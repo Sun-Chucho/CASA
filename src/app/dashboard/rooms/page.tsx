@@ -36,7 +36,7 @@ interface BookingRoomRecord {
 }
 
 function getRoomTypeLabel(type: Room["type"]) {
-  return type === "Platinum" ? "Premium" : type;
+  return type;
 }
 
 export default function RoomsPage() {
@@ -301,7 +301,9 @@ export default function RoomsPage() {
               <TabsList className="h-10">
                 <TabsTrigger value="all" className="text-[10px] font-black uppercase tracking-widest">All</TabsTrigger>
                 <TabsTrigger value="Standard" className="text-[10px] font-black uppercase tracking-widest">Standard</TabsTrigger>
-                <TabsTrigger value="Platinum" className="text-[10px] font-black uppercase tracking-widest">Premium</TabsTrigger>
+                <TabsTrigger value="Deluxe" className="text-[10px] font-black uppercase tracking-widest">Deluxe</TabsTrigger>
+                <TabsTrigger value="Executive" className="text-[10px] font-black uppercase tracking-widest">Executive</TabsTrigger>
+                <TabsTrigger value="Suite" className="text-[10px] font-black uppercase tracking-widest">Suite</TabsTrigger>
               </TabsList>
             </Tabs>
 

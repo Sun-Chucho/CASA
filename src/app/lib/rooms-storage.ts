@@ -1,6 +1,7 @@
 import {
   Room,
   getCasaRoomPrice,
+  getCasaRoomType,
   getDefaultRoomsForTier,
 } from "@/app/lib/mock-data";
 import { readJson, writeJson } from "@/app/lib/storage";
@@ -28,11 +29,14 @@ export function getDefaultRooms(scope?: "standard" | "platinum"): Room[] {
 }
 
 function normalizeRoomRates(rooms: Room[], _scope: "standard" | "platinum"): Room[] {
-  return rooms.map((room) => ({
-    ...room,
-    type: "Standard" as Room["type"],
-    price: getCasaRoomPrice(room.number),
-  }));
+  return rooms.map((room) => {
+    const price = getCasaRoomPrice(room.number);
+    return {
+      ...room,
+      type: getCasaRoomType(price),
+      price: price,
+    };
+  });
 }
 
 export function readRoomsState(scope?: "standard" | "platinum"): Room[] {

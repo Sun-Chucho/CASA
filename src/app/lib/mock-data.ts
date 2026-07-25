@@ -18,7 +18,7 @@ export const USERS: User[] = [
 export interface Room {
   id: string;
   number: string;
-  type: 'Standard' | 'Platinum';
+  type: 'Standard' | 'Deluxe' | 'Executive' | 'Suite';
   status: 'available' | 'occupied' | 'cleaning' | 'maintenance';
   price: number;
 }
@@ -27,13 +27,13 @@ export const STANDARD_ROOM_PRICE = 50000;
 export const PLATINUM_ROOM_PRICE = 50000;
 
 const CASA_ROOM_NUMBERS = [
-  "101", "102", "103", "104", "105", "106", "107",
+  "100", "101", "102", "103", "104", "105", "106", "107",
   "108", "109", "110", "111", "112", "113", "114", "115", "116", "117",
 ] as const;
 
 const CASA_ROOM_RULES: Array<{ numbers: readonly string[]; price: number }> = [
   { numbers: ["101", "102", "103", "104", "105", "106", "107"], price: 50000 },
-  { numbers: ["108", "109", "110"], price: 100000 },
+  { numbers: ["100", "108", "109", "110"], price: 100000 },
   { numbers: ["111"], price: 120000 },
   { numbers: ["112", "113", "114", "115", "116", "117"], price: 60000 },
 ];
@@ -43,13 +43,24 @@ export function getCasaRoomPrice(number: string): number {
   return match?.price ?? STANDARD_ROOM_PRICE;
 }
 
-const casaRooms: Room[] = CASA_ROOM_NUMBERS.map((number) => ({
-  id: `r${number}`,
-  number,
-  type: "Standard",
-  status: "available",
-  price: getCasaRoomPrice(number),
-}));
+export function getCasaRoomType(price: number): Room['type'] {
+  if (price === 50000) return 'Standard';
+  if (price === 60000) return 'Deluxe';
+  if (price === 100000) return 'Executive';
+  if (price === 120000) return 'Suite';
+  return 'Standard';
+}
+
+const casaRooms: Room[] = CASA_ROOM_NUMBERS.map((number) => {
+  const price = getCasaRoomPrice(number);
+  return {
+    id: `r${number}`,
+    number,
+    type: getCasaRoomType(price),
+    status: "available",
+    price: price,
+  };
+});
 
 export const ROOMS: Room[] = [...casaRooms];
 

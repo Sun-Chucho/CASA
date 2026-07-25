@@ -384,7 +384,10 @@ export default function BookingPage() {
     [editingBookingId, transactions],
   );
   const roomPickerRooms = useMemo(() => {
-    return rooms.filter((room) => room.number >= "101" && room.number <= "117");
+    return rooms.filter((room) => {
+      const n = parseInt(room.number, 10);
+      return n >= 100 && n <= 117;
+    });
   }, [activeBookedRoomNumbers, roomType, rooms]);
   const availableRooms = useMemo(
     () =>
@@ -1021,10 +1024,10 @@ export default function BookingPage() {
               </div>
               <div className="space-y-6">
                 {[
-                  { title: "Standard Rooms (50,000 TSh)", price: 50000 },
-                  { title: "Deluxe Rooms (60,000 TSh)", price: 60000 },
-                  { title: "Executive Rooms (100,000 TSh)", price: 100000 },
-                  { title: "Suite Rooms (120,000 TSh)", price: 120000 },
+                  { title: "Standard Rooms — TSh 50,000", price: 50000 },
+                  { title: "Deluxe Rooms — TSh 60,000", price: 60000 },
+                  { title: "Executive Rooms — TSh 100,000", price: 100000 },
+                  { title: "Premium Suite — TSh 120,000", price: 120000 },
                 ].map(category => {
                   const categoryRooms = roomPickerRooms.filter(r => r.price === category.price);
                   if (categoryRooms.length === 0) return null;
