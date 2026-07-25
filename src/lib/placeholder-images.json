@@ -1,0 +1,22 @@
+{
+  "placeholderImages": [
+    {
+      "id": "app-logo",
+      "description": "MAWIO Official Logo",
+      "imageUrl": "/logo.png",
+      "imageHint": "MAWIO logo"
+    },
+    {
+      "id": "hotel-lobby",
+      "description": "MAWIO Lobby",
+      "imageUrl": "/logo.png",
+      "imageHint": "MAWIO logo"
+    },
+    {
+      "id": "avatar-manager",
+      "description": "Hotel Manager Avatar",
+      "imageUrl": "/logo.png",
+      "imageHint": "MAWIO logo"
+    }
+  ]
+}

@@ -1,0 +1,96 @@
+
+> nextn@0.1.0 dev
+> next dev --turbopack -p 9002
+
+   ▲ Next.js 15.5.9 (Turbopack)
+   - Local:        http://localhost:9002
+   - Network:      http://192.168.100.176:9002
+   - Environments: .env.local
+
+ ✓ Starting...
+Creating turbopack project {
+  dir: 'C:\\Users\\PC\\Desktop\\orange hotel\\orangehotel',
+  testMode: true
+}
+ ✓ Compiled middleware in 260ms
+ ✓ Ready in 2.4s
+ ○ Compiling /dashboard ...
+ ✓ Compiled /dashboard in 8.3s
+ GET /dashboard 200 in 9220ms
+ GET /dashboard 200 in 263ms
+ ○ Compiling /dashboard/analytics ...
+ ✓ Compiled /dashboard/analytics in 2.7s
+ GET /dashboard/analytics 200 in 3012ms
+ ○ Compiling /dashboard/barista ...
+ ✓ Compiled /dashboard/barista in 705ms
+ GET /dashboard/barista 200 in 860ms
+ ○ Compiling /dashboard/cancelled ...
+ ✓ Compiled /dashboard/cancelled in 685ms
+ GET /dashboard/cancelled 200 in 923ms
+ ○ Compiling /dashboard/cash-requests ...
+ ✓ Compiled /dashboard/cash-requests in 566ms
+ GET /dashboard/cash-requests 200 in 807ms
+ ○ Compiling /dashboard/cashier ...
+ ✓ Compiled /dashboard/cashier in 654ms
+ GET /dashboard/cashier 200 in 844ms
+ ○ Compiling /dashboard/company-stock ...
+ ✓ Compiled /dashboard/company-stock in 687ms
+ GET /dashboard/company-stock 200 in 917ms
+ ○ Compiling /dashboard/expenses ...
+ ✓ Compiled /dashboard/expenses in 812ms
+ GET /dashboard/expenses 200 in 1012ms
+ ○ Compiling /dashboard/finances ...
+ ✓ Compiled /dashboard/finances in 667ms
+ GET /dashboard/finances 200 in 931ms
+ ○ Compiling /dashboard/fnb-pos ...
+ ✓ Compiled /dashboard/fnb-pos in 558ms
+ GET /dashboard/fnb-pos 200 in 866ms
+ ○ Compiling /dashboard/fnb-suite ...
+ ✓ Compiled /dashboard/fnb-suite in 1254ms
+ GET /dashboard/fnb-suite 200 in 1453ms
+ ○ Compiling /dashboard/inventory ...
+ ✓ Compiled /dashboard/inventory in 1215ms
+ GET /dashboard/inventory 200 in 1458ms
+ ○ Compiling /dashboard/inventory/barista-stock ...
+ ✓ Compiled /dashboard/inventory/barista-stock in 737ms
+ GET /dashboard/inventory/barista-stock 200 in 962ms
+ ○ Compiling /dashboard/inventory/kitchen-stock ...
+ ✓ Compiled /dashboard/inventory/kitchen-stock in 573ms
+ GET /dashboard/inventory/kitchen-stock 200 in 732ms
+ ○ Compiling /dashboard/inventory/stock-movement ...
+ ✓ Compiled /dashboard/inventory/stock-movement in 612ms
+ GET /dashboard/inventory/stock-movement 200 in 890ms
+ ○ Compiling /dashboard/kitchen ...
+ ✓ Compiled /dashboard/kitchen in 789ms
+ GET /dashboard/kitchen 200 in 1035ms
+ ✓ Compiled /dashboard/laundry in 499ms
+ GET /dashboard/laundry 200 in 666ms
+ ✓ Compiled /dashboard/live-chat in 471ms
+ GET /dashboard/live-chat 200 in 639ms
+ ○ Compiling /dashboard/menu-create ...
+ ✓ Compiled /dashboard/menu-create in 626ms
+ GET /dashboard/menu-create 200 in 865ms
+ ○ Compiling /dashboard/payments ...
+ ✓ Compiled /dashboard/payments in 732ms
+ GET /dashboard/payments 200 in 925ms
+ ○ Compiling /dashboard/rooms ...
+ ✓ Compiled /dashboard/rooms in 630ms
+ GET /dashboard/rooms 200 in 819ms
+ ○ Compiling /dashboard/settings ...
+ ✓ Compiled /dashboard/settings in 580ms
+ GET /dashboard/settings 200 in 797ms
+ ○ Compiling /dashboard/settings/password ...
+ ✓ Compiled /dashboard/settings/password in 588ms
+ GET /dashboard/settings/password 200 in 850ms
+ ○ Compiling /dashboard/settings/sync ...
+ ✓ Compiled /dashboard/settings/sync in 702ms
+ GET /dashboard/settings/sync 200 in 982ms
+ ○ Compiling /dashboard/staff ...
+ ✓ Compiled /dashboard/staff in 749ms
+ GET /dashboard/staff 200 in 940ms
+ ○ Compiling /dashboard/website-bookings ...
+ ✓ Compiled /dashboard/website-bookings in 532ms
+ GET /dashboard/website-bookings 200 in 753ms
+ ○ Compiling /_error ...
+ ✓ Compiled /_error in 1580ms
+[?25h

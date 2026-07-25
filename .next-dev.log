@@ -1,0 +1,18 @@
+
+> nextn@0.1.0 dev
+> next dev --turbopack -p 9002
+
+   ▲ Next.js 15.5.9 (Turbopack)
+   - Local:        http://localhost:9002
+   - Network:      http://192.168.100.176:9002
+   - Environments: .env.local
+
+ ✓ Starting...
+Creating turbopack project {
+  dir: 'C:\\Users\\PC\\Desktop\\orange hotel\\orangehotel',
+  testMode: true
+}
+ ✓ Compiled middleware in 278ms
+ ✓ Ready in 2.5s
+ ○ Compiling / ...
+ ✓ Compiled / in 11.5s
