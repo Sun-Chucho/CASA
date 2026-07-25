@@ -23,7 +23,7 @@ export default function HotelTabs() {
   };
 
   const links = [
-    { name: "Managing Director", url: "/MD" },
+    { name: "Managing Director", url: "/mdlogin" },
     { name: "Hotel Manager", url: "/MANAGER" },
     { name: "Reception Booking", url: "/RB" },
     { name: "Kitchen POS", url: "/KP" },

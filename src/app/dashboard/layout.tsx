@@ -1503,40 +1503,7 @@ export default function DashboardLayout({
                 <Clock className="w-3 h-3 mr-1" /> {shift}
               </Badge>
             )}
-            {isDirector ? (
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const nextHotel: "standard" | "platinum" = currentHotelView === "standard" ? "platinum" : "standard";
-                    if (typeof window !== "undefined") {
-                      // Rebind the per-tab tier lock, then reload so every page
-                      // effect/subscription re-initializes against the new hotel.
-                      setMawioTier(nextHotel);
-                      window.location.reload();
-                    }
-                  }}
-                  className={cn(
-                    "flex items-center gap-2 px-3 py-2 rounded-lg font-black uppercase text-[10px] tracking-widest transition-all border-2",
-                    currentHotelView === "standard"
-                      ? "border-blue-500 bg-blue-50 text-blue-600 hover:bg-blue-100"
-                      : "border-amber-500 bg-amber-50 text-amber-600 hover:bg-amber-100"
-                  )}
-                >
-                  <span>Switch to {currentHotelView === "standard" ? "Premium" : "Standard"}</span>
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12M8 17h12M14 12H2" />
-                  </svg>
-                </button>
-                <Badge variant="outline" className={cn("text-[10px] font-black uppercase tracking-widest px-2",
-                  currentHotelView === "platinum"
-                    ? "border-amber-500 text-amber-600 bg-amber-50"
-                    : "border-blue-500 text-blue-600 bg-blue-50"
-                )}>
-                  {currentHotelView === "platinum" ? "Premium Hotel" : "Standard Hotel"}
-                </Badge>
-              </div>
-            ) : (
+            {!isDirector && (
               <Badge variant="outline" className={cn("text-[10px] font-black uppercase tracking-widest px-2",
                 typeof window !== 'undefined' && getLocalMawioTier() === "platinum"
                   ? "border-amber-500 text-amber-600 bg-amber-50"
