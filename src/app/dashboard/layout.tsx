@@ -1503,15 +1503,7 @@ export default function DashboardLayout({
                 <Clock className="w-3 h-3 mr-1" /> {shift}
               </Badge>
             )}
-            {!isDirector && (
-              <Badge variant="outline" className={cn("text-[10px] font-black uppercase tracking-widest px-2",
-                typeof window !== 'undefined' && getLocalMawioTier() === "platinum"
-                  ? "border-amber-500 text-amber-600 bg-amber-50"
-                  : "border-blue-500 text-blue-600 bg-blue-50"
-              )}>
-                {typeof window !== 'undefined' && getLocalMawioTier() === "platinum" ? "Premium Hotel" : "Standard Hotel"}
-              </Badge>
-            )}
+
             
             <div className={cn("flex items-center gap-4 text-muted-foreground", isDirector && "hidden md:flex")}>
               <SyncStatusIndicator />
