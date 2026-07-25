@@ -1,4 +1,4 @@
-const CACHE_NAME = "orange-hotel-shell-v5";
+const CACHE_NAME = "cassa-hotel-shell-v1";
 
 self.addEventListener("fetch", (event) => {
   const { request } = event;

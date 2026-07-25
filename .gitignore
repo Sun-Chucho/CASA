@@ -59,3 +59,8 @@ __pycache__/
 # Local Firebase service account credentials
 casamotel-*-firebase-adminsdk-*.json
 
+# build logs
+*.log
+tsc_output*.txt
+verify-routes.ps1
+replace.js

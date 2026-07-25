@@ -63,9 +63,9 @@ const DEFAULT_BARISTA_STAFF: StaffMember[] = [
     id: "barista-1",
     name: "ALI",
     role: "barista",
-    avatar: "/logo.png",
+    avatar: "/casa-logo.svg",
     phone: "+255 000 000 001",
-    email: "ali@cassa.hotel",
+    email: "ali@orange.hotel",
     shift: "Day",
     blocked: false,
   },
@@ -73,16 +73,16 @@ const DEFAULT_BARISTA_STAFF: StaffMember[] = [
     id: "barista-2",
     name: "USER 2",
     role: "barista",
-    avatar: "/logo.png",
+    avatar: "/casa-logo.svg",
     phone: "+255 000 000 002",
-    email: "user.2@cassa.hotel",
+    email: "user.2@orange.hotel",
     shift: "Day",
     blocked: false,
   },
 ];
 
 function toEmail(name: string) {
-  return `${name.toLowerCase().replace(/\s+/g, ".")}@cassa.hotel`;
+  return `${name.toLowerCase().replace(/\s+/g, ".")}@orange.hotel`;
 }
 
 function getDefaultMembers(): StaffMember[] {
@@ -114,7 +114,7 @@ function getProfileMembers(profiles: LoginProfiles | null): StaffMember[] {
       id: `${role}-${normalizeStaffName(user.username).replace(/\s+/g, "-")}`,
       name: user.username,
       role,
-      avatar: "/logo.png",
+      avatar: "/casa-logo.svg",
       phone: "+255 000 000 000",
       email: toEmail(user.username),
       shift: profiles[role]?.shift === "night" ? "Night" as const : "Day" as const,
@@ -245,7 +245,7 @@ export default function StaffPage() {
       id,
       name: username,
       role: newRole,
-      avatar: "/logo.png",
+      avatar: "/casa-logo.svg",
       phone: `+1 (555) 300-${Math.floor(1000 + Math.random() * 9000)}`,
       email: toEmail(newName.trim()),
       shift: newShift,

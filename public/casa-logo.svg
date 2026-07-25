@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="CASSA Hotel logo">
+  <rect width="512" height="512" fill="#ffffff"/>
+  <!-- C outer circle arc -->
+  <path d="M256 80 C152 80 76 165 76 256 C76 347 152 432 256 432 C314 432 366 406 402 364" fill="none" stroke="#1a1a1a" stroke-width="28" stroke-linecap="round"/>
+  <!-- H left vertical -->
+  <line x1="172" y1="140" x2="172" y2="372" stroke="#1a1a1a" stroke-width="28" stroke-linecap="round"/>
+  <!-- H right vertical -->
+  <line x1="340" y1="140" x2="340" y2="372" stroke="#1a1a1a" stroke-width="28" stroke-linecap="round"/>
+  <!-- H crossbar -->
+  <line x1="172" y1="256" x2="340" y2="256" stroke="#1a1a1a" stroke-width="28" stroke-linecap="round"/>
+</svg>

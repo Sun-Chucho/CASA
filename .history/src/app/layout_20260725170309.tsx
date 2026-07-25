@@ -14,23 +14,22 @@ const playfair = Playfair_Display({
 });
 
 export const metadata: Metadata = {
-  title: 'CASSA Hotel | Management Suite',
-  description: 'CASSA Hotel — smart hotel management, bookings, and operations.',
+  title: 'CASA | Secure Booking',
+  description: 'Book CASA rooms online with a modern hotel management experience.',
   icons: {
-    icon: '/logo.png',
-    shortcut: '/logo.png',
-    apple: [{ url: '/logo.png', sizes: 'any', type: 'image/png' }],
+    icon: '/casa-logo.svg',
+    shortcut: '/casa-logo.svg',
+    apple: [{ url: '/casa-logo.svg', sizes: 'any', type: 'image/svg+xml' }],
   },
   appleWebApp: {
     capable: true,
-    title: 'CASSA Hotel',
+    title: 'CASA',
     statusBarStyle: 'black-translucent',
   },
-  manifest: '/manifest.webmanifest',
   other: {
     'mobile-web-app-capable': 'yes',
     'apple-mobile-web-app-capable': 'yes',
-    'application-name': 'CASSA Hotel',
+    'application-name': 'CASA',
   },
 };
 

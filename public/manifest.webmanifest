@@ -1,9 +1,9 @@
 {
-  "name": "CASSA Hotel Director Dashboard",
+  "name": "CASSA Hotel Dashboard",
   "short_name": "CASSA Hotel",
-  "description": "CASSA Hotel managing director mobile dashboard.",
-  "id": "/cassa-hotel-md-dashboard",
-  "start_url": "/MD?source=pwa",
+  "description": "CASSA Hotel operations and smart management mobile dashboard.",
+  "id": "/cassa-hotel-dashboard",
+  "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui"],
@@ -28,10 +28,10 @@
   ],
   "shortcuts": [
     {
-      "name": "Open MD Dashboard",
-      "short_name": "Dashboard",
-      "description": "Open the CASSA Hotel managing director dashboard.",
-      "url": "/MD?source=pwa",
+      "name": "Open CASSA Hotel",
+      "short_name": "CASSA",
+      "description": "Open the CASSA Hotel smart manager portal selection.",
+      "url": "/?source=pwa",
       "icons": [
         {
           "src": "/logo.png",

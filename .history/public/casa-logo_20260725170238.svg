@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="CASA logo">
+  <rect width="512" height="512" rx="128" fill="#111827"/>
+  <path d="M157 148c0-40 32-72 72-72h64c40 0 72 32 72 72v42h-44v-42c0-15-12-27-27-27h-64c-15 0-27 12-27 27v42h-46v-42Z" fill="#F8B84E"/>
+  <path d="M157 217h198v42H157z" fill="#F8B84E"/>
+  <path d="M157 292h198v42H157z" fill="#F8B84E"/>
+  <path d="M157 367h198v42H157z" fill="#F8B84E"/>
+  <path d="M126 106h120l64 116 64-116h120l-164 298H290L126 106Z" fill="#FFFFFF"/>
+</svg>

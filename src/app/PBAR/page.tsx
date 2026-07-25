@@ -1,12 +1,5 @@
-import type { Metadata } from "next";
-import { RoleLoginPage } from "@/components/auth/role-login-page";
+import { redirect } from "next/navigation";
 
-export const metadata: Metadata = {
-  title: "MAWIO Premium Barista POS",
-  description: "Premium barista POS login page for MAWIO.",
-  manifest: "/api/pwa-manifest/barista?tier=platinum",
-};
-
-export default function PremiumBaristaPosPage() {
-  return <RoleLoginPage role="platinum" initialHotelRole="barista" />;
+export default function RedirectPBar() {
+  redirect("/dashboard/barista");
 }

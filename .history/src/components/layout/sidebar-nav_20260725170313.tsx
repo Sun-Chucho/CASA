@@ -120,14 +120,14 @@ export function SidebarNav({ role }: { role: Role }) {
 
   return (
     <div className="flex h-full min-h-0 w-64 flex-col bg-black text-white border-r border-sidebar-border">
-      <div className="p-6 flex justify-center">
+      <div className="p-8 flex justify-center">
         <Link href="/dashboard" className="group">
-          <div className="w-24 h-24 bg-white rounded-2xl flex items-center justify-center p-2 group-hover:scale-105 transition-transform overflow-hidden shadow-2xl relative border border-slate-700">
+          <div className="w-20 h-20 bg-slate-900 rounded-2xl flex items-center justify-center p-2 group-hover:scale-105 transition-transform overflow-hidden shadow-2xl relative border border-slate-700">
             <Image
-              src="/logo.png"
-              alt="CASSA Hotel Logo"
-              width={96}
-              height={96}
+              src="/casa-logo.svg"
+              alt="CASA Logo"
+              width={80}
+              height={80}
               priority
               className="object-contain"
             />
@@ -177,13 +177,12 @@ export function SidebarNav({ role }: { role: Role }) {
 
       <div className="shrink-0 p-4 border-t border-sidebar-border mt-auto">
         <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-900/90 mb-4 border border-slate-700">
-          <div className="w-9 h-9 rounded-lg bg-white overflow-hidden relative border border-white/20 flex items-center justify-center">
+          <div className="w-9 h-9 rounded-lg bg-white/10 overflow-hidden relative border border-white/20">
             <Image
-              src="/logo.png"
-              alt="CASSA Hotel"
-              width={36}
-              height={36}
-              className="object-contain"
+              src="/casa-logo.svg"
+              alt="CASA avatar" 
+              fill 
+              className="object-cover"
             />
           </div>
           <div className="flex flex-col overflow-hidden">

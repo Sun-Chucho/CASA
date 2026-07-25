@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import { RoleLoginPage } from "@/components/auth/role-login-page";
 
 export const metadata: Metadata = {
-  title: "MAWIO Barista POS",
-  description: "Barista POS login page for MAWIO.",
+  title: "CASSA Hotel Barista POS",
+  description: "Barista POS login page for CASSA Hotel.",
   manifest: "/api/pwa-manifest/barista",
 };
 
