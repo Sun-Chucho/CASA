@@ -1,43 +1,18 @@
 "use client";
 
 import Link from 'next/link';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Download, Smartphone, Info } from 'lucide-react';
-
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
-}
+import { usePwaInstall } from '@/hooks/use-pwa-install';
 
 export default function HotelTabs() {
-  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [installFeedback, setInstallFeedback] = useState("");
-  const [isStandaloneApp, setIsStandaloneApp] = useState(false);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const standalone = window.matchMedia("(display-mode: standalone)").matches;
-    setIsStandaloneApp(standalone);
-
-    const handleBeforeInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setInstallPrompt(event as BeforeInstallPromptEvent);
-    };
-
-    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-
-    return () => {
-      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-    };
-  }, []);
+  const { installPrompt, isStandaloneApp, promptInstall } = usePwaInstall();
 
   const handleInstallApp = async () => {
     if (installPrompt) {
-      await installPrompt.prompt();
-      const choice = await installPrompt.userChoice;
-      setInstallPrompt(null);
-      if (choice.outcome === "accepted") {
+      const choice = await promptInstall();
+      if (choice?.outcome === "accepted") {
         setInstallFeedback("CASSA Hotel app is being installed successfully!");
       } else {
         setInstallFeedback("Installation dismissed.");
@@ -48,11 +23,14 @@ export default function HotelTabs() {
   };
 
   const links = [
-    { name: "Hotel Manager", url: "/dashboard" },
-    { name: "Reception Booking", url: "/dashboard/cashier" },
-    { name: "Kitchen POS", url: "/dashboard/kitchen" },
-    { name: "Barista POS", url: "/dashboard/barista" },
-    { name: "Inventory Manager", url: "/dashboard/inventory" },
+    { name: "Managing Director", url: "/MD" },
+    { name: "Hotel Manager", url: "/MANAGER" },
+    { name: "Reception Booking", url: "/RB" },
+    { name: "Kitchen POS", url: "/KP" },
+    { name: "Barista POS", url: "/BP" },
+    { name: "Inventory Manager", url: "/IM" },
+    { name: "Standard Hotel", url: "/standard" },
+    { name: "Premium Hotel", url: "/platinum" },
   ];
 
   return (
@@ -75,7 +53,7 @@ export default function HotelTabs() {
 
         <div className="px-6 pb-6 pt-4 space-y-3">
           <p className="text-[11px] font-bold uppercase tracking-[0.3em] text-slate-400 mb-2">Available Portals</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[22rem] overflow-y-auto pr-1">
             {links.map((link) => (
               <Link
                 key={link.name}

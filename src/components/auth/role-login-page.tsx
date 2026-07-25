@@ -26,20 +26,12 @@ import {
   upsertProfileUser,
   writeLocalLoginProfiles,
 } from "@/app/lib/login-profiles";
+import { usePwaInstall } from "@/hooks/use-pwa-install";
 
 interface RoleLoginPageProps {
   role: Role;
   initialHotelRole?: HotelLoginRole;
 }
-
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
-}
-
-type NavigatorWithStandalone = Navigator & {
-  standalone?: boolean;
-};
 
 type LoginRole = Exclude<Role, "standard" | "platinum">;
 type HotelLoginRole = Exclude<LoginRole, "director">;
@@ -165,12 +157,10 @@ export function RoleLoginPage({ role, initialHotelRole = "manager" }: RoleLoginP
   const [username, setUsername] = useState(storedUsername ?? roleConfig.username);
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [installFeedback, setInstallFeedback] = useState("");
-  const [isStandaloneApp, setIsStandaloneApp] = useState(false);
   const [isIosDevice, setIsIosDevice] = useState(false);
   const [isAndroidDevice, setIsAndroidDevice] = useState(false);
-  const [serviceWorkerReady, setServiceWorkerReady] = useState(false);
+  const { installPrompt, isStandaloneApp, serviceWorkerReady, promptInstall } = usePwaInstall(isInstallableRole);
   const roleDefaultPassword = getDefaultLoginPassword(activeRole);
 
   useEffect(() => {
@@ -212,55 +202,19 @@ export function RoleLoginPage({ role, initialHotelRole = "manager" }: RoleLoginP
   }, [activeRole, loginScope, roleConfig.username]);
 
   useEffect(() => {
-    if (!isInstallableRole || typeof window === "undefined" || !("serviceWorker" in navigator)) return;
-
-    void navigator.serviceWorker
-      .register("/sw.js", { scope: "/" })
-      .then(() => navigator.serviceWorker.ready)
-      .then(() => setServiceWorkerReady(true))
-      .catch(() => setServiceWorkerReady(false));
-    return () => undefined;
-  }, [isInstallableRole]);
-
-  useEffect(() => {
     if (!isInstallableRole || typeof window === "undefined") return;
 
-    const standalone =
-      window.matchMedia("(display-mode: standalone)").matches ||
-      (navigator as NavigatorWithStandalone).standalone === true;
     const userAgent = navigator.userAgent;
     const isTouchMac = /macintosh/i.test(userAgent) && navigator.maxTouchPoints > 1;
-    setIsStandaloneApp(standalone);
     setIsIosDevice(/iphone|ipad|ipod/i.test(userAgent) || isTouchMac);
     setIsAndroidDevice(/android/i.test(userAgent));
-
-    const handleBeforeInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setInstallPrompt(event as BeforeInstallPromptEvent);
-      setInstallFeedback("");
-    };
-
-    const handleAppInstalled = () => {
-      setInstallPrompt(null);
-      setInstallFeedback(`Installed. Look for ${roleConfig.label} on your desktop, home screen, or app list.`);
-    };
-
-    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-    window.addEventListener("appinstalled", handleAppInstalled);
-
-    return () => {
-      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-      window.removeEventListener("appinstalled", handleAppInstalled);
-    };
-  }, [isInstallableRole, roleConfig.label]);
+  }, [isInstallableRole]);
 
   const installDirectorApp = async () => {
     if (installPrompt) {
-      await installPrompt.prompt();
-      const choice = await installPrompt.userChoice;
-      setInstallPrompt(null);
+      const choice = await promptInstall();
       setInstallFeedback(
-        choice.outcome === "accepted"
+        choice?.outcome === "accepted"
           ? `Installing. Look for ${roleConfig.label} on your desktop, home screen, or app list.`
           : "Installation dismissed.",
       );
@@ -597,9 +551,8 @@ export function RoleLoginPage({ role, initialHotelRole = "manager" }: RoleLoginP
             {!error && <p className="mb-4 hidden text-xs font-bold text-red-600" data-login-error />}
 
             <Button
-              type="button"
+              type="submit"
               data-role-login-submit
-              onClick={() => handleLogin()}
               className={cn("w-full bg-primary hover:bg-primary/90 text-white font-black uppercase tracking-widest h-14 shadow-lg shadow-primary/20", isDirector ? "rounded-lg" : "rounded-xl")}
             >
               {isHotelTierPage ? `Sign In As ${roleConfig.label}` : "Enter Dashboard"}

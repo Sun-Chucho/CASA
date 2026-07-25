@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { SyncStatusIndicator } from "@/components/sync-status-indicator";
-import { MANAGER_SESSION_VERSION, STORAGE_MANAGER_SESSION_VERSION, readActiveSessionUsername, readLocalLoginProfiles, renameProfileUser, saveLoginProfileToServer, writeActiveSessionUsername } from "@/app/lib/login-profiles";
+import { MANAGER_SESSION_VERSION, STORAGE_MANAGER_SESSION_VERSION, normalizeLoginProfileScope, readActiveSessionUsername, readLocalLoginProfiles, renameProfileUser, saveLoginProfileToServer, writeActiveSessionUsername } from "@/app/lib/login-profiles";
 
 const VALID_ROLES: Role[] = ['manager', 'director', 'inventory', 'cashier', 'kitchen', 'barista'];
 const DIRECTOR_MOBILE_NAV = [
@@ -1314,11 +1314,12 @@ export default function DashboardLayout({
         return;
       }
 
+      const activeLoginScope = normalizeLoginProfileScope(localStorage.getItem("orange-hotel-active-login-scope"));
       localStorage.setItem("orange-hotel-role", savedRole);
-      localStorage.setItem("orange-hotel-active-login-scope", activeHotelScope);
-      localStorage.setItem("mawio-tier", activeHotelScope === "platinum" ? "platinum" : "standard");
-      setCurrentHotelView(activeHotelScope === "platinum" ? "platinum" : "standard");
-      setActiveUsername(readActiveSessionUsername(savedRole, activeHotelScope === "platinum" ? "platinum" : "standard"));
+      localStorage.setItem("orange-hotel-active-login-scope", activeLoginScope);
+      localStorage.setItem("mawio-tier", activeLoginScope === "platinum" ? "platinum" : "standard");
+      setCurrentHotelView(activeLoginScope === "platinum" ? "platinum" : "standard");
+      setActiveUsername(readActiveSessionUsername("", activeLoginScope));
       setRole(savedRole);
       if (savedShift) setShift(savedShift);
 
