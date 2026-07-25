@@ -1,5 +1,6 @@
 import {
   Room,
+  STANDARD_ROOM_PRICE,
   getCasaRoomPrice,
   getDefaultRoomsForTier,
 } from "@/app/lib/mock-data";

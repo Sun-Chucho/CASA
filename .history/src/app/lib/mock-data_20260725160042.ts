@@ -23,39 +23,63 @@ export interface Room {
   price: number;
 }
 
-export const STANDARD_ROOM_PRICE = 50000;
-export const PLATINUM_ROOM_PRICE = 50000;
+export const STANDARD_ROOM_PRICE = 20000;
+export const PLATINUM_ROOM_PRICE = 30000;
 
-const CASA_ROOM_NUMBERS = [
-  "101", "102", "103", "104", "105", "106", "107",
-  "108", "109", "110", "111", "112", "113", "114", "115", "116", "117",
+const STANDARD_ROOM_NUMBERS = [
+  "101", "102", "103", "104", "105", "106", "107", "108", "109", "110",
+  "111", "112", "113", "114", "115", "116", "117", "118"
 ] as const;
 
-const CASA_ROOM_RULES: Array<{ numbers: readonly string[]; price: number }> = [
-  { numbers: ["101", "102", "103", "104", "105", "106", "107"], price: 50000 },
-  { numbers: ["108", "109", "110"], price: 100000 },
-  { numbers: ["111"], price: 120000 },
-  { numbers: ["112", "113", "114", "115", "116", "117"], price: 60000 },
-];
+export const PREMIUM_STANDARD_ROOM_PRICE = 60000;
+export const PREMIUM_DELUXE_ROOM_PRICE = 80000;
 
-export function getCasaRoomPrice(number: string): number {
-  const match = CASA_ROOM_RULES.find((rule) => rule.numbers.includes(number));
-  return match?.price ?? STANDARD_ROOM_PRICE;
-}
+export const PREMIUM_STANDARD_ROOM_NUMBERS = [
+  "301", "304", "308", "313", "314", "315", "317", "318", "319", "320"
+] as const;
 
-const casaRooms: Room[] = CASA_ROOM_NUMBERS.map((number) => ({
+export const PREMIUM_DELUXE_ROOM_NUMBERS = [
+  "302", "303", "305", "306", "307", "309", "310", "311", "312", "316"
+] as const;
+
+const standardRooms: Room[] = STANDARD_ROOM_NUMBERS.map((number) => ({
   id: `r${number}`,
   number,
   type: "Standard",
   status: "available",
-  price: getCasaRoomPrice(number),
+  price: STANDARD_ROOM_PRICE,
 }));
 
-export const ROOMS: Room[] = [...casaRooms];
+const platinumRooms: Room[] = PLATINUM_ROOM_NUMBERS.map((number) => ({
+  id: `r${number}`,
+  number,
+  type: "Platinum",
+  status: "available",
+  price: PLATINUM_ROOM_PRICE,
+}));
 
-export const PLATINUM_HOTEL_ROOMS: Room[] = [];
+export const ROOMS: Room[] = [...standardRooms, ...platinumRooms];
 
-export function getDefaultRoomsForTier(_tier: "standard" | "platinum"): Room[] {
+// Premium (platinum) hotel rooms are a fully separate set — numbers 301-320 —
+// split into two rate classes by explicit room-number lists.
+export const PLATINUM_HOTEL_ROOMS: Room[] = [
+  ...PREMIUM_STANDARD_ROOM_NUMBERS.map((number): Room => ({
+    id: `r${number}`,
+    number,
+    type: "Standard",
+    status: "available",
+    price: PREMIUM_STANDARD_ROOM_PRICE,
+  })),
+  ...PREMIUM_DELUXE_ROOM_NUMBERS.map((number): Room => ({
+    id: `r${number}`,
+    number,
+    type: "Platinum",
+    status: "available",
+    price: PREMIUM_DELUXE_ROOM_PRICE,
+  })),
+];
+
+export function getDefaultRoomsForTier(tier: "standard" | "platinum"): Room[] {
   return ROOMS.map((room) => ({ ...room }));
 }
 

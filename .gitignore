@@ -55,3 +55,7 @@ __pycache__/
 /test-barcode-label.html
 /test-barcode-label.png
 /smaller.mp4
+
+# Local Firebase service account credentials
+casamotel-*-firebase-adminsdk-*.json
+

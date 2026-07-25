@@ -10,6 +10,7 @@ interface BeforeInstallPromptEvent extends Event {
 }
 
 export default function HotelTabs() {
+  const [activeTab, setActiveTab] = useState<'standard' | 'platinum'>('standard');
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [installFeedback, setInstallFeedback] = useState("");
   const [isStandaloneApp, setIsStandaloneApp] = useState(false);
@@ -47,13 +48,23 @@ export default function HotelTabs() {
     }
   };
 
-  const links = [
-    { name: "Hotel Manager", url: "/dashboard" },
-    { name: "Reception Booking", url: "/dashboard/cashier" },
-    { name: "Kitchen POS", url: "/dashboard/kitchen" },
-    { name: "Barista POS", url: "/dashboard/barista" },
-    { name: "Inventory Manager", url: "/dashboard/inventory" },
+  const standardLinks = [
+    { name: "Barista POS", url: "/SBAR" },
+    { name: "Reception Booking", url: "/SRB" },
+    { name: "Standard Kitchen", url: "/SKIT" },
+    { name: "Standard Inventory Manager", url: "/SIM" },
+    { name: "Manager", url: "/smanager" },
   ];
+
+  const premiumLinks = [
+    { name: "Premium Barista POS", url: "/PBAR" },
+    { name: "Premium Reception Booking", url: "/PRB" },
+    { name: "Premium Kitchen POS", url: "/PKIT" },
+    { name: "Premium Inventory Manager", url: "/PIM" },
+    { name: "Premium Manager", url: "/pmanager" },
+  ];
+
+  const currentLinks = activeTab === 'standard' ? standardLinks : premiumLinks;
 
   return (
     <main
@@ -70,15 +81,45 @@ export default function HotelTabs() {
           <p className="text-xs font-bold uppercase tracking-wider text-gray-500 mt-1">Smart Hotel Management Suite</p>
         </div>
 
-        {/* Unified dashboard entry */}
+        {/* Tab selector */}
+        <div className="flex bg-gray-100 p-1 m-4 rounded-xl">
+          <button
+            type="button"
+            className={`flex-1 py-3 text-center font-bold text-sm rounded-lg transition-all duration-200 ${
+              activeTab === 'standard'
+                ? 'bg-gray-900 text-white shadow'
+                : 'text-gray-600 hover:text-gray-950'
+            }`}
+            onClick={() => setActiveTab('standard')}
+          >
+            Standard Dashboard
+          </button>
+          <button
+            type="button"
+            className={`flex-1 py-3 text-center font-bold text-sm rounded-lg transition-all duration-200 ${
+              activeTab === 'platinum'
+                ? 'bg-gray-800 text-white shadow'
+                : 'text-gray-600 hover:text-gray-950'
+            }`}
+            onClick={() => setActiveTab('platinum')}
+          >
+            Premium Dashboard
+          </button>
+        </div>
+
+        {/* Links to login pages */}
         <div className="px-6 pb-6 pt-2 space-y-3">
           <p className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Available Portals</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {links.map((link) => (
+            {currentLinks.map((link) => (
               <Link
                 key={link.name}
                 href={link.url}
-                className="flex items-center justify-center p-4 rounded-xl font-bold text-center border border-gray-300 bg-gray-50 text-gray-800 hover:bg-gray-900 hover:text-white hover:border-gray-900 transition-all duration-200"
+                className={`flex items-center justify-center p-4 rounded-xl font-bold text-center border text-sm transition-all duration-200 ${
+                  activeTab === 'standard'
+                    ? 'border-gray-300 bg-gray-50 text-gray-800 hover:bg-gray-900 hover:text-white hover:border-gray-900'
+                    : 'border-gray-300 bg-gray-50 text-gray-800 hover:bg-gray-900 hover:text-white hover:border-gray-900'
+                }`}
               >
                 {link.name}
               </Link>

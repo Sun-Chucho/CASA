@@ -8,7 +8,7 @@ import {
   getCasaRoomPrice,
 } from "@/app/lib/mock-data";
 import { readStoredRole } from "@/app/lib/auth";
-import { readCashierState, writeCashierState, getActiveCashierStateKey } from "@/app/lib/storage";
+import { readCashierState, STORAGE_CASHIER_STATE, writeCashierState, getActiveCashierStateKey } from "@/app/lib/storage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +28,7 @@ import { useConfirmDialog } from "@/hooks/use-confirm-dialog";
 import { isBookingStillActive, readRoomsState, syncRoomsStateFromBookings, updateRoomStatusByNumber } from "@/app/lib/rooms-storage";
 import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
 import { getScopedStorageKey } from "@/app/lib/storage";
+import { getLocalMawioTier } from "@/app/lib/login-profiles";
 
 type PaymentMethod = "cash" | "card" | "mobile-money" | "credit";
 type TransactionTab = "completed" | "credit";
@@ -67,6 +68,10 @@ interface BookingRecord {
 
 function getFallbackRoomRate(): number {
   return STANDARD_ROOM_PRICE;
+}
+
+function getRoomTypeLabel(_roomType: RoomType): string {
+  return "CASA";
 }
 
 const SPECIAL_PACKAGES: Record<
@@ -326,7 +331,7 @@ export default function BookingPage() {
   );
   const selectedRate = packageConfig
     ? packageConfig.standardRate
-    : selectedRoom?.price ?? getCasaRoomPrice(selectedRoomNumber) ?? getFallbackRoomRate();
+    : selectedRoom?.price ?? getFallbackRoomRate();
   const rate = Number.isFinite(selectedRate) && selectedRate > 0 ? selectedRate : 0;
   const bookingCurrency: BookingCurrency = packageConfig?.currency ?? "TSh";
   const accountingCurrency = toAccountingCurrency(bookingCurrency);

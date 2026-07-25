@@ -1,6 +1,3 @@
-import { readFileSync } from "fs";
-import path from "path";
-
 const FIREBASE_API_KEY =
   process.env.NEXT_PUBLIC_FIREBASE_API_KEY ?? "AIzaSyAT55z0QVhfCtAAPvt0XZmZgEWGkLjaEsU";
 const FIREBASE_DATABASE_URL =
@@ -8,20 +5,6 @@ const FIREBASE_DATABASE_URL =
   "https://casamotel-96c86-default-rtdb.firebaseio.com/";
 const FIREBASE_STORAGE_ROOT = "casa";
 const DEFAULT_MAWIO_TIER = "standard";
-
-const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH ?? path.join(process.cwd(), "casamotel-96c86-firebase-adminsdk-fbsvc-caa2bed17c.json");
-let serviceAccountConfig: Record<string, unknown> | null = null;
-
-function loadServiceAccountConfig() {
-  if (serviceAccountConfig) return serviceAccountConfig;
-  try {
-    const raw = readFileSync(serviceAccountPath, "utf8");
-    serviceAccountConfig = JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    serviceAccountConfig = null;
-  }
-  return serviceAccountConfig;
-}
 
 type ServerStorageOptions = {
   tier?: string | null;
@@ -34,7 +17,7 @@ type FirebaseAnonSession = {
 
 let anonSessionPromise: Promise<FirebaseAnonSession> | null = null;
 
-function normalizeTier(_value: string | null | undefined) {
+function normalizeTier(value: string | null | undefined) {
   return DEFAULT_MAWIO_TIER;
 }
 
@@ -42,7 +25,7 @@ function getDatabaseBaseUrl() {
   return FIREBASE_DATABASE_URL.replace(/\/+$/, "");
 }
 
-function toStoragePath(key: string, _tier?: string | null) {
+function toStoragePath(key: string, tier?: string | null) {
   return `${FIREBASE_STORAGE_ROOT}/${key.replace(/[.#$[\]/]/g, "-")}`;
 }
 
@@ -89,10 +72,6 @@ async function getAnonymousSession() {
 }
 
 async function requestDatabase<T>(key: string, init?: RequestInit, options?: ServerStorageOptions) {
-  const serviceAccount = loadServiceAccountConfig();
-  if (serviceAccount?.private_key && serviceAccount?.client_email) {
-    void serviceAccount;
-  }
   const basePath = `${getDatabaseBaseUrl()}/${toStoragePath(key, options?.tier)}.json`;
 
   const runRequest = async (idToken?: string) => {
@@ -123,13 +102,11 @@ async function requestDatabase<T>(key: string, init?: RequestInit, options?: Ser
 }
 
 export async function readServerSyncedStorageValue<T>(key: string, options?: ServerStorageOptions) {
-  void loadServiceAccountConfig();
   const response = await requestDatabase<T>(key, { method: "GET" }, options);
   return (await response.json()) as T | null;
 }
 
 export async function writeServerSyncedStorageValue<T>(key: string, value: T, options?: ServerStorageOptions) {
-  void loadServiceAccountConfig();
   await requestDatabase(key, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
