@@ -1019,30 +1019,46 @@ export default function BookingPage() {
                 <Badge className="bg-orange-50 text-orange-700 border border-orange-500 hover:bg-orange-50">Cleaning</Badge>
                 <Badge className="bg-gray-100 text-gray-600 border border-gray-500 hover:bg-gray-100">Maintenance</Badge>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                {roomPickerRooms.map((room) => {
-                  const roomState = getRoomBookingState(room);
-
+              <div className="space-y-6">
+                {[
+                  { title: "Standard Rooms (50,000 TSh)", price: 50000 },
+                  { title: "Deluxe Rooms (60,000 TSh)", price: 60000 },
+                  { title: "Executive Rooms (100,000 TSh)", price: 100000 },
+                  { title: "Suite Rooms (120,000 TSh)", price: 120000 },
+                ].map(category => {
+                  const categoryRooms = roomPickerRooms.filter(r => r.price === category.price);
+                  if (categoryRooms.length === 0) return null;
                   return (
-                    <Button
-                      key={room.id}
-                      type="button"
-                      variant="outline"
-                      disabled={!roomState.canBook}
-                      onClick={() => {
-                        if (!roomState.canBook) return;
-                        setSelectedRoomNumber(room.number);
-                        setRoomPickerOpen(false);
-                      }}
-                      className={`h-auto min-h-14 flex-col gap-1 border font-black ${
-                        selectedRoomNumber === room.number && roomState.canBook
-                          ? "border-primary bg-primary text-primary-foreground hover:bg-primary"
-                          : roomState.className
-                      }`}
-                    >
-                      <span>{room.number}</span>
-                      <span className="text-[10px] uppercase tracking-widest">{roomState.label}</span>
-                    </Button>
+                    <div key={category.title} className="space-y-2">
+                      <h4 className="font-bold text-sm text-muted-foreground uppercase tracking-wider">{category.title}</h4>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        {categoryRooms.map((room) => {
+                          const roomState = getRoomBookingState(room);
+
+                          return (
+                            <Button
+                              key={room.id}
+                              type="button"
+                              variant="outline"
+                              disabled={!roomState.canBook}
+                              onClick={() => {
+                                if (!roomState.canBook) return;
+                                setSelectedRoomNumber(room.number);
+                                setRoomPickerOpen(false);
+                              }}
+                              className={`h-auto min-h-14 flex-col gap-1 border font-black ${
+                                selectedRoomNumber === room.number && roomState.canBook
+                                  ? "border-primary bg-primary text-primary-foreground hover:bg-primary"
+                                  : roomState.className
+                              }`}
+                            >
+                              <span>{room.number}</span>
+                              <span className="text-[10px] uppercase tracking-widest">{roomState.label}</span>
+                            </Button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   );
                 })}
               </div>
