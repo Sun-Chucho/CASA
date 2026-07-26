@@ -127,6 +127,14 @@ export default function LaundryPage() {
     setTab(nextRecord.status);
   };
 
+  const payCredit = (id: string) => {
+    const nextRecords = records.map((record) =>
+      record.id === id ? { ...record, status: "completed" as LaundryPaymentStatus, paymentMethod: "cash" as LaundryPaymentMethod } : record
+    );
+    setRecords(nextRecords);
+    writeJson(STORAGE_LAUNDRY_RECORDS, nextRecords);
+  };
+
   return (
     <div className="space-y-6">
       <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -232,6 +240,7 @@ export default function LaundryPage() {
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Items</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Method</TableHead>
                 <TableHead className="text-right font-black uppercase text-[10px] tracking-widest">Amount</TableHead>
+                <TableHead className="text-right font-black uppercase text-[10px] tracking-widest">Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -243,11 +252,18 @@ export default function LaundryPage() {
                   <TableCell className="font-bold">{record.itemCount}</TableCell>
                   <TableCell className="font-black uppercase text-[10px] tracking-widest">{record.paymentMethod}</TableCell>
                   <TableCell className="text-right font-black">{formatMoney(record.totalAmount)}</TableCell>
+                  <TableCell className="text-right">
+                    {record.status === "credit" && !isReadOnly && (
+                      <Button size="sm" onClick={() => payCredit(record.id)} className="font-black uppercase tracking-widest text-[10px]">
+                        Pay
+                      </Button>
+                    )}
+                  </TableCell>
                 </TableRow>
               ))}
               {filteredRecords.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-10 text-center text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  <TableCell colSpan={7} className="py-10 text-center text-[10px] font-black uppercase tracking-widest text-muted-foreground">
                     No laundry records in this status
                   </TableCell>
                 </TableRow>
