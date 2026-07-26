@@ -43,7 +43,8 @@ function getDatabaseBaseUrl() {
 }
 
 function toStoragePath(key: string, _tier?: string | null) {
-  return `${FIREBASE_STORAGE_ROOT}/${key.replace(/[.#$[\]/]/g, "-")}`;
+  const tier = _tier === "platinum" ? "platinum" : "standard";
+  return `${FIREBASE_STORAGE_ROOT}/${tier}/${key.replace(/[.#$[\]/]/g, "-")}`;
 }
 
 async function getAnonymousSession() {

@@ -209,7 +209,7 @@ export function getMawioTier(): "standard" | "platinum" {
 }
 
 function toStoragePath(key: string) {
-  return `${FIREBASE_STORAGE_ROOT}/${key.replace(/[.#$[\]/]/g, "-")}`;
+  return `${FIREBASE_STORAGE_ROOT}/${getMawioTier()}/${key.replace(/[.#$[\]/]/g, "-")}`;
 }
 
 // ── Tier-tagged local cache keys ────────────────────────────────────────────
@@ -232,7 +232,7 @@ function toStoragePath(key: string) {
 // (`TIER_SCOPED_KEYS` / `TIER_SHARED_KEYS` are defined below, after the key
 // lists they are built from.)
 export function getTierTag(): "S_" | "P_" {
-  return "S_";
+  return getMawioTier() === "platinum" ? "P_" : "S_";
 }
 
 export function getTierScopedLocalKey(baseKey: string): string {
