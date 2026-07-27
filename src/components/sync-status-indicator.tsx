@@ -8,21 +8,22 @@ import { cn } from "@/lib/utils";
 import { Wifi, WifiOff } from "lucide-react";
 
 export function SyncStatusIndicator() {
-  // Seed with browser online state so we never show "Offline" on first render
-  // when the device actually has internet (Firebase may take a moment to confirm).
-  const [connected, setConnected] = useState(
-    typeof window !== "undefined" ? window.navigator.onLine : true,
-  );
+  const [connected, setConnected] = useState(true);
 
   useEffect(() => {
-    // Mirror browser online / offline events as a fast fallback.
+    // Firebase's realtime socket can be unavailable while the app's server
+    // sync is still online. Never let that narrower signal incorrectly
+    // override the browser's confirmed network state.
+    const applyConnectionState = (syncConnected: boolean) => {
+      setConnected(window.navigator.onLine || syncConnected);
+    };
     const onOnline = () => setConnected(true);
     const onOffline = () => setConnected(false);
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
 
-    // Firebase realtime connection status (authoritative when available).
-    const unsubscribe = subscribeToConnectionStatus(setConnected);
+    applyConnectionState(false);
+    const unsubscribe = subscribeToConnectionStatus(applyConnectionState);
 
     return () => {
       window.removeEventListener("online", onOnline);
