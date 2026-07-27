@@ -14,6 +14,7 @@ const _lastSyncedAt: Record<string, number> = {};
 const _pendingLocalWrites: Record<string, { value: unknown; createdAt: number }> = {};
 const FALLBACK_POLL_INTERVAL_MS = 10000;
 const PENDING_LOCAL_WRITE_TTL_MS = 15000;
+const DIRECT_FIREBASE_WRITE_TIMEOUT_MS = 5000;
 const SERVER_SYNC_ETAG_PREFIX = "orange-hotel-server-sync-etag";
 
 function dispatchStorageUpdated(key: string) {
@@ -97,6 +98,22 @@ async function removeServerSyncedStorageValue(key: string) {
   if (!response.ok) {
     throw new Error(`Server sync delete failed for ${key}`);
   }
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string) {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timeoutId);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timeoutId);
+        reject(error);
+      },
+    );
+  });
 }
 
 if (typeof window !== "undefined") {
@@ -652,16 +669,6 @@ function protectSyncedValueBeforeWrite(key: string, localValue: unknown, remoteV
   return localValue;
 }
 
-function isDangerouslySmallCashierWrite(key: string, localValue: unknown, remoteValue: unknown) {
-  if (key !== "orange-hotel-cashier-state") return false;
-  const localTransactions = (localValue as { transactions?: unknown[] } | null)?.transactions;
-  const remoteTransactions = (remoteValue as { transactions?: unknown[] } | null)?.transactions;
-  const localCount = Array.isArray(localTransactions) ? localTransactions.length : 0;
-  const remoteCount = Array.isArray(remoteTransactions) ? remoteTransactions.length : 0;
-
-  return localCount > 0 && localCount < 50 && remoteCount === 0;
-}
-
 function getCanonicalDefaultValue(key: string) {
   switch (key) {
     case "orange-hotel-cashier-state":
@@ -844,38 +851,54 @@ export function syncStorageValueToFirebase<T>(key: string, value: T) {
   if (typeof window === "undefined") return;
   let sanitizedValue: unknown = sanitizeForStorage(value);
   _pendingLocalWrites[key] = { value: sanitizedValue, createdAt: Date.now() };
-  void ensureFirebaseAuthReady()
-    .then(async () => {
-      const snapshot = await get(ref(firebaseDatabase, toStoragePath(key))).catch(() => null);
-      const remoteValue = snapshot?.exists() ? sanitizeForStorage(sanitizeSyncedValue(key, snapshot.val())) : null;
-      if (isDangerouslySmallCashierWrite(key, sanitizedValue, remoteValue)) {
-        console.warn(`Blocked unsafe cashier sync for ${key}: local snapshot is too small and remote could not be verified.`);
-        return;
-      }
+
+  // Use the app's API as the primary write path. A disconnected Firebase
+  // realtime socket can leave set() pending indefinitely, which previously
+  // prevented the server fallback from running and left the UI on "Offline"
+  // even though the browser and API were reachable.
+  void (async () => {
+    try {
+      const remoteValue = sanitizeForStorage(
+        sanitizeSyncedValue(key, await fetchServerSyncedStorageValue(key).catch(() => null)),
+      );
       sanitizedValue = sanitizeForStorage(sanitizeSyncedValue(key, protectSyncedValueBeforeWrite(key, sanitizedValue, remoteValue)));
       _pendingLocalWrites[key] = { value: sanitizedValue, createdAt: Date.now() };
-      await set(ref(firebaseDatabase, toStoragePath(key)), sanitizedValue);
-    })
-    .then(() => {
+      await writeServerSyncedStorageValue(key, sanitizedValue);
       markSyncHealthy(key);
-    })
-    .catch(async (error) => {
-      console.error(`Firebase sync failed for ${key}`, error);
-      try {
-        const remoteValue = sanitizeForStorage(sanitizeSyncedValue(key, await fetchServerSyncedStorageValue(key).catch(() => null)));
-        if (isDangerouslySmallCashierWrite(key, sanitizedValue, remoteValue)) {
-          console.warn(`Blocked unsafe server cashier sync for ${key}: local snapshot is too small and remote could not be verified.`);
-          return;
-        }
-        sanitizedValue = sanitizeForStorage(sanitizeSyncedValue(key, protectSyncedValueBeforeWrite(key, sanitizedValue, remoteValue)));
-        _pendingLocalWrites[key] = { value: sanitizedValue, createdAt: Date.now() };
-        await writeServerSyncedStorageValue(key, sanitizedValue);
-        markSyncHealthy(key);
-      } catch (serverError) {
-        emitConnectionState(false);
-        console.error(`Server sync fallback failed for ${key}`, serverError);
-      }
-    });
+      return;
+    } catch (serverError) {
+      console.error(`Server sync failed for ${key}`, serverError);
+    }
+
+    try {
+      await withTimeout(
+        ensureFirebaseAuthReady(),
+        DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
+        `Firebase authentication timed out for ${key}`,
+      );
+      const snapshot = await withTimeout(
+        get(ref(firebaseDatabase, toStoragePath(key))),
+        DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
+        `Firebase read timed out for ${key}`,
+      );
+      const remoteValue = snapshot.exists()
+        ? sanitizeForStorage(sanitizeSyncedValue(key, snapshot.val()))
+        : null;
+      sanitizedValue = sanitizeForStorage(
+        sanitizeSyncedValue(key, protectSyncedValueBeforeWrite(key, sanitizedValue, remoteValue)),
+      );
+      _pendingLocalWrites[key] = { value: sanitizedValue, createdAt: Date.now() };
+      await withTimeout(
+        set(ref(firebaseDatabase, toStoragePath(key)), sanitizedValue),
+        DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
+        `Firebase write timed out for ${key}`,
+      );
+      markSyncHealthy(key);
+    } catch (firebaseError) {
+      emitConnectionState(false);
+      console.error(`Firebase sync fallback failed for ${key}`, firebaseError);
+    }
+  })();
 }
 
 export async function hydrateStorageKeyFromFirebase(key: string) {
