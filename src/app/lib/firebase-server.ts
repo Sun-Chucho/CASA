@@ -7,7 +7,6 @@ const FIREBASE_DATABASE_URL =
   process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL ??
   "https://casamotel-96c86-default-rtdb.firebaseio.com/";
 const FIREBASE_STORAGE_ROOT = "casa";
-const DEFAULT_MAWIO_TIER = "standard";
 
 const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH ?? path.join(process.cwd(), "casamotel-96c86-firebase-adminsdk-fbsvc-caa2bed17c.json");
 let serviceAccountConfig: Record<string, unknown> | null = null;
@@ -23,10 +22,6 @@ function loadServiceAccountConfig() {
   return serviceAccountConfig;
 }
 
-type ServerStorageOptions = {
-  tier?: string | null;
-};
-
 type FirebaseAnonSession = {
   idToken: string;
   expiresAt: number;
@@ -34,17 +29,12 @@ type FirebaseAnonSession = {
 
 let anonSessionPromise: Promise<FirebaseAnonSession> | null = null;
 
-function normalizeTier(_value: string | null | undefined) {
-  return DEFAULT_MAWIO_TIER;
-}
-
 function getDatabaseBaseUrl() {
   return FIREBASE_DATABASE_URL.replace(/\/+$/, "");
 }
 
-function toStoragePath(key: string, _tier?: string | null) {
-  const tier = _tier === "platinum" ? "platinum" : "standard";
-  return `${FIREBASE_STORAGE_ROOT}/${tier}/${key.replace(/[.#$[\]/]/g, "-")}`;
+function toStoragePath(key: string) {
+  return `${FIREBASE_STORAGE_ROOT}/${key.replace(/[.#$[\]/]/g, "-")}`;
 }
 
 async function getAnonymousSession() {
@@ -89,12 +79,12 @@ async function getAnonymousSession() {
   return session;
 }
 
-async function requestDatabase<T>(key: string, init?: RequestInit, options?: ServerStorageOptions) {
+async function requestDatabase<T>(key: string, init?: RequestInit) {
   const serviceAccount = loadServiceAccountConfig();
   if (serviceAccount?.private_key && serviceAccount?.client_email) {
     void serviceAccount;
   }
-  const basePath = `${getDatabaseBaseUrl()}/${toStoragePath(key, options?.tier)}.json`;
+  const basePath = `${getDatabaseBaseUrl()}/${toStoragePath(key)}.json`;
 
   const runRequest = async (idToken?: string) => {
     const path = idToken ? `${basePath}?auth=${encodeURIComponent(idToken)}` : basePath;
@@ -123,23 +113,23 @@ async function requestDatabase<T>(key: string, init?: RequestInit, options?: Ser
   return response;
 }
 
-export async function readServerSyncedStorageValue<T>(key: string, options?: ServerStorageOptions) {
+export async function readServerSyncedStorageValue<T>(key: string) {
   void loadServiceAccountConfig();
-  const response = await requestDatabase<T>(key, { method: "GET" }, options);
+  const response = await requestDatabase<T>(key, { method: "GET" });
   return (await response.json()) as T | null;
 }
 
-export async function writeServerSyncedStorageValue<T>(key: string, value: T, options?: ServerStorageOptions) {
+export async function writeServerSyncedStorageValue<T>(key: string, value: T) {
   void loadServiceAccountConfig();
   await requestDatabase(key, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(value),
-  }, options);
+  });
 }
 
-export async function appendServerSyncedStorageItem<T>(key: string, item: T, options?: ServerStorageOptions) {
-  const current = await readServerSyncedStorageValue<T[]>(key, options);
+export async function appendServerSyncedStorageItem<T>(key: string, item: T) {
+  const current = await readServerSyncedStorageValue<T[]>(key);
   const next = Array.isArray(current) ? [item, ...current] : [item];
-  await writeServerSyncedStorageValue(key, next, options);
+  await writeServerSyncedStorageValue(key, next);
 }

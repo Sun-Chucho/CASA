@@ -69,67 +69,18 @@ export async function GET(
     return NextResponse.json({ error: "Manifest not found." }, { status: 404 });
   }
 
-  const tier = request.nextUrl.searchParams.get("tier");
-  let startUrl: string = manifest.start_url;
-  let name: string = manifest.name;
-  let shortName: string = manifest.short_name;
 
-  if (tier === "standard") {
-    if (role === "barista") {
-      startUrl = "/SBAR";
-      name = "CASA Standard Barista POS";
-      shortName = "Std Barista";
-    } else if (role === "kitchen") {
-      startUrl = "/SKIT";
-      name = "CASA Standard Kitchen POS";
-      shortName = "Std Kitchen";
-    } else if (role === "manager") {
-      startUrl = "/smanager";
-      name = "CASA Standard Manager";
-      shortName = "Std Manager";
-    } else if (role === "inventory") {
-      startUrl = "/SIM";
-      name = "CASA Standard Inventory";
-      shortName = "Std Inventory";
-    } else if (role === "cashier") {
-      startUrl = "/SRB";
-      name = "CASA Standard Reception";
-      shortName = "Std Reception";
-    }
-  } else if (tier === "platinum") {
-    if (role === "barista") {
-      startUrl = "/PBAR";
-      name = "CASA Premium Barista POS";
-      shortName = "Prem Barista";
-    } else if (role === "kitchen") {
-      startUrl = "/PKIT";
-      name = "CASA Premium Kitchen POS";
-      shortName = "Prem Kitchen";
-    } else if (role === "manager") {
-      startUrl = "/pmanager";
-      name = "CASA Premium Manager";
-      shortName = "Prem Manager";
-    } else if (role === "inventory") {
-      startUrl = "/PIM";
-      name = "CASA Premium Inventory";
-      shortName = "Prem Inventory";
-    } else if (role === "cashier") {
-      startUrl = "/PRB";
-      name = "CASA Premium Reception";
-      shortName = "Prem Reception";
-    }
-  }
 
   return new NextResponse(
     JSON.stringify({
       ...manifest,
-      name,
-      short_name: shortName,
+      name: manifest.name,
+      short_name: manifest.short_name,
       display: "standalone",
       display_override: ["standalone", "minimal-ui"],
-      start_url: startUrl,
-      scope: startUrl,
-      id: startUrl,
+      start_url: manifest.start_url,
+      scope: manifest.start_url,
+      id: manifest.start_url,
       background_color: manifest.background_color,
       theme_color: manifest.theme_color,
       categories: ["business", "productivity"],

@@ -2,16 +2,15 @@
 
 import { useState, useEffect } from 'react';
 import { SidebarNav } from "@/components/layout/sidebar-nav";
-import { BARISTA_INVENTORY_SEED, PREMIUM_BARISTA_INVENTORY_SEED, PREMIUM_BARISTA_PRICE_ALIASES } from "@/app/lib/seed-barista-data";
+import { BARISTA_INVENTORY_SEED } from "@/app/lib/seed-barista-data";
 import { DEFAULT_KITCHEN_MENU, mergeKitchenMenuItems } from "@/app/lib/kitchen-menu";
-import { getDefaultRoomsForTier, InventoryItem, Role } from "@/app/lib/mock-data";
-import { getLocalMawioTier } from "@/app/lib/login-profiles";
+import { InventoryItem, Role } from "@/app/lib/mock-data";
 import { ExpenseRecord, STORAGE_EXPENSES } from "@/app/lib/expenses";
 import { KitchenPurchaseHistoryEntry, STORAGE_KITCHEN_PURCHASE_HISTORY } from "@/app/lib/kitchen-session-storage";
 import { MainStoreItem, STORAGE_MAIN_STORE_ITEMS, getStoreItemLabel, normalizeBaristaProductTarget, normalizeStockName } from "@/app/lib/inventory-transfer";
 import { getTotLimit } from "@/app/lib/barista-stock";
 import { normalizeRole } from "@/app/lib/auth";
-import { hydrateStorageKeyFromFirebase, purgeSyncedKeysForCurrentTier, runOnceForTierAcrossDevices, setMawioTier } from "@/app/lib/firebase-sync";
+import { hydrateStorageKeyFromFirebase, purgeSyncedKeys, runOnceAcrossDevices } from "@/app/lib/firebase-sync";
 import { readJson, readPosState, STORAGE_BARISTA_STATE, STORAGE_KITCHEN_STATE, writeJson, writePosState } from "@/app/lib/storage";
 import { usePathname, useRouter } from "next/navigation";
 import { Bell, Home, Hotel, Search, User, Clock, Menu, WalletCards, ReceiptText, Package } from "lucide-react";
@@ -21,7 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { SyncStatusIndicator } from "@/components/sync-status-indicator";
-import { MANAGER_SESSION_VERSION, STORAGE_MANAGER_SESSION_VERSION, normalizeLoginProfileScope, readActiveSessionUsername, readLocalLoginProfiles, renameProfileUser, saveLoginProfileToServer, writeActiveSessionUsername } from "@/app/lib/login-profiles";
+import { MANAGER_SESSION_VERSION, STORAGE_MANAGER_SESSION_VERSION, readActiveSessionUsername, readLocalLoginProfiles, renameProfileUser, saveLoginProfileToServer, writeActiveSessionUsername } from "@/app/lib/login-profiles";
 
 const VALID_ROLES: Role[] = ['manager', 'director', 'inventory', 'cashier', 'kitchen', 'barista'];
 const DIRECTOR_MOBILE_NAV = [
@@ -33,6 +32,10 @@ const DIRECTOR_MOBILE_NAV = [
   { label: "Expenses", href: "/dashboard/expenses", icon: ReceiptText },
 ] as const;
 const KITCHEN_TRANSACTIONS_RESET_KEY = "orange-hotel-kitchen-transactions-reset-v3";
+const KITCHEN_RESET_KEY = "orange-hotel-kitchen-reset-marker-v2";
+runOnceAcrossDevices(KITCHEN_RESET_KEY, async () => {
+  await purgeSyncedKeys(["orange-hotel-kitchen-state", "orange-hotel-cancelled-tickets"]);
+});
 const KITCHEN_MENU_PRICE_FIX_KEY = "orange-hotel-kitchen-menu-price-fix-v2";
 const DOMPO_STOCK_FIX_KEY = "orange-hotel-dompo-750ml-stock-fix-v1";
 const BARISTA_STOCK_FIX_KEY = "orange-hotel-barista-stock-fix-v5";
@@ -44,7 +47,6 @@ const BARISTA_MENU_REMOVAL_FIX_KEY = "orange-hotel-barista-menu-removal-fix-v1";
 const JACK_DANIELS_TOTS_PRICE_FIX_KEY = "orange-hotel-jack-daniels-tots-price-fix-v1";
 const STAFF_FOOD_DISHES_EXPENSE_REMOVAL_KEY = "orange-hotel-staff-food-dishes-expense-removal-v2";
 const KITCHEN_MAY_SALES_YEAR_FIX_KEY = "orange-hotel-kitchen-may-sales-year-fix-v1";
-const PREMIUM_BARISTA_PRICE_FIX_KEY = "orange-hotel-premium-barista-price-fix-v1";
 
 const MANAGEMENT_SYNC_KEYS = [
   "orange-hotel-settings",
@@ -75,8 +77,6 @@ const STARTUP_SYNC_KEYS_BY_ROLE: Record<Role, string[]> = {
   cashier: ["orange-hotel-settings", "orange-hotel-login-profiles", "orange-hotel-cashier-state", "orange-hotel-rooms-state"],
   kitchen: ["orange-hotel-settings", "orange-hotel-login-profiles", "orange-hotel-kitchen-state", "orange-hotel-main-store-items", "orange-hotel-inventory-items", "orange-hotel-store-movements", "orange-hotel-store-usage"],
   barista: ["orange-hotel-settings", "orange-hotel-login-profiles", "orange-hotel-barista-state", "orange-hotel-main-store-items", "orange-hotel-inventory-items", "orange-hotel-store-movements", "orange-hotel-store-usage"],
-  standard: ["orange-hotel-settings", "orange-hotel-login-profiles"],
-  platinum: ["orange-hotel-settings", "orange-hotel-login-profiles"],
 };
 
 async function hydrateStartupStateForRole(role: Role) {
@@ -204,189 +204,6 @@ function getBaristaInventoryLabel(item: Pick<InventoryItem, "name" | "size">) {
   if (!size) return isTotItem ? `${baseName} (TOTS)` : baseName;
   if (rawName.toLowerCase().includes(size.toLowerCase())) return rawName;
   return isTotItem ? `${baseName} ${size} (TOTS)`.trim() : `${baseName} ${size}`.trim();
-}
-
-function getPremiumBaristaTargets(label: string) {
-  const target = normalizeBaristaMenuTarget(label);
-  const aliasGroup = PREMIUM_BARISTA_PRICE_ALIASES.find((group) =>
-    group.labels.some((alias) => normalizeBaristaMenuTarget(alias) === target),
-  );
-
-  if (!aliasGroup) return [target];
-  return Array.from(new Set([target, ...aliasGroup.labels.map((alias) => normalizeBaristaMenuTarget(alias))]));
-}
-
-function getPremiumBaristaPrice(label: string) {
-  const target = normalizeBaristaMenuTarget(label);
-
-  for (const group of PREMIUM_BARISTA_PRICE_ALIASES) {
-    if (group.labels.some((alias) => normalizeBaristaMenuTarget(alias) === target)) {
-      return group.price;
-    }
-  }
-
-  const seedMatch = PREMIUM_BARISTA_INVENTORY_SEED.find((item) => {
-    if (!item.name) return false;
-    return getPremiumBaristaTargets(getBaristaInventoryLabel({ name: item.name, size: item.size ?? "" })).includes(target);
-  });
-
-  return typeof seedMatch?.sellingPrice === "number" && seedMatch.sellingPrice > 0 ? seedMatch.sellingPrice : 0;
-}
-
-function getPremiumBaristaSeedLabel(item: Partial<InventoryItem>) {
-  return getBaristaInventoryLabel({ name: item.name ?? "", size: item.size ?? "" });
-}
-
-function getPremiumBaristaSeedId(prefix: string, item: Partial<InventoryItem>, index: number) {
-  return `${prefix}-${item.barcode || normalizeStockName(getPremiumBaristaSeedLabel(item)).replace(/\s+/g, "-") || index}`;
-}
-
-function applyPremiumBaristaPriceCorrections() {
-  if (typeof window === "undefined" || getLocalMawioTier() !== "platinum") return;
-  if (localStorage.getItem(PREMIUM_BARISTA_PRICE_FIX_KEY) === "1") return;
-
-  const inventoryItems = readJson<InventoryItem[]>("orange-hotel-inventory-items") ?? [];
-  const storeItems = readJson<MainStoreItem[]>(STORAGE_MAIN_STORE_ITEMS) ?? [];
-  const baristaSnapshot = readPosState<{ id: string }, { id: string }, { id: string; name: string; price: number; category: string; prepMinutes: number; barcode?: string }>(
-    STORAGE_BARISTA_STATE,
-    "orange-hotel-barista-orders",
-    "orange-hotel-barista-seq",
-    "orange-hotel-barista-payments",
-    "orange-hotel-barista-menu",
-    490,
-  );
-
-  const canonicalSeed = PREMIUM_BARISTA_INVENTORY_SEED.filter(
-    (item) => item.name && item.status === "ACTIVE" && typeof item.sellingPrice === "number" && item.sellingPrice > 0,
-  );
-
-  const nextMenuItems = [...baristaSnapshot.menuItems];
-  const existingMenuTargets = new Set(nextMenuItems.flatMap((item) => getPremiumBaristaTargets(item.name)));
-  let menuChanged = false;
-
-  for (let index = 0; index < nextMenuItems.length; index += 1) {
-    const price = getPremiumBaristaPrice(nextMenuItems[index].name);
-    if (price > 0 && nextMenuItems[index].price !== price) {
-      nextMenuItems[index] = { ...nextMenuItems[index], price };
-      menuChanged = true;
-    }
-  }
-
-  canonicalSeed.forEach((item, index) => {
-    const label = getPremiumBaristaSeedLabel(item);
-    const targets = getPremiumBaristaTargets(label);
-    if (targets.some((target) => existingMenuTargets.has(target))) return;
-
-    nextMenuItems.push({
-      id: getPremiumBaristaSeedId("premium-seed", item, index),
-      name: label,
-      price: item.sellingPrice ?? 0,
-      category: item.category ?? "cold",
-      prepMinutes: 2,
-      barcode: item.barcode ?? "",
-    });
-    targets.forEach((target) => existingMenuTargets.add(target));
-    menuChanged = true;
-  });
-
-  const nextInventoryItems = [...inventoryItems];
-  let inventoryChanged = false;
-  canonicalSeed.forEach((seedItem, index) => {
-    const label = getPremiumBaristaSeedLabel(seedItem);
-    const targets = getPremiumBaristaTargets(label);
-    const inventoryIndex = nextInventoryItems.findIndex((item) => {
-      const itemTargets = getPremiumBaristaTargets(getBaristaInventoryLabel(item));
-      return itemTargets.some((target) => targets.includes(target));
-    });
-
-    if (inventoryIndex >= 0) {
-      const current = nextInventoryItems[inventoryIndex];
-      const price = getPremiumBaristaPrice(getBaristaInventoryLabel(current)) || seedItem.sellingPrice || current.sellingPrice;
-      if (current.sellingPrice !== price || current.price !== price) {
-        nextInventoryItems[inventoryIndex] = {
-          ...current,
-          sellingPrice: price,
-          price,
-        };
-        inventoryChanged = true;
-      }
-      return;
-    }
-
-    nextInventoryItems.push({
-      id: getPremiumBaristaSeedId("premium-inventory", seedItem, index),
-      barcode: seedItem.barcode ?? "",
-      name: seedItem.name ?? "",
-      category: "Bar",
-      subCategory: seedItem.category ?? "Bar",
-      size: seedItem.size ?? "",
-      stock: seedItem.stock ?? 0,
-      buyingPrice: seedItem.buyingPrice ?? 0,
-      sellingPrice: seedItem.sellingPrice ?? 0,
-      price: seedItem.sellingPrice ?? 0,
-      status: seedItem.status ?? "ACTIVE",
-      minStock: seedItem.minStock ?? 0,
-      unit: seedItem.unit ?? "Bottle",
-      totSold: seedItem.totSold ?? 0,
-      totPerBottle: seedItem.totPerBottle,
-    });
-    inventoryChanged = true;
-  });
-
-  const nextStoreItems = [...storeItems];
-  let storeChanged = false;
-  canonicalSeed.forEach((seedItem, index) => {
-    const label = getPremiumBaristaSeedLabel(seedItem);
-    const targets = getPremiumBaristaTargets(label);
-    const storeIndex = nextStoreItems.findIndex((item) => {
-      if (item.lane !== "barista") return false;
-      const itemTargets = getPremiumBaristaTargets(getStoreItemLabel(item));
-      return itemTargets.some((target) => targets.includes(target));
-    });
-
-    if (storeIndex >= 0) {
-      const current = nextStoreItems[storeIndex];
-      const price = getPremiumBaristaPrice(getStoreItemLabel(current)) || seedItem.sellingPrice || current.sellingPrice || 0;
-      if (current.sellingPrice !== price) {
-        nextStoreItems[storeIndex] = {
-          ...current,
-          sellingPrice: price,
-        };
-        storeChanged = true;
-      }
-      return;
-    }
-
-    nextStoreItems.push({
-      id: getPremiumBaristaSeedId("premium-store", seedItem, index),
-      name: seedItem.name ?? "",
-      subCategory: seedItem.category ?? "Bar",
-      size: seedItem.size ?? "",
-      stock: seedItem.stock ?? 0,
-      unit: seedItem.unit ?? "Bottle",
-      minStock: seedItem.minStock ?? 0,
-      lane: "barista",
-      buyingPrice: seedItem.buyingPrice ?? 0,
-      sellingPrice: seedItem.sellingPrice ?? 0,
-      totLimit: seedItem.totPerBottle,
-      totSold: seedItem.totSold ?? 0,
-    });
-    storeChanged = true;
-  });
-
-  if (menuChanged) {
-    writePosState(STORAGE_BARISTA_STATE, baristaSnapshot.tickets, baristaSnapshot.ticketSeq, baristaSnapshot.payments, nextMenuItems);
-  }
-
-  if (inventoryChanged) {
-    writeJson("orange-hotel-inventory-items", nextInventoryItems);
-  }
-
-  if (storeChanged) {
-    writeJson(STORAGE_MAIN_STORE_ITEMS, nextStoreItems);
-  }
-
-  localStorage.setItem(PREMIUM_BARISTA_PRICE_FIX_KEY, "1");
 }
 
 function syncBaristaMenuItemsWithSharedData(
@@ -1261,7 +1078,6 @@ export default function DashboardLayout({
   const [usernameDraft, setUsernameDraft] = useState("");
   const [usernameSaving, setUsernameSaving] = useState(false);
   const [usernameFeedback, setUsernameFeedback] = useState<string | null>(null);
-  const [currentHotelView, setCurrentHotelView] = useState<"standard" | "platinum">("standard");
 
   const allowedByRole: Record<Role, string[]> = {
     manager: ['/dashboard', '/dashboard/rooms', '/dashboard/inventory', '/dashboard/inventory/kitchen-stock', '/dashboard/inventory/barista-stock', '/dashboard/menu-create', '/dashboard/company-stock', '/dashboard/cashier', '/dashboard/laundry', '/dashboard/expenses', '/dashboard/finances', '/dashboard/payments', '/dashboard/kitchen', '/dashboard/cancelled', '/dashboard/barista', '/dashboard/staff', '/dashboard/settings', '/dashboard/settings/sync', '/dashboard/settings/password'],
@@ -1270,8 +1086,6 @@ export default function DashboardLayout({
     cashier: ['/dashboard/cashier', '/dashboard/laundry', '/dashboard/cash-requests', '/dashboard/website-bookings', '/dashboard/live-chat', '/dashboard/payments', '/dashboard/rooms', '/dashboard/settings/password'],
     kitchen: ['/dashboard/fnb-pos', '/dashboard/kitchen', '/dashboard/cancelled', '/dashboard/payments', '/dashboard/settings/password'],
     barista: ['/dashboard/fnb-pos', '/dashboard/barista', '/dashboard/payments', '/dashboard/cancelled', '/dashboard/settings/password'],
-    standard: [],
-    platinum: [],
   };
 
   const defaultByRole: Record<Role, string> = {
@@ -1281,8 +1095,6 @@ export default function DashboardLayout({
     cashier: '/dashboard/cashier',
     kitchen: '/dashboard/kitchen',
     barista: '/dashboard/barista',
-    standard: '/standard',
-    platinum: '/platinum',
   };
 
   useEffect(() => {
@@ -1291,14 +1103,11 @@ export default function DashboardLayout({
     async function initializeDashboard() {
       const savedRole = normalizeRole(localStorage.getItem('orange-hotel-role'));
       const savedShift = localStorage.getItem('orange-hotel-shift');
-      const activeHotelScope = getLocalMawioTier();
 
       if (!savedRole || !VALID_ROLES.includes(savedRole)) {
         localStorage.removeItem('orange-hotel-role');
         localStorage.removeItem('orange-hotel-shift');
         localStorage.removeItem(STORAGE_MANAGER_SESSION_VERSION);
-        localStorage.removeItem('orange-hotel-active-login-scope');
-        localStorage.removeItem('mawio-tier');
         router.replace('/');
         return;
       }
@@ -1308,18 +1117,12 @@ export default function DashboardLayout({
         localStorage.removeItem("orange-hotel-shift");
         localStorage.removeItem("orange-hotel-username");
         localStorage.removeItem(STORAGE_MANAGER_SESSION_VERSION);
-        localStorage.removeItem('orange-hotel-active-login-scope');
-        localStorage.removeItem('mawio-tier');
         router.replace("/MANAGER");
         return;
       }
 
-      const activeLoginScope = normalizeLoginProfileScope(localStorage.getItem("orange-hotel-active-login-scope"));
       localStorage.setItem("orange-hotel-role", savedRole);
-      localStorage.setItem("orange-hotel-active-login-scope", activeLoginScope);
-      localStorage.setItem("mawio-tier", activeLoginScope === "platinum" ? "platinum" : "standard");
-      setCurrentHotelView(activeLoginScope === "platinum" ? "platinum" : "standard");
-      setActiveUsername(readActiveSessionUsername("", activeLoginScope));
+      setActiveUsername(readActiveSessionUsername(""));
       setRole(savedRole);
       if (savedShift) setShift(savedShift);
 
@@ -1344,26 +1147,7 @@ export default function DashboardLayout({
     };
   }, [router]);
 
-  // Keep the resolved hotel tier pinned in the URL of EVERY dashboard route.
-  // Sidebar links are static and drop the `?tier=` param on client navigation,
-  // so without this a reload/shared link could fall back to the browser-wide
-  // login scope (which the other hotel can overwrite) and render the wrong
-  // hotel's data. Re-pinning here — in the layout that wraps all dashboards —
-  // fixes every dashboard from one place. getLocalMawioTier() reads the per-tab
-  // sessionStorage pin, so the value is always this tab's hotel.
-  useEffect(() => {
-    if (!mounted || typeof window === "undefined") return;
-    const tier = getLocalMawioTier();
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("tier") === tier) return;
-    params.set("tier", tier);
-    const query = params.toString();
-    window.history.replaceState(
-      window.history.state,
-      "",
-      `${window.location.pathname}${query ? `?${query}` : ""}`,
-    );
-  }, [mounted, pathname]);
+
 
   useEffect(() => {
     const onResize = () => {
@@ -1425,19 +1209,7 @@ export default function DashboardLayout({
 
   const isDirector = role === "director";
 
-  useEffect(() => {
-    if (typeof window === "undefined" || !isDirector) return;
 
-    const handleHotelViewChanged = (event: CustomEvent) => {
-      const hotel = event.detail?.hotel;
-      if (hotel === "standard" || hotel === "platinum") {
-        window.location.reload();
-      }
-    };
-
-    window.addEventListener("hotel-view-changed", handleHotelViewChanged as EventListener);
-    return () => window.removeEventListener("hotel-view-changed", handleHotelViewChanged as EventListener);
-  }, [isDirector]);
   const directorCurrentLabel =
     DIRECTOR_MOBILE_NAV.find((item) => item.href === pathname)?.label ??
     (pathname.includes("/inventory") ? "Stock" : pathname.includes("/settings") ? "Settings" : "Dashboard");
@@ -1445,7 +1217,7 @@ export default function DashboardLayout({
   if (!mounted) return null;
 
   return (
-    <div className={cn("flex h-[100dvh] w-full overflow-hidden bg-background", currentHotelView === "platinum" ? "tier-platinum" : "tier-standard", isDirector && "bg-[#f4f7f2] md:bg-background")}>
+    <div className={cn("flex h-[100dvh] w-full overflow-hidden bg-background", isDirector && "bg-[#f4f7f2] md:bg-background")}>
       <aside
         className={cn(
           "fixed left-0 top-0 z-50 h-[100dvh] w-64 transition-transform duration-300",

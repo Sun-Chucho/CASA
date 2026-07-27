@@ -2,7 +2,6 @@ import { ref, runTransaction } from "firebase/database";
 import { firebaseDatabase } from "@/app/lib/firebase";
 import { readJson, writeJson } from "@/app/lib/storage";
 
-import { getMawioTier } from "@/app/lib/firebase-sync";
 
 export const STORAGE_WEBSITE_BOOKINGS = "orange-hotel-website-bookings";
 const FIREBASE_STORAGE_ROOT = "mawio";
@@ -51,7 +50,7 @@ export function writeWebsiteBookings(bookings: WebsiteBookingRecord[]) {
 }
 
 function toStoragePath(key: string) {
-  return `${FIREBASE_STORAGE_ROOT}/${getMawioTier()}/${key.replace(/[.#$[\]/]/g, "-")}`;
+  return `${FIREBASE_STORAGE_ROOT}/${key.replace(/[.#$[\]/]/g, "-")}`;
 }
 
 export async function appendWebsiteBooking(booking: WebsiteBookingRecord) {

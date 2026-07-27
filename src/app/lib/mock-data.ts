@@ -1,5 +1,5 @@
 
-export type Role = 'manager' | 'director' | 'inventory' | 'cashier' | 'kitchen' | 'barista' | 'standard' | 'platinum';
+export type Role = 'manager' | 'director' | 'inventory' | 'cashier' | 'kitchen' | 'barista';
 
 export interface User {
   id: string;
@@ -24,8 +24,6 @@ export interface Room {
 }
 
 export const STANDARD_ROOM_PRICE = 50000;
-export const PLATINUM_ROOM_PRICE = 50000;
-
 const CASA_ROOM_NUMBERS = [
   "100", "101", "102", "103", "104", "105", "106", "107",
   "108", "109", "110", "111", "112", "113", "114", "115", "116", "117",
@@ -64,9 +62,7 @@ const casaRooms: Room[] = CASA_ROOM_NUMBERS.map((number) => {
 
 export const ROOMS: Room[] = [...casaRooms];
 
-export const PLATINUM_HOTEL_ROOMS: Room[] = [];
-
-export function getDefaultRoomsForTier(_tier: "standard" | "platinum"): Room[] {
+export function getDefaultRooms(): Room[] {
   return ROOMS.map((room) => ({ ...room }));
 }
 

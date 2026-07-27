@@ -71,37 +71,6 @@
   }
 }
 
-@layer base {
-  /* Premium (Platinum) hotel theme. Applied on the dashboard root when the
-     active hotel tier is platinum so the premium identity (amber/gold) persists
-     across the whole dashboard, distinct from the standard hotel (blue). */
-  .tier-platinum {
-    --primary: 0 0% 30%;
-    --primary-foreground: 0 0% 100%;
-    --accent: 0 0% 18%;
-    --accent-foreground: 0 0% 96%;
-    --ring: 0 0% 45%;
-    --chart-1: 0 0% 35%;
-    --sidebar-primary: 0 0% 30%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent-foreground: 0 0% 96%;
-    --sidebar-ring: 0 0% 45%;
-  }
-
-  /* Standard hotel theme (dark gray) — explicit for clarity; matches :root defaults. */
-  .tier-standard {
-    --primary: 0 0% 24%;
-    --primary-foreground: 0 0% 100%;
-    --accent: 0 0% 18%;
-    --accent-foreground: 0 0% 96%;
-    --ring: 0 0% 40%;
-    --chart-1: 0 0% 24%;
-    --sidebar-primary: 0 0% 24%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent-foreground: 0 0% 96%;
-    --sidebar-ring: 0 0% 40%;
-  }
-}
 
 @layer base {
   * {

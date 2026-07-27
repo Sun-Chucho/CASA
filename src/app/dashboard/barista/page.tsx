@@ -19,8 +19,7 @@ import {
 import { findStoreItemForMenuName, formatTotStatus, getMenuStockStatus, getRemainingTots, getTotLimit, isTotTrackedMenuItem, normalizeBaristaMenuItems } from "@/app/lib/barista-stock";
 import { printDepartmentReceipt } from "@/app/lib/receipt-print";
 import { getActiveBaristaStateKey, readJson, readPosState, writeJson, writePosState } from "@/app/lib/storage";
-import { BARISTA_INVENTORY_SEED, PREMIUM_BARISTA_INVENTORY_SEED, PREMIUM_BARISTA_PRICE_ALIASES } from "@/app/lib/seed-barista-data";
-import { getLocalMawioTier } from "@/app/lib/login-profiles";
+import { BARISTA_INVENTORY_SEED } from "@/app/lib/seed-barista-data";
 import { useIsDirector } from "@/hooks/use-is-director";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -32,7 +31,7 @@ import { SyncStatusIndicator } from "@/components/sync-status-indicator";
 import { KitchenSessionManager } from "@/components/dashboard/kitchen-session-manager";
 import { CheckCircle2, Coffee, Lock, Minus, Pencil, Plus, Receipt, Search, Trash2, User, XCircle } from "lucide-react";
 import { useConfirmDialog } from "@/hooks/use-confirm-dialog";
-import { hydrateStorageKeyFromFirebase, purgeSyncedKeysForCurrentTier, runOnceForTierAcrossDevices, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
+import { hydrateStorageKeyFromFirebase, purgeSyncedKeys, runOnceAcrossDevices, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
 import { DEFAULT_LOGIN_PASSWORD, getProfilePassword, readActiveSessionUsername, readLocalLoginProfiles, saveLoginProfileToServer, STORAGE_LOGIN_PROFILES, subscribeToSessionIdentity, upsertProfileUser } from "@/app/lib/login-profiles";
 
 type BaristaCategory = "all" | "espresso" | "coffee" | "tea" | "cold" | "snacks";
@@ -200,12 +199,8 @@ function syncBaristaMenuItemsWithSharedInventory(
   inventory: InventoryItem[],
   _storeItems: MainStoreItem[],
 ) {
-  // The POS menu is authoritative per hotel tier: the seeded drink list plus any
-  // manual edits made in the manager Drinks / Inventory tabs. We deliberately do
-  // NOT merge items in from the shared inventory/store here. That shared data was
-  // historically co-mingled between the standard and premium hotels, so merging
-  // it back would leak one hotel's drinks into the other (the "merging" bug).
-  // Stock levels are resolved separately at render time via getMenuStockStatus.
+  // The POS menu is authoritative: seeded drinks plus manager edits. Stock
+  // levels are resolved separately at render time via getMenuStockStatus.
   if (menuItems.length === 0) {
     return normalizeBaristaMenuItemsFromInventory(inventory);
   }
@@ -231,31 +226,14 @@ function isTotInventoryItem(item: Pick<InventoryItem, "name" | "totPerBottle">) 
   return (typeof item.totPerBottle === "number" && item.totPerBottle > 0) || /\s*\(?TOTS?\)?$/i.test(item.name);
 }
 
-function buildPremiumSeedMenuItems(): BaristaMenuItem[] {
-  return PREMIUM_BARISTA_INVENTORY_SEED
-    .filter((item) => item.name && item.status === "ACTIVE")
-    .map((item, idx) => ({
-      id: `premium-seed-${idx}`,
-      name: getBaristaInventoryLabel({ name: item.name ?? "", size: item.size ?? "" }),
-      // Customer-facing POS price is the retail selling price; buying price is
-      // the supplier cost, kept for manager costing only.
-      price: item.sellingPrice ?? 0,
-      buyingPrice: item.buyingPrice ?? 0,
-      category: normalizeCategory(item.category ?? "cold", item.name ?? ""),
-      prepMinutes: 2,
-      barcode: item.barcode ?? "",
-    }));
-}
-
-function buildStandardSeedMenuItems(): BaristaMenuItem[] {
+function buildSeedMenuItems(): BaristaMenuItem[] {
   return BARISTA_INVENTORY_SEED
     .filter((item) => item.name && item.status === "ACTIVE")
     .map((item, idx) => ({
-      id: `standard-seed-${idx}`,
+      id: `barista-seed-${idx}`,
       name: getBaristaInventoryLabel({ name: item.name ?? "", size: item.size ?? "" }),
       // Customer-facing POS price is always the selling price; buying price is
-      // reserved for manager costing only (synced from premium where the same
-      // product shares a supplier).
+      // reserved for manager costing only.
       price: item.sellingPrice ?? 0,
       buyingPrice: item.buyingPrice ?? 0,
       category: normalizeCategory(item.category ?? "cold", item.name ?? ""),
@@ -264,36 +242,25 @@ function buildStandardSeedMenuItems(): BaristaMenuItem[] {
     }));
 }
 
-// Bumping this version forces the standard barista menu to be re-seeded from
-// BARISTA_INVENTORY_SEED once per browser, so uploaded drink-list changes show
-// up even when a stale menu was already persisted.
-const STANDARD_BARISTA_SEED_VERSION_KEY = "orange-hotel-standard-barista-seed-v2";
+const BARISTA_SEED_VERSION_KEY = "orange-hotel-barista-seed-v3";
 
 // One-time refresh of SELLING prices on an already-persisted menu from the
-// canonical seed price list (per tier, per browser). Custom drinks and any
+// canonical seed price list. Custom drinks and any
 // manual price edits made after this runs are left untouched. Bump to re-apply.
 const BARISTA_MENU_PRICE_SYNC_KEY = "orange-hotel-barista-menu-price-sync-v2";
 
-function getEquivalentBaristaTargets(label: string, scope: "standard" | "platinum") {
-  const target = normalizeBaristaTarget(label);
-  if (scope !== "platinum") return [target];
-
-  const aliasGroup = PREMIUM_BARISTA_PRICE_ALIASES.find((group) =>
-    group.labels.some((alias) => normalizeBaristaTarget(alias) === target),
-  );
-  if (!aliasGroup) return [target];
-
-  return Array.from(new Set([target, ...aliasGroup.labels.map((alias) => normalizeBaristaTarget(alias))]));
+function getEquivalentBaristaTargets(label: string) {
+  return [normalizeBaristaTarget(label)];
 }
 
-function appendMissingCanonicalMenuItems(menuItems: BaristaMenuItem[], scope: "standard" | "platinum") {
-  const seedMenuItems = scope === "platinum" ? buildPremiumSeedMenuItems() : buildStandardSeedMenuItems();
-  const existingTargets = new Set(menuItems.flatMap((item) => getEquivalentBaristaTargets(item.name, scope)));
+function appendMissingCanonicalMenuItems(menuItems: BaristaMenuItem[]) {
+  const seedMenuItems = buildSeedMenuItems();
+  const existingTargets = new Set(menuItems.flatMap((item) => getEquivalentBaristaTargets(item.name)));
   let changed = false;
   const next = [...menuItems];
 
   for (const seedItem of seedMenuItems) {
-    const seedTargets = getEquivalentBaristaTargets(seedItem.name, scope);
+    const seedTargets = getEquivalentBaristaTargets(seedItem.name);
     if (seedTargets.some((target) => existingTargets.has(target))) continue;
 
     next.push(seedItem);
@@ -304,21 +271,13 @@ function appendMissingCanonicalMenuItems(menuItems: BaristaMenuItem[], scope: "s
   return { menuItems: next, changed };
 }
 
-function applyCanonicalSellingPrices(menuItems: BaristaMenuItem[], scope: "standard" | "platinum") {
-  const seed = scope === "platinum" ? PREMIUM_BARISTA_INVENTORY_SEED : BARISTA_INVENTORY_SEED;
+function applyCanonicalSellingPrices(menuItems: BaristaMenuItem[]) {
+  const seed = BARISTA_INVENTORY_SEED;
   const priceByTarget = new Map<string, number>();
   for (const item of seed) {
     if (!item.name || typeof item.sellingPrice !== "number" || item.sellingPrice <= 0) continue;
     const label = getBaristaInventoryLabel({ name: item.name, size: item.size ?? "" });
     priceByTarget.set(normalizeBaristaTarget(label), item.sellingPrice);
-  }
-
-  if (scope === "platinum") {
-    for (const group of PREMIUM_BARISTA_PRICE_ALIASES) {
-      for (const label of group.labels) {
-        priceByTarget.set(normalizeBaristaTarget(label), group.price);
-      }
-    }
   }
 
   let changed = false;
@@ -332,10 +291,7 @@ function applyCanonicalSellingPrices(menuItems: BaristaMenuItem[], scope: "stand
   return { menuItems: next, changed };
 }
 
-// One-time, per-tier barista clean-slate marker. The suffix `-{scope}` is added
-// at runtime so the standard and premium hotels each purge their own historically
-// co-mingled barista data exactly once. Bump the version to force another purge.
-const BARISTA_TIER_RESET_KEY = "orange-hotel-barista-tier-reset-v2";
+const BARISTA_RESET_KEY = "orange-hotel-barista-reset-v3";
 
 export default function BaristaPage() {
   const isDirector = useIsDirector();
@@ -420,7 +376,6 @@ export default function BaristaPage() {
   useEffect(() => {
     let cancelled = false;
     const activeBaristaKey = getActiveBaristaStateKey();
-    const scope = getLocalMawioTier();
 
     const applyBaristaSnapshot = () => {
       if (cancelled) return;
@@ -441,37 +396,28 @@ export default function BaristaPage() {
 
       let menuItems = snapshot.menuItems;
       let menuMutated = false;
-      if (scope === "platinum") {
-        if (menuItems.length === 0) {
-          menuItems = buildPremiumSeedMenuItems();
-          menuMutated = true;
-        }
-      } else {
-        // Standard hotel: seed when empty, and force a one-time re-seed so an
-        // updated uploaded drink list replaces a previously persisted menu.
-        const needsForcedSeed =
-          typeof window !== "undefined" && !window.localStorage.getItem(STANDARD_BARISTA_SEED_VERSION_KEY);
-        if (menuItems.length === 0 || needsForcedSeed) {
-          menuItems = buildStandardSeedMenuItems();
-          menuMutated = true;
-        }
-        if (typeof window !== "undefined") {
-          window.localStorage.setItem(STANDARD_BARISTA_SEED_VERSION_KEY, "1");
-        }
+      const needsForcedSeed =
+        typeof window !== "undefined" && !window.localStorage.getItem(BARISTA_SEED_VERSION_KEY);
+      if (menuItems.length === 0 || needsForcedSeed) {
+        menuItems = buildSeedMenuItems();
+        menuMutated = true;
+      }
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(BARISTA_SEED_VERSION_KEY, "1");
       }
 
       // One-time selling-price refresh from the canonical seed price list, so
       // menus persisted before a price correction stop showing stale (or
       // supplier-cost) prices in the POS.
-      const priceSyncMarker = `${BARISTA_MENU_PRICE_SYNC_KEY}-${scope}`;
+      const priceSyncMarker = BARISTA_MENU_PRICE_SYNC_KEY;
       if (typeof window !== "undefined" && !window.localStorage.getItem(priceSyncMarker)) {
-        const priceSync = applyCanonicalSellingPrices(menuItems, scope);
+        const priceSync = applyCanonicalSellingPrices(menuItems);
         if (priceSync.changed) {
           menuItems = priceSync.menuItems;
           menuMutated = true;
         }
 
-        const missingSeedSync = appendMissingCanonicalMenuItems(menuItems, scope);
+        const missingSeedSync = appendMissingCanonicalMenuItems(menuItems);
         if (missingSeedSync.changed) {
           menuItems = missingSeedSync.menuItems;
           menuMutated = true;
@@ -489,13 +435,8 @@ export default function BaristaPage() {
     };
 
     const bootstrapBarista = async () => {
-      // One-time, per-hotel clean slate: abandon the barista data that was
-      // historically co-mingled between the two hotels during the original
-      // shared-database bug. Each tier purges only its own data (local + its own
-      // Firebase node) exactly once, then reseeds below. This is what makes each
-      // dashboard truly own its sales/menu with no cross-hotel conflict.
-      await runOnceForTierAcrossDevices(BARISTA_TIER_RESET_KEY, async () => {
-        await purgeSyncedKeysForCurrentTier([
+      await runOnceAcrossDevices(BARISTA_RESET_KEY, async () => {
+        await purgeSyncedKeys([
           activeBaristaKey,
           STORAGE_TICKETS,
           STORAGE_SEQ,
@@ -967,7 +908,7 @@ export default function BaristaPage() {
     if (index >= 0) {
       nextStoreItems = allStoreItems.map((entry, idx) => (idx === index ? { ...entry, stock: qty } : entry));
     } else {
-      const seedRef = [...BARISTA_INVENTORY_SEED, ...PREMIUM_BARISTA_INVENTORY_SEED].find(
+      const seedRef = BARISTA_INVENTORY_SEED.find(
         (seed) =>
           normalizeBaristaTarget(getBaristaInventoryLabel({ name: seed.name ?? "", size: seed.size ?? "" })) === target,
       );

@@ -15,11 +15,6 @@ function decodeStorageKey(rawKey: string) {
   return decodeURIComponent(rawKey);
 }
 
-function getRequestTier(request: NextRequest) {
-  const queryTier = request.nextUrl.searchParams.get("tier");
-  const headerTier = request.headers.get("x-mawio-tier");
-  return queryTier === "platinum" || headerTier === "platinum" ? "platinum" : "standard";
-}
 
 function createStorageEtag(value: unknown) {
   return `"${createHash("sha1").update(JSON.stringify(value)).digest("base64url")}"`;
@@ -29,7 +24,6 @@ function getReadHeaders(etag: string) {
   return {
     "Cache-Control": "public, max-age=0, s-maxage=15, stale-while-revalidate=60",
     ETag: etag,
-    Vary: "x-mawio-tier",
   };
 }
 
@@ -166,7 +160,7 @@ function protectIncomingSyncedValue(key: string, incomingValue: unknown, current
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
     const { key } = await context.params;
-    const value = await readServerSyncedStorageValue(decodeStorageKey(key), { tier: getRequestTier(request) });
+    const value = await readServerSyncedStorageValue(decodeStorageKey(key));
     const etag = createStorageEtag(value);
 
     if (request.headers.get("if-none-match") === etag) {
@@ -190,10 +184,9 @@ export async function PUT(request: NextRequest, context: RouteContext) {
     const { key } = await context.params;
     const decodedKey = decodeStorageKey(key);
     const body = (await request.json()) as { value?: unknown };
-    const tier = getRequestTier(request);
-    const currentValue = await readServerSyncedStorageValue(decodedKey, { tier }).catch(() => null);
+    const currentValue = await readServerSyncedStorageValue(decodedKey).catch(() => null);
     const nextValue = protectIncomingSyncedValue(decodedKey, body.value ?? null, currentValue);
-    await writeServerSyncedStorageValue(decodedKey, nextValue, { tier });
+    await writeServerSyncedStorageValue(decodedKey, nextValue);
     return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return NextResponse.json(
@@ -206,7 +199,7 @@ export async function PUT(request: NextRequest, context: RouteContext) {
 export async function DELETE(request: NextRequest, context: RouteContext) {
   try {
     const { key } = await context.params;
-    await writeServerSyncedStorageValue(decodeStorageKey(key), null, { tier: getRequestTier(request) });
+    await writeServerSyncedStorageValue(decodeStorageKey(key), null);
     return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return NextResponse.json(

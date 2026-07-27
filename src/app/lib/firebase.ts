@@ -96,8 +96,7 @@ export function ensureFirebaseAuthReady() {
 if (typeof window !== "undefined") {
   void ensureFirebaseAuthReady()
     .then(() => {
-      const tier = window.localStorage.getItem("mawio-tier") || "standard";
-      onValue(ref(firebaseDatabase, `casa/${tier}`), () => {}, { onlyOnce: false });
+      onValue(ref(firebaseDatabase, `casa`), () => {}, { onlyOnce: false });
     })
     .catch((error) => {
       console.error("Firebase authentication bootstrap failed", error);

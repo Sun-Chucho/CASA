@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
 export default function RedirectPRb() {
-  redirect("/dashboard/cashier");
+  redirect("/RB");
 }

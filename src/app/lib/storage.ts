@@ -1,4 +1,4 @@
-import { getTierScopedLocalKey, removeStorageValueFromFirebase, syncStorageValueToFirebase } from "@/app/lib/firebase-sync";
+import { getUnifiedLocalKey, removeStorageValueFromFirebase, syncStorageValueToFirebase } from "@/app/lib/firebase-sync";
 import { sanitizeForStorage } from "@/app/lib/storage-sanitize";
 
 export const STORAGE_CASHIER_STATE = "orange-hotel-cashier-state";
@@ -40,7 +40,7 @@ interface PosState<TTicket, TPayment, TMenu> {
 
 export function readJson<T>(key: string): T | null {
   if (typeof window === "undefined") return null;
-  const raw = localStorage.getItem(getTierScopedLocalKey(key));
+  const raw = localStorage.getItem(getUnifiedLocalKey(key));
   if (!raw) return null;
   try {
     return JSON.parse(raw) as T;
@@ -54,14 +54,14 @@ export function writeJson<T>(key: string, value: T) {
   const sanitizedValue = sanitizeForStorage(value);
   // Local cache is namespaced per hotel tier; the base key is used for the
   // change event and backend sync (which adds its own tier prefix to the path).
-  localStorage.setItem(getTierScopedLocalKey(key), JSON.stringify(sanitizedValue));
+  localStorage.setItem(getUnifiedLocalKey(key), JSON.stringify(sanitizedValue));
   window.dispatchEvent(new CustomEvent("orange-hotel-storage-updated", { detail: { key } }));
   syncStorageValueToFirebase(key, sanitizedValue);
 }
 
 export function removeJson(key: string) {
   if (typeof window === "undefined") return;
-  localStorage.removeItem(getTierScopedLocalKey(key));
+  localStorage.removeItem(getUnifiedLocalKey(key));
   window.dispatchEvent(new CustomEvent("orange-hotel-storage-updated", { detail: { key } }));
   removeStorageValueFromFirebase(key);
 }
@@ -81,7 +81,7 @@ export function readCashierState<TTransaction>(
   }
 
   const transactions = readJson<TTransaction[]>(legacyTransactionsKey) ?? [];
-  const legacySeqRaw = typeof window === "undefined" ? null : localStorage.getItem(getTierScopedLocalKey(legacySeqKey));
+  const legacySeqRaw = typeof window === "undefined" ? null : localStorage.getItem(getUnifiedLocalKey(legacySeqKey));
   const parsedSeq = Number(legacySeqRaw);
 
   return {
@@ -115,7 +115,7 @@ export function readPosState<TTicket, TPayment, TMenu>(
   const tickets = readJson<TTicket[]>(legacyTicketsKey) ?? [];
   const payments = readJson<TPayment[]>(legacyPaymentsKey) ?? [];
   const menuItems = readJson<TMenu[]>(legacyMenuKey) ?? [];
-  const legacySeqRaw = typeof window === "undefined" ? null : localStorage.getItem(getTierScopedLocalKey(legacySeqKey));
+  const legacySeqRaw = typeof window === "undefined" ? null : localStorage.getItem(getUnifiedLocalKey(legacySeqKey));
   const parsedSeq = Number(legacySeqRaw);
 
   return {

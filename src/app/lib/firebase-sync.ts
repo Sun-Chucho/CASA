@@ -2,7 +2,7 @@ import { get, onValue, ref, remove, set } from "firebase/database";
 import { ensureFirebaseAuthReady, firebaseDatabase } from "@/app/lib/firebase";
 import { getStoreItemLabel, type MainStoreItem } from "@/app/lib/inventory-transfer";
 import { mergeKitchenMenuItems, type KitchenMenuItem } from "@/app/lib/kitchen-menu";
-import { getDefaultRoomsForTier, type InventoryItem } from "@/app/lib/mock-data";
+import { getDefaultRooms, type InventoryItem } from "@/app/lib/mock-data";
 import { DEFAULT_HARDWARE_SETTINGS } from "@/app/lib/hardware-settings";
 import { sanitizeForStorage } from "@/app/lib/storage-sanitize";
 
@@ -48,14 +48,14 @@ function markSyncHealthy(key?: string) {
 }
 
 async function fetchServerSyncedStorageValue<T>(key: string): Promise<T | null> {
-  const etagKey = `${SERVER_SYNC_ETAG_PREFIX}:${getMawioTier()}:${key}`;
+  const etagKey = `${SERVER_SYNC_ETAG_PREFIX}:${key}`;
   const headers: Record<string, string> = {};
   const cachedEtag = typeof window !== "undefined" ? window.sessionStorage.getItem(etagKey) : null;
   if (cachedEtag) {
     headers["If-None-Match"] = cachedEtag;
   }
 
-  const response = await fetch(`/api/storage-sync/${encodeURIComponent(key)}?tier=${encodeURIComponent(getMawioTier())}`, {
+  const response = await fetch(`/api/storage-sync/${encodeURIComponent(key)}`, {
     method: "GET",
     headers,
   });
@@ -78,7 +78,7 @@ async function fetchServerSyncedStorageValue<T>(key: string): Promise<T | null> 
 }
 
 async function writeServerSyncedStorageValue<T>(key: string, value: T) {
-  const response = await fetch(`/api/storage-sync/${encodeURIComponent(key)}?tier=${encodeURIComponent(getMawioTier())}`, {
+  const response = await fetch(`/api/storage-sync/${encodeURIComponent(key)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ value }),
@@ -90,7 +90,7 @@ async function writeServerSyncedStorageValue<T>(key: string, value: T) {
 }
 
 async function removeServerSyncedStorageValue(key: string) {
-  const response = await fetch(`/api/storage-sync/${encodeURIComponent(key)}?tier=${encodeURIComponent(getMawioTier())}`, {
+  const response = await fetch(`/api/storage-sync/${encodeURIComponent(key)}`, {
     method: "DELETE",
   });
 
@@ -127,156 +127,12 @@ export function subscribeToConnectionStatus(onChange: (connected: boolean) => vo
 
 const FIREBASE_STORAGE_ROOT = "casa";
 
-// The hotel tier is LOCKED per browser tab. localStorage is shared across every
-// tab/PWA of the same origin, so re-reading the global scope flag on each storage
-// operation let a second hotel opened elsewhere hijack this tab's reads/writes
-// (e.g. a "standard" sale being saved into the platinum node). We resolve the
-// tier once and then freeze it for this tab's lifetime. A `?tier=` query param or
-// an explicit setMawioTier() call (used by the director hotel switcher, which
-// reloads) is the only way to (re)bind it.
-let _lockedMawioTier: "standard" | "platinum" | null = null;
-
-// Per-TAB tier pin. sessionStorage is scoped to a single tab/window and is NOT
-// shared across tabs (unlike localStorage), so once a tab is bound to a hotel it
-// survives reloads without another hotel's tab being able to hijack it.
-const TAB_TIER_SESSION_KEY = "mawio-tab-tier";
-
-function readTabTier(): "standard" | "platinum" | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const value = window.sessionStorage.getItem(TAB_TIER_SESSION_KEY);
-    return value === "standard" || value === "platinum" ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeTabTier(tier: "standard" | "platinum") {
-  if (typeof window === "undefined") return;
-  try {
-    window.sessionStorage.setItem(TAB_TIER_SESSION_KEY, tier);
-  } catch {
-    // sessionStorage may be unavailable (private mode quotas); the in-memory
-    // lock and the URL param still keep the tab on the right tier.
-  }
-}
-
-export function setMawioTier(tier: "standard" | "platinum") {
-  _lockedMawioTier = tier;
-  if (typeof window !== "undefined") {
-    writeTabTier(tier);
-    window.localStorage.setItem("mawio-tier", tier);
-    window.localStorage.setItem("orange-hotel-active-login-scope", tier);
-  }
-}
-
-export function getMawioTier(): "standard" | "platinum" {
-  if (typeof window !== "undefined") {
-    const params = new URLSearchParams(window.location.search);
-    const queryTier = params.get("tier");
-    if (queryTier === "standard" || queryTier === "platinum") {
-      _lockedMawioTier = queryTier;
-      writeTabTier(queryTier);
-      window.localStorage.setItem("mawio-tier", queryTier);
-      window.localStorage.setItem("orange-hotel-active-login-scope", queryTier);
-      return queryTier;
-    }
-    // Once resolved for this tab, the tier is frozen so another hotel opened in a
-    // different tab cannot change which node this tab reads from / writes to.
-    if (_lockedMawioTier) return _lockedMawioTier;
-    // Per-tab pin survives reloads and is immune to other tabs (see above).
-    const tabTier = readTabTier();
-    if (tabTier) {
-      _lockedMawioTier = tabTier;
-      return tabTier;
-    }
-    // First load of a fresh tab with no URL param: fall back to the browser-wide
-    // login scope, then pin it to this tab so later cross-tab logins can't move it.
-    const activeScope = window.localStorage.getItem("orange-hotel-active-login-scope");
-    if (activeScope === "standard" || activeScope === "platinum") {
-      _lockedMawioTier = activeScope;
-      writeTabTier(activeScope);
-      return activeScope;
-    }
-    const localTier = window.localStorage.getItem("mawio-tier");
-    if (localTier === "standard" || localTier === "platinum") {
-      _lockedMawioTier = localTier;
-      writeTabTier(localTier);
-      return localTier;
-    }
-  }
-  return "standard";
-}
-
 function toStoragePath(key: string) {
-  return `${FIREBASE_STORAGE_ROOT}/${getMawioTier()}/${key.replace(/[.#$[\]/]/g, "-")}`;
+  return `${FIREBASE_STORAGE_ROOT}/${key.replace(/[.#$[\]/]/g, "-")}`;
 }
 
-// ── Tier-tagged local cache keys ────────────────────────────────────────────
-// Backend separation already happens through the Firebase path / server `tier`
-// param (`mawio/{tier}/{key}`). The browser localStorage cache, however, is a
-// single shared bucket. Previously only the premium tier was namespaced while
-// standard kept the bare keys — that left the bare key as a bucket both hotels
-// could end up reading/writing whenever the tier briefly resolved to the
-// "standard" default, which is what produced the cross-tier merge errors.
-//
-// We now tag EVERY synced business key with an explicit per-tier prefix —
-// `S_` for standard, `P_` for premium (platinum) — so the two hotels share no
-// cache bucket at all. The tag is applied centrally here, so it propagates to
-// every record, entity and synced key automatically. Switching tiers simply
-// changes which prefix is read, giving a single unified store that is filtered
-// by data source.
-//
-// Login profiles are intentionally excluded: they have their own dedicated
-// per-scope keys (`...-standard` / `...-platinum`) managed in login-profiles.ts.
-// (`TIER_SCOPED_KEYS` / `TIER_SHARED_KEYS` are defined below, after the key
-// lists they are built from.)
-export function getTierTag(): "S_" | "P_" {
-  return getMawioTier() === "platinum" ? "P_" : "S_";
-}
-
-export function getTierScopedLocalKey(baseKey: string): string {
-  if (typeof window === "undefined") return baseKey;
-  if (!TIER_SCOPED_KEYS.has(baseKey)) return baseKey;
-  return `${getTierTag()}${baseKey}`;
-}
-
-// One-time migration of pre-existing local cache into the new `S_`/`P_` tagged
-// keys. Runs once per tier per browser. Standard data lived on bare keys and
-// premium on the legacy `::platinum` suffix; both are copied to their tagged
-// home so unsynced offline writes are preserved across the upgrade. Anything we
-// miss is harmless — Firebase hydration repopulates the tagged keys on load.
-const TIER_TAG_MIGRATION_MARKER = "orange-hotel-tier-tag-migration-v1";
-
-export function migrateLocalCacheToTierTags() {
-  if (typeof window === "undefined") return;
-
-  const tier = getMawioTier();
-  const markerKey = `${TIER_TAG_MIGRATION_MARKER}-${tier}`;
-  if (window.localStorage.getItem(markerKey) === "1") return;
-
-  const tag = tier === "platinum" ? "P_" : "S_";
-  const legacySuffix = tier === "platinum" ? "::platinum" : "";
-
-  for (const baseKey of TIER_SCOPED_KEYS) {
-    const legacyKey = legacySuffix ? `${baseKey}${legacySuffix}` : baseKey;
-    const taggedKey = `${tag}${baseKey}`;
-    if (legacyKey === taggedKey) continue;
-
-    try {
-      const legacyValue = window.localStorage.getItem(legacyKey);
-      if (legacyValue === null) continue;
-      // Don't clobber a tagged value that already exists (e.g. a partial prior run).
-      if (window.localStorage.getItem(taggedKey) === null) {
-        window.localStorage.setItem(taggedKey, legacyValue);
-      }
-      window.localStorage.removeItem(legacyKey);
-    } catch {
-      // Ignore quota/access errors; hydration will rebuild the tagged cache.
-    }
-  }
-
-  window.localStorage.setItem(markerKey, "1");
+export function getUnifiedLocalKey(baseKey: string): string {
+  return baseKey;
 }
 
 export const FIREBASE_SYNC_KEYS = [
@@ -332,16 +188,9 @@ export const LEGACY_DEMO_KEYS = [
   "orange-hotel-barista-seq",
 ] as const;
 
-const TIER_SHARED_KEYS = new Set<string>(["orange-hotel-login-profiles"]);
-const TIER_SCOPED_KEYS = new Set<string>(
-  [...FIREBASE_SYNC_KEYS, ...LEGACY_DEMO_KEYS].filter((key) => !TIER_SHARED_KEYS.has(key)),
-);
-
-
-
 function readParsedLocalValue<T>(key: string) {
   if (typeof window === "undefined") return null;
-  const raw = localStorage.getItem(getTierScopedLocalKey(key));
+  const raw = localStorage.getItem(getUnifiedLocalKey(key));
   if (!raw) return null;
 
   try {
@@ -355,17 +204,17 @@ function readParsedLocalValue<T>(key: string) {
 // tier-scoped key so the two hotels never share a cache bucket.
 function setLocalCache(key: string, rawValue: string) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(getTierScopedLocalKey(key), rawValue);
+  localStorage.setItem(getUnifiedLocalKey(key), rawValue);
 }
 
 function removeLocalCache(key: string) {
   if (typeof window === "undefined") return;
-  localStorage.removeItem(getTierScopedLocalKey(key));
+  localStorage.removeItem(getUnifiedLocalKey(key));
 }
 
 function getLocalCacheRaw(key: string) {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem(getTierScopedLocalKey(key));
+  return localStorage.getItem(getUnifiedLocalKey(key));
 }
 
 function sanitizeSyncedValue<T>(key: string, value: T): T {
@@ -512,7 +361,7 @@ function hasUsableSyncedValue(key: string, value: unknown) {
     // Compare against the ACTIVE hotel's room count. Using the standard hotel's
     // list here made every valid platinum rooms array (20 rooms vs standard's
     // 34) look "unusable", so hydration kept replacing it with standard rooms.
-    return Array.isArray(value) && value.length >= getDefaultRoomsForTier(getMawioTier()).length;
+    return Array.isArray(value) && value.length >= getDefaultRooms().length;
   }
 
   if (key === "orange-hotel-kitchen-state" || key === "orange-hotel-barista-state") {
@@ -848,7 +697,7 @@ function getCanonicalDefaultValue(key: string) {
     case "orange-hotel-barista-daily-stock-session":
       return null;
     case "orange-hotel-rooms-state":
-      return getDefaultRoomsForTier(getMawioTier());
+      return getDefaultRooms();
     case "orange-hotel-settings":
       return {
         fullName: "Alex Rivera",
@@ -1032,10 +881,6 @@ export function syncStorageValueToFirebase<T>(key: string, value: T) {
 export async function hydrateStorageKeyFromFirebase(key: string) {
   if (typeof window === "undefined") return;
 
-  // Ensure any pre-existing untagged cache is moved into the S_/P_ tagged keys
-  // before we read/merge. Marker-guarded, so this is a no-op after the first run.
-  migrateLocalCacheToTierTags();
-
   const applyHydratedValue = (value: unknown) => {
     const sanitizedValue = sanitizeForStorage(sanitizeSyncedValue(key, value));
     if (sanitizedValue === null || sanitizedValue === undefined) return null;
@@ -1124,7 +969,7 @@ export function subscribeToSyncedStorageKey<T>(key: string, onChange: (value: T 
   };
 
   const handleStorageEvent = (event: StorageEvent) => {
-    if (event.key === key || event.key === getTierScopedLocalKey(key)) emitLocalValue();
+    if (event.key === key || event.key === getUnifiedLocalKey(key)) emitLocalValue();
   };
 
   window.addEventListener("orange-hotel-storage-updated", handleCustomEvent as EventListener);
@@ -1259,14 +1104,13 @@ export function clearLocalBusinessState() {
 // used, so devices that already ran the action skip it). A purge guarded only
 // by localStorage re-runs on every new browser and deletes data recorded since
 // the last run — the backend marker prevents that.
-export async function runOnceForTierAcrossDevices(markerKey: string, action: () => Promise<void>) {
+export async function runOnceAcrossDevices(markerKey: string, action: () => Promise<void>) {
   if (typeof window === "undefined") return;
-  const tier = getMawioTier();
-  const localMarker = `${markerKey}-${tier}`;
+  const localMarker = `${markerKey}`;
   if (window.localStorage.getItem(localMarker) === "1") return;
 
   try {
-    const response = await fetch(`/api/storage-sync/${encodeURIComponent(markerKey)}?tier=${encodeURIComponent(tier)}`);
+    const response = await fetch(`/api/storage-sync/${encodeURIComponent(markerKey)}`);
     // If the backend marker cannot be verified, do nothing — never run a
     // destructive action blindly. The next load retries.
     if (!response.ok) return;
@@ -1289,7 +1133,7 @@ export async function runOnceForTierAcrossDevices(markerKey: string, action: () 
 // standard and premium hotels — without touching the other tier. Resolves only
 // after the backend delete completes so a follow-up reseed is not clobbered by a
 // late delete.
-export async function purgeSyncedKeysForCurrentTier(keys: string[]) {
+export async function purgeSyncedKeys(keys: string[]) {
   if (typeof window === "undefined") return;
 
   keys.forEach((key) => {
