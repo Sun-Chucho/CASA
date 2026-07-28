@@ -23,13 +23,11 @@ function createStorageEtag(value: unknown) {
 
 function getReadHeaders(etag: string) {
   return {
-    "Cache-Control": "public, max-age=0, s-maxage=15, stale-while-revalidate=60",
+    "Cache-Control": "no-store, no-cache, must-revalidate",
+    Pragma: "no-cache",
+    Expires: "0",
     ETag: etag,
   };
-}
-
-function getArrayCount(value: unknown) {
-  return Array.isArray(value) ? value.length : 0;
 }
 
 function getCashierTransactions(value: unknown) {
@@ -57,9 +55,37 @@ function getSettlementPriority(record: unknown) {
   return 0;
 }
 
+function getRecordRevision(record: unknown) {
+  if (typeof record !== "object" || record === null) return 0;
+  const candidate = record as {
+    updatedAt?: unknown;
+    changedAt?: unknown;
+    lastExtendedAt?: unknown;
+    createdAt?: unknown;
+  };
+  const revision = Number(
+    candidate.updatedAt ??
+    candidate.changedAt ??
+    candidate.lastExtendedAt ??
+    candidate.createdAt ??
+    0,
+  );
+  return Number.isFinite(revision) ? revision : 0;
+}
+
 function chooseRecordBySettlementPriority(currentRecord: unknown, incomingRecord: unknown) {
   const currentPriority = getSettlementPriority(currentRecord);
   const incomingPriority = getSettlementPriority(incomingRecord);
+  if (currentPriority !== incomingPriority) {
+    return incomingPriority > currentPriority ? incomingRecord : currentRecord;
+  }
+
+  const currentRevision = getRecordRevision(currentRecord);
+  const incomingRevision = getRecordRevision(incomingRecord);
+  if (currentRevision !== incomingRevision) {
+    return incomingRevision > currentRevision ? incomingRecord : currentRecord;
+  }
+
   return incomingPriority >= currentPriority ? incomingRecord : currentRecord;
 }
 
@@ -136,6 +162,8 @@ function protectIncomingSyncedValue(key: string, incomingValue: unknown, current
     const incomingTickets = Array.isArray(incomingSnapshot?.tickets) ? incomingSnapshot.tickets : [];
     const currentPayments = Array.isArray(currentSnapshot?.payments) ? currentSnapshot.payments : [];
     const incomingPayments = Array.isArray(incomingSnapshot?.payments) ? incomingSnapshot.payments : [];
+    const currentMenuItems = Array.isArray(currentSnapshot?.menuItems) ? currentSnapshot.menuItems : [];
+    const incomingMenuItems = Array.isArray(incomingSnapshot?.menuItems) ? incomingSnapshot.menuItems : [];
     const currentSeq = Number(currentSnapshot?.ticketSeq);
     const incomingSeq = Number(incomingSnapshot?.ticketSeq);
 
@@ -143,6 +171,7 @@ function protectIncomingSyncedValue(key: string, incomingValue: unknown, current
       ...(typeof incomingValue === "object" && incomingValue !== null ? incomingValue : {}),
       tickets: mergeRecordsByIdPreservingIncomingChanges(currentTickets, incomingTickets),
       payments: mergeRecordsByIdPreservingIncomingChanges(currentPayments, incomingPayments),
+      menuItems: mergeRecordsByIdPreservingIncomingChanges(currentMenuItems, incomingMenuItems),
       ticketSeq: Math.max(
         Number.isFinite(currentSeq) ? currentSeq : 0,
         Number.isFinite(incomingSeq) ? incomingSeq : 0,
@@ -154,8 +183,8 @@ function protectIncomingSyncedValue(key: string, incomingValue: unknown, current
     return mergeRecordsByIdPreservingIncomingChanges(currentValue, incomingValue);
   }
 
-  if (Array.isArray(currentValue) && Array.isArray(incomingValue) && getArrayCount(incomingValue) < getArrayCount(currentValue)) {
-    return currentValue;
+  if (Array.isArray(currentValue) && Array.isArray(incomingValue)) {
+    return mergeRecordsByIdPreservingIncomingChanges(currentValue, incomingValue);
   }
 
   return incomingValue;

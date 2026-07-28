@@ -57,10 +57,15 @@ async function fetchServerSyncedStorageValue<T>(key: string): Promise<T | null> 
     headers["If-None-Match"] = cachedEtag;
   }
 
-  const response = await fetch(`/api/storage-sync/${encodeURIComponent(key)}`, {
-    method: "GET",
-    headers,
-  });
+  const response = await withTimeout(
+    fetch(`/api/storage-sync/${encodeURIComponent(key)}`, {
+      method: "GET",
+      headers,
+      cache: "no-store",
+    }),
+    DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
+    `Server sync read timed out for ${key}`,
+  );
 
   if (response.status === 304) {
     return readParsedLocalValue<T>(key);
@@ -80,11 +85,16 @@ async function fetchServerSyncedStorageValue<T>(key: string): Promise<T | null> 
 }
 
 async function writeServerSyncedStorageValue<T>(key: string, value: T) {
-  const response = await fetch(`/api/storage-sync/${encodeURIComponent(key)}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ value }),
-  });
+  const response = await withTimeout(
+    fetch(`/api/storage-sync/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ value }),
+      cache: "no-store",
+    }),
+    DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
+    `Server sync write timed out for ${key}`,
+  );
 
   if (!response.ok) {
     throw new Error(`Server sync write failed for ${key}`);
@@ -92,9 +102,14 @@ async function writeServerSyncedStorageValue<T>(key: string, value: T) {
 }
 
 async function removeServerSyncedStorageValue(key: string) {
-  const response = await fetch(`/api/storage-sync/${encodeURIComponent(key)}`, {
-    method: "DELETE",
-  });
+  const response = await withTimeout(
+    fetch(`/api/storage-sync/${encodeURIComponent(key)}`, {
+      method: "DELETE",
+      cache: "no-store",
+    }),
+    DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
+    `Server sync delete timed out for ${key}`,
+  );
 
   if (!response.ok) {
     throw new Error(`Server sync delete failed for ${key}`);
@@ -515,9 +530,37 @@ function getSettlementPriority(record: unknown) {
   return 0;
 }
 
+function getRecordRevision(record: unknown) {
+  if (typeof record !== "object" || record === null) return 0;
+  const candidate = record as {
+    updatedAt?: unknown;
+    changedAt?: unknown;
+    lastExtendedAt?: unknown;
+    createdAt?: unknown;
+  };
+  const revision = Number(
+    candidate.updatedAt ??
+    candidate.changedAt ??
+    candidate.lastExtendedAt ??
+    candidate.createdAt ??
+    0,
+  );
+  return Number.isFinite(revision) ? revision : 0;
+}
+
 function chooseRecordBySettlementPriority(currentRecord: unknown, incomingRecord: unknown) {
   const currentPriority = getSettlementPriority(currentRecord);
   const incomingPriority = getSettlementPriority(incomingRecord);
+  if (currentPriority !== incomingPriority) {
+    return incomingPriority > currentPriority ? incomingRecord : currentRecord;
+  }
+
+  const currentRevision = getRecordRevision(currentRecord);
+  const incomingRevision = getRecordRevision(incomingRecord);
+  if (currentRevision !== incomingRevision) {
+    return incomingRevision > currentRevision ? incomingRecord : currentRecord;
+  }
+
   return incomingPriority >= currentPriority ? incomingRecord : currentRecord;
 }
 
@@ -959,8 +1002,16 @@ export async function hydrateStorageKeyFromFirebase(key: string) {
   };
 
   try {
-    await ensureFirebaseAuthReady();
-    const snapshot = await get(ref(firebaseDatabase, toStoragePath(key)));
+    await withTimeout(
+      ensureFirebaseAuthReady(),
+      DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
+      `Firebase authentication timed out while hydrating ${key}`,
+    );
+    const snapshot = await withTimeout(
+      get(ref(firebaseDatabase, toStoragePath(key))),
+      DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
+      `Firebase read timed out while hydrating ${key}`,
+    );
     const remoteValue = snapshot.exists() ? sanitizeForStorage(sanitizeSyncedValue(key, snapshot.val())) : null;
     const localValue = getLocalSyncedValue(key);
 
@@ -984,7 +1035,11 @@ export async function hydrateStorageKeyFromFirebase(key: string) {
     if (sanitizedPreferredValue === null) return;
 
     if (!areSnapshotsEqual(remoteValue, sanitizedPreferredValue)) {
-      await set(ref(firebaseDatabase, toStoragePath(key)), sanitizedPreferredValue);
+      await withTimeout(
+        set(ref(firebaseDatabase, toStoragePath(key)), sanitizedPreferredValue),
+        DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
+        `Firebase reconciliation timed out while hydrating ${key}`,
+      );
       await writeServerSyncedStorageValue(key, sanitizedPreferredValue).catch(() => undefined);
     }
 

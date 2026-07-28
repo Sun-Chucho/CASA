@@ -63,6 +63,7 @@ interface BaristaMenuItem {
   category: Exclude<BaristaCategory, "all">;
   prepMinutes: number;
   barcode?: string;
+  updatedAt?: number;
   // Supplier cost, used only for manager costing — never shown in POS.
   buyingPrice?: number;
 }
@@ -257,56 +258,6 @@ function buildSeedMenuItems(): BaristaMenuItem[] {
     }));
 }
 
-const BARISTA_SEED_VERSION_KEY = "orange-hotel-barista-seed-v3";
-
-// One-time refresh of SELLING prices on an already-persisted menu from the
-// canonical seed price list. Custom drinks and any
-// manual price edits made after this runs are left untouched. Bump to re-apply.
-const BARISTA_MENU_PRICE_SYNC_KEY = "orange-hotel-barista-menu-price-sync-v2";
-
-function getEquivalentBaristaTargets(label: string) {
-  return [normalizeBaristaTarget(label)];
-}
-
-function appendMissingCanonicalMenuItems(menuItems: BaristaMenuItem[]) {
-  const seedMenuItems = buildSeedMenuItems();
-  const existingTargets = new Set(menuItems.flatMap((item) => getEquivalentBaristaTargets(item.name)));
-  let changed = false;
-  const next = [...menuItems];
-
-  for (const seedItem of seedMenuItems) {
-    const seedTargets = getEquivalentBaristaTargets(seedItem.name);
-    if (seedTargets.some((target) => existingTargets.has(target))) continue;
-
-    next.push(seedItem);
-    seedTargets.forEach((target) => existingTargets.add(target));
-    changed = true;
-  }
-
-  return { menuItems: next, changed };
-}
-
-function applyCanonicalSellingPrices(menuItems: BaristaMenuItem[]) {
-  const seed = BARISTA_INVENTORY_SEED;
-  const priceByTarget = new Map<string, number>();
-  for (const item of seed) {
-    if (!item.name || typeof item.sellingPrice !== "number" || item.sellingPrice <= 0) continue;
-    const label = getBaristaInventoryLabel({ name: item.name, size: item.size ?? "" });
-    priceByTarget.set(normalizeBaristaTarget(label), item.sellingPrice);
-  }
-
-  let changed = false;
-  const next = menuItems.map((item) => {
-    const price = priceByTarget.get(normalizeBaristaTarget(item.name));
-    if (typeof price !== "number" || price === item.price) return item;
-    changed = true;
-    return { ...item, price };
-  });
-
-  return { menuItems: next, changed };
-}
-
-
 export default function BaristaPage() {
   const isDirector = useIsDirector();
   const { confirm, dialog } = useConfirmDialog();
@@ -417,38 +368,8 @@ export default function BaristaPage() {
       setInventoryItems(inventory);
 
       let menuItems = snapshot.menuItems;
-      let menuMutated = false;
-      const needsForcedSeed =
-        typeof window !== "undefined" && !window.localStorage.getItem(BARISTA_SEED_VERSION_KEY);
-      if (menuItems.length === 0 || needsForcedSeed) {
+      if (menuItems.length === 0) {
         menuItems = buildSeedMenuItems();
-        menuMutated = true;
-      }
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(BARISTA_SEED_VERSION_KEY, "1");
-      }
-
-      // One-time selling-price refresh from the canonical seed price list, so
-      // menus persisted before a price correction stop showing stale (or
-      // supplier-cost) prices in the POS.
-      const priceSyncMarker = BARISTA_MENU_PRICE_SYNC_KEY;
-      if (typeof window !== "undefined" && !window.localStorage.getItem(priceSyncMarker)) {
-        const priceSync = applyCanonicalSellingPrices(menuItems);
-        if (priceSync.changed) {
-          menuItems = priceSync.menuItems;
-          menuMutated = true;
-        }
-
-        const missingSeedSync = appendMissingCanonicalMenuItems(menuItems);
-        if (missingSeedSync.changed) {
-          menuItems = missingSeedSync.menuItems;
-          menuMutated = true;
-        }
-
-        window.localStorage.setItem(priceSyncMarker, "1");
-      }
-
-      if (menuMutated) {
         writePosState(activeBaristaKey, snapshot.tickets, snapshot.ticketSeq, snapshot.payments, menuItems);
       }
 
@@ -542,6 +463,7 @@ export default function BaristaPage() {
     lines: BaristaOrderLine[],
     direction: "consume" | "restore",
   ) => {
+    const updatedAt = Date.now();
     const allStoreItems = readJson<Array<MainStoreItem & { lane?: "kitchen" | "barista" }>>(STORAGE_MAIN_STORE_ITEMS) ?? [];
     const otherStoreItems = allStoreItems.filter((entry) => entry.lane !== "barista");
     const currentBaristaItems = allStoreItems
@@ -597,6 +519,7 @@ export default function BaristaPage() {
             stock: currentItem.stock - bottlesConsumed,
             totLimit,
             totSold: totalTotSold % totLimit,
+            updatedAt,
           };
           nextInventoryItems = adjustInventoryQuantity(nextInventoryItems, "Bar", inventoryLabel, -bottlesConsumed);
           continue;
@@ -608,6 +531,7 @@ export default function BaristaPage() {
             ...currentItem,
             totLimit,
             totSold: totalTotSold,
+            updatedAt,
           };
           continue;
         }
@@ -618,6 +542,7 @@ export default function BaristaPage() {
           stock: currentItem.stock + bottlesRestored,
           totLimit,
           totSold: totalTotSold + bottlesRestored * totLimit,
+          updatedAt,
         };
         nextInventoryItems = adjustInventoryQuantity(nextInventoryItems, "Bar", inventoryLabel, bottlesRestored);
         continue;
@@ -627,12 +552,12 @@ export default function BaristaPage() {
         if (line.qty > currentItem.stock) {
           return { ok: false as const, error: `Not enough stock for ${line.name}.` };
         }
-        nextBaristaItems[itemIndex] = { ...currentItem, stock: currentItem.stock - line.qty };
+        nextBaristaItems[itemIndex] = { ...currentItem, stock: currentItem.stock - line.qty, updatedAt };
         nextInventoryItems = adjustInventoryQuantity(nextInventoryItems, "Bar", inventoryLabel, -line.qty);
         continue;
       }
 
-      nextBaristaItems[itemIndex] = { ...currentItem, stock: currentItem.stock + line.qty };
+      nextBaristaItems[itemIndex] = { ...currentItem, stock: currentItem.stock + line.qty, updatedAt };
       nextInventoryItems = adjustInventoryQuantity(nextInventoryItems, "Bar", inventoryLabel, line.qty);
     }
 
@@ -917,6 +842,7 @@ export default function BaristaPage() {
       return;
     }
 
+    const updatedAt = Date.now();
     setSavingBaristaItemId(item.id);
     setSavedBaristaItemId("");
     const activeBaristaKey = getActiveBaristaStateKey();
@@ -928,12 +854,12 @@ export default function BaristaPage() {
     const nextMenuItems = snapshot.menuItems.map((menuItem) => {
       if (normalizeBaristaTarget(menuItem.name) !== target) return menuItem;
       matchedMenu = true;
-      return { ...menuItem, buyingPrice, price: sellingPrice };
+      return { ...menuItem, buyingPrice, price: sellingPrice, updatedAt };
     });
     if (!matchedMenu) {
       const menuReference = menuItems.find((menuItem) => normalizeBaristaTarget(menuItem.name) === target);
       if (menuReference) {
-        nextMenuItems.push({ ...menuReference, buyingPrice, price: sellingPrice });
+        nextMenuItems.push({ ...menuReference, buyingPrice, price: sellingPrice, updatedAt });
       }
     }
 
@@ -944,7 +870,7 @@ export default function BaristaPage() {
     let nextStoreItems: Array<MainStoreItem & { lane?: "kitchen" | "barista" }>;
     if (index >= 0) {
       nextStoreItems = allStoreItems.map((entry, idx) =>
-        idx === index ? { ...entry, stock, buyingPrice, sellingPrice } : entry,
+        idx === index ? { ...entry, stock, buyingPrice, sellingPrice, updatedAt } : entry,
       );
     } else {
       const seedRef = BARISTA_INVENTORY_SEED.find(
@@ -952,7 +878,7 @@ export default function BaristaPage() {
           normalizeBaristaTarget(getBaristaInventoryLabel({ name: seed.name ?? "", size: seed.size ?? "" })) === target,
       );
       const newStoreItem: MainStoreItem & { lane: "barista" } = {
-        id: `bs-${Date.now()}`,
+        id: `bs-${updatedAt}`,
         name: seedRef?.name ?? item.name,
         subCategory: seedRef?.category ?? item.category ?? "Bar",
         size: seedRef?.size ?? "",
@@ -962,6 +888,7 @@ export default function BaristaPage() {
         lane: "barista",
         buyingPrice,
         sellingPrice,
+        updatedAt,
       };
       nextStoreItems = [...allStoreItems, newStoreItem];
     }
@@ -982,6 +909,7 @@ export default function BaristaPage() {
         buyingPrice,
         sellingPrice,
         price: sellingPrice,
+        updatedAt,
       };
     });
     if (!matchedInventory) {
@@ -989,7 +917,7 @@ export default function BaristaPage() {
         (entry) => entry.lane === "barista" && normalizeBaristaTarget(getStoreItemLabel(entry)) === target,
       );
       nextInventoryItems.unshift({
-        id: `inv-manager-${Date.now()}`,
+        id: `inv-manager-${updatedAt}`,
         barcode: "",
         name: storeItem?.name ?? item.name,
         category: "Bar",
@@ -1003,6 +931,7 @@ export default function BaristaPage() {
         status: "ACTIVE",
         minStock: storeItem?.minStock ?? 0,
         unit: storeItem?.unit ?? "Bottle",
+        updatedAt,
       });
     }
 
@@ -1573,10 +1502,11 @@ export default function BaristaPage() {
     const snapshot = readPosState<BaristaTicket, BaristaPaymentRecord, BaristaMenuItem>(
       activeBaristaKey, STORAGE_TICKETS, STORAGE_SEQ, STORAGE_PAYMENTS, STORAGE_MENU, 490,
     );
+    const updatedAt = Date.now();
     let next: BaristaMenuItem[];
     if (drinkEditId) {
       next = snapshot.menuItems.map((item) =>
-        item.id === drinkEditId ? { ...item, name, price, category: drinkCategory, prepMinutes: prep } : item,
+        item.id === drinkEditId ? { ...item, name, price, category: drinkCategory, prepMinutes: prep, updatedAt } : item,
       );
     } else {
       const quantity = Number(drinkQuantity);
@@ -1595,14 +1525,14 @@ export default function BaristaPage() {
         return;
       }
 
-      const createdAt = Date.now();
       const newDrink: BaristaMenuItem = {
-        id: `d-${createdAt}`,
+        id: `d-${updatedAt}`,
         name,
         price,
         category: drinkCategory,
         prepMinutes: prep,
         buyingPrice,
+        updatedAt,
       };
       next = [...snapshot.menuItems, newDrink];
 
@@ -1610,7 +1540,7 @@ export default function BaristaPage() {
       const nextStoreItems: Array<MainStoreItem & { lane?: "kitchen" | "barista" }> = [
         ...storedItems,
         {
-          id: `bs-${createdAt}`,
+          id: `bs-${updatedAt}`,
           name,
           subCategory: drinkCategory,
           size: drinkSize.trim(),
@@ -1620,6 +1550,7 @@ export default function BaristaPage() {
           lane: "barista",
           buyingPrice,
           sellingPrice: price,
+          updatedAt,
         },
       ];
       writeJson(STORAGE_MAIN_STORE_ITEMS, nextStoreItems);
@@ -1628,7 +1559,7 @@ export default function BaristaPage() {
       const storedInventory = readJson<InventoryItem[]>(STORAGE_INVENTORY_ITEMS) ?? [];
       const nextInventory: InventoryItem[] = [
         {
-          id: `inv-${createdAt}`,
+          id: `inv-${updatedAt}`,
           barcode: "",
           name,
           category: "Bar",
@@ -1642,6 +1573,7 @@ export default function BaristaPage() {
           status: "ACTIVE",
           minStock: lowThreshold,
           unit,
+          updatedAt,
         },
         ...storedInventory,
       ];

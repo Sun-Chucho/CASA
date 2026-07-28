@@ -79,7 +79,9 @@ async function hydrateStartupStateForRole(role: Role) {
   const keys = STARTUP_SYNC_KEYS_BY_ROLE[role] ?? ["orange-hotel-settings", "orange-hotel-login-profiles"];
   await Promise.race([
     Promise.all(keys.map((key) => hydrateStorageKeyFromFirebase(key).catch(() => undefined))),
-    new Promise((resolve) => window.setTimeout(resolve, 5000)),
+    // Do not mount pages early enough for their empty defaults to race a slow
+    // Firebase/server hydration on a fresh browser or after a new login.
+    new Promise((resolve) => window.setTimeout(resolve, 15000)),
   ]);
 }
 const KALUSE_KIANGI_BOOKING_FIX_KEY = "orange-hotel-kaluse-kiangi-booking-fix-v2";

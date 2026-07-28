@@ -16,6 +16,7 @@ export interface MainStoreItem {
   totSold?: number;
   damages?: number;
   receivedStock?: number;
+  updatedAt?: number;
 }
 
 export interface StoreMovementLog {
@@ -102,10 +103,12 @@ export function adjustInventoryQuantity<
     totPerBottle?: number;
     totSold?: number;
     size?: string;
+    updatedAt?: number;
   }
 >(items: T[], category: string, itemName: string, delta: number) {
   const target = normalizeStockName(itemName);
   const isTotAdjustment = target.endsWith("tots");
+  const updatedAt = Date.now();
 
   return items.map((item) => {
     const itemTarget = normalizeStockName(item.name);
@@ -133,6 +136,7 @@ export function adjustInventoryQuantity<
           ...item,
           stock: Math.max(0, item.stock - bottlesToDeduct),
           totSold: nextTotSold % item.totPerBottle,
+          updatedAt,
         };
       } else {
         // Intake/Restore (delta is positive)
@@ -145,6 +149,7 @@ export function adjustInventoryQuantity<
           ...item,
           stock: nextStock,
           totSold: nextTotSold === item.totPerBottle ? 0 : nextTotSold,
+          updatedAt,
         };
       }
     }
@@ -153,6 +158,7 @@ export function adjustInventoryQuantity<
     return {
       ...item,
       stock: Math.max(0, item.stock + delta),
+      updatedAt,
     };
   });
 }

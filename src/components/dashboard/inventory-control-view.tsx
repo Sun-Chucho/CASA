@@ -666,12 +666,14 @@ export function InventoryControlView({
 
     const matchingStore = storeItems.find((entry) => entry.id === itemId && entry.lane === lane);
     if (!matchingStore) return;
+    const updatedAt = Date.now();
 
     const nextStoreItems = storeItems.map((item) =>
       item.id === itemId
         ? {
             ...item,
             sellingPrice,
+            updatedAt,
           }
         : item,
     );
@@ -681,6 +683,7 @@ export function InventoryControlView({
           ...item,
           sellingPrice,
           price: sellingPrice,
+          updatedAt,
         };
       }
       return item;
@@ -762,9 +765,10 @@ export function InventoryControlView({
       actionLabel: "Add Item",
     });
     if (!approved) return;
+    const updatedAt = Date.now();
 
     const nextStoreRecord: MainStoreItem = {
-      id: `s-${Date.now()}`,
+      id: `s-${updatedAt}`,
       name: name.trim(),
       subCategory,
       size,
@@ -776,6 +780,7 @@ export function InventoryControlView({
       sellingPrice,
       damages,
       receivedStock,
+      updatedAt,
     };
 
     const nextStoreItems = [nextStoreRecord, ...storeItems];
@@ -786,7 +791,7 @@ export function InventoryControlView({
     const nextInventoryItems = [...items];
     const category = lane === "kitchen" ? "Kitchen" : "Bar";
     nextInventoryItems.unshift({
-      id: `inv-${Date.now()}`,
+      id: `inv-${updatedAt}`,
       barcode: "",
       name: name.trim(),
       category,
@@ -802,6 +807,7 @@ export function InventoryControlView({
       unit: unit.trim(),
       damages,
       receivedStock,
+      updatedAt,
     });
     setItems(nextInventoryItems);
     writeJson(STORAGE_INVENTORY_ITEMS, nextInventoryItems);
@@ -841,6 +847,7 @@ export function InventoryControlView({
       actionLabel: "Update Item",
     });
     if (!approved) return;
+    const updatedAt = Date.now();
 
     const nextStoreItems = storeItems.map((item) =>
       item.id === editModal.itemId
@@ -855,6 +862,7 @@ export function InventoryControlView({
             sellingPrice: editModal.lane === "kitchen" ? 0 : sellingPrice,
             damages,
             receivedStock,
+            updatedAt,
           }
         : item,
     );
@@ -874,6 +882,7 @@ export function InventoryControlView({
           damages,
           receivedStock,
           status: editModal.status,
+          updatedAt,
         };
       }
       return item;

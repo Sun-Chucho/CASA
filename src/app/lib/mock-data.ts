@@ -79,6 +79,7 @@ export interface InventoryItem {
   unit: string;
   damages?: number;
   receivedStock?: number;
+  updatedAt?: number;
 }
 
 export const INVENTORY: InventoryItem[] = [];

@@ -89,14 +89,12 @@ export function ensureFirebaseAuthReady() {
   return authReadyPromise;
 }
 
-// Enable offline persistence: an active onValue listener on the storage root
-// ensures the SDK eagerly caches all data locally. Writes made while offline
-// are automatically queued by the Firebase SDK and replayed when the
-// connection is restored.
+// Keep the active CASA storage root warm and connected. Durable browser
+// persistence is handled by the casa-v2 localStorage cache in firebase-sync.
 if (typeof window !== "undefined") {
   void ensureFirebaseAuthReady()
     .then(() => {
-      onValue(ref(firebaseDatabase, `casa`), () => {}, { onlyOnce: false });
+      onValue(ref(firebaseDatabase, "casa-v2"), () => {}, { onlyOnce: false });
     })
     .catch((error) => {
       console.error("Firebase authentication bootstrap failed", error);
