@@ -319,10 +319,7 @@ export function InventoryControlView({
   const isInventoryRole = role === "inventory";
   const isReadOnlyStock = isDirector || role === "manager";
   const canEditStock = !isReadOnlyStock;
-  const effectiveVisibleTabs = useMemo(
-    () => (isInventoryRole ? visibleTabs.filter((tab) => tab !== "barista-stock") : visibleTabs),
-    [isInventoryRole, visibleTabs],
-  );
+  const effectiveVisibleTabs = useMemo(() => visibleTabs, [visibleTabs]);
 
   useEffect(() => {
     setRole(readStoredRole());
@@ -932,7 +929,7 @@ export function InventoryControlView({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 pt-4">
-        {canEditStock && !(lane === "kitchen" && isInventoryRole) && (
+        {canEditStock && (
         <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-2">
           <Input
             value={lane === "kitchen" ? kitchenName : baristaName}

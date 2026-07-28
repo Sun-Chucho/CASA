@@ -303,6 +303,11 @@ export default function BaristaPage() {
   const [drinkPrice, setDrinkPrice] = useState("");
   const [drinkCategory, setDrinkCategory] = useState<Exclude<BaristaCategory, "all">>("coffee");
   const [drinkPrepMinutes, setDrinkPrepMinutes] = useState("5");
+  const [drinkQuantity, setDrinkQuantity] = useState("0");
+  const [drinkBuyingPrice, setDrinkBuyingPrice] = useState("");
+  const [drinkSize, setDrinkSize] = useState("");
+  const [drinkUnit, setDrinkUnit] = useState("Bottle");
+  const [drinkLowThreshold, setDrinkLowThreshold] = useState("1");
   const [directorTab, setDirectorTab] = useState<"inventory" | "finance" | "purchases" | "sales">("finance");
   const [directorSalesDateFilter, setDirectorSalesDateFilter] = useState<SalesDateFilter>("day");
   const [category, setCategory] = useState<BaristaCategory>("all");
@@ -1433,6 +1438,19 @@ export default function BaristaPage() {
     writePosState(getActiveBaristaStateKey(), nextTickets, ticketSeq, baristaPayments, storedMenuItems);
   };
 
+  const resetDrinkForm = () => {
+    setDrinkEditId(null);
+    setDrinkName("");
+    setDrinkPrice("");
+    setDrinkPrepMinutes("5");
+    setDrinkCategory("coffee");
+    setDrinkQuantity("0");
+    setDrinkBuyingPrice("");
+    setDrinkSize("");
+    setDrinkUnit("Bottle");
+    setDrinkLowThreshold("1");
+  };
+
   const saveDrink = () => {
     const name = drinkName.trim();
     const price = parseFloat(drinkPrice);
@@ -1449,22 +1467,78 @@ export default function BaristaPage() {
         item.id === drinkEditId ? { ...item, name, price, category: drinkCategory, prepMinutes: prep } : item,
       );
     } else {
+      const quantity = Number(drinkQuantity);
+      const buyingPrice = Number(drinkBuyingPrice) || 0;
+      const lowThreshold = Number(drinkLowThreshold);
+      const unit = drinkUnit.trim();
+      if (
+        !Number.isFinite(quantity) ||
+        quantity < 0 ||
+        !Number.isFinite(buyingPrice) ||
+        buyingPrice < 0 ||
+        !Number.isFinite(lowThreshold) ||
+        lowThreshold < 0 ||
+        !unit
+      ) {
+        return;
+      }
+
+      const createdAt = Date.now();
       const newDrink: BaristaMenuItem = {
-        id: `d-${Date.now()}`,
+        id: `d-${createdAt}`,
         name,
         price,
         category: drinkCategory,
         prepMinutes: prep,
+        buyingPrice,
       };
       next = [...snapshot.menuItems, newDrink];
+
+      const storedItems = readJson<Array<MainStoreItem & { lane?: "kitchen" | "barista" }>>(STORAGE_MAIN_STORE_ITEMS) ?? [];
+      const nextStoreItems: Array<MainStoreItem & { lane?: "kitchen" | "barista" }> = [
+        ...storedItems,
+        {
+          id: `bs-${createdAt}`,
+          name,
+          subCategory: drinkCategory,
+          size: drinkSize.trim(),
+          stock: quantity,
+          unit,
+          minStock: lowThreshold,
+          lane: "barista",
+          buyingPrice,
+          sellingPrice: price,
+        },
+      ];
+      writeJson(STORAGE_MAIN_STORE_ITEMS, nextStoreItems);
+      setBaristaStoreItems(nextStoreItems.filter((item) => item.lane === "barista"));
+
+      const storedInventory = readJson<InventoryItem[]>(STORAGE_INVENTORY_ITEMS) ?? [];
+      const nextInventory: InventoryItem[] = [
+        {
+          id: `inv-${createdAt}`,
+          barcode: "",
+          name,
+          category: "Bar",
+          subCategory: drinkCategory,
+          size: drinkSize.trim(),
+          stock: quantity,
+          totSold: 0,
+          buyingPrice,
+          sellingPrice: price,
+          price,
+          status: "ACTIVE",
+          minStock: lowThreshold,
+          unit,
+        },
+        ...storedInventory,
+      ];
+      writeJson(STORAGE_INVENTORY_ITEMS, nextInventory);
+      setInventoryItems(nextInventory);
     }
     writePosState(activeBaristaKey, snapshot.tickets, snapshot.ticketSeq, snapshot.payments, next);
     setStoredMenuItems(next);
-    setDrinkEditId(null);
-    setDrinkName("");
-    setDrinkPrice("");
-    setDrinkPrepMinutes("5");
-    setDrinkCategory("coffee");
+    resetDrinkForm();
   };
 
   const startEditDrink = (item: BaristaMenuItem) => {
@@ -1505,10 +1579,12 @@ export default function BaristaPage() {
       <Card className="border-none shadow-sm">
         <CardHeader>
           <CardTitle className="text-xl font-black uppercase tracking-tight">
-            {drinkEditId ? "Edit Drink" : "Add New Drink"}
+            {drinkEditId ? "Edit Barista Item" : "Add New Barista Item"}
           </CardTitle>
           <CardDescription>
-            {drinkEditId ? "Update the drink details below, then save." : "Enter drink name, price, category and prep time, then save."}
+            {drinkEditId
+              ? "Update the item details below, then save."
+              : "Enter the item, stock quantity, buying price and POS selling price, then save."}
           </CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -1552,13 +1628,55 @@ export default function BaristaPage() {
               placeholder="e.g. 5"
             />
           </div>
+          {!drinkEditId && (
+            <>
+              <div className="space-y-1">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Quantity</p>
+                <Input
+                  type="number"
+                  min="0"
+                  value={drinkQuantity}
+                  onChange={(e) => setDrinkQuantity(e.target.value)}
+                  placeholder="e.g. 24"
+                />
+              </div>
+              <div className="space-y-1">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Buying Price (TSh)</p>
+                <Input
+                  type="number"
+                  min="0"
+                  value={drinkBuyingPrice}
+                  onChange={(e) => setDrinkBuyingPrice(e.target.value)}
+                  placeholder="e.g. 1800"
+                />
+              </div>
+              <div className="space-y-1">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Size</p>
+                <Input value={drinkSize} onChange={(e) => setDrinkSize(e.target.value)} placeholder="e.g. 330ml" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Unit</p>
+                <Input value={drinkUnit} onChange={(e) => setDrinkUnit(e.target.value)} placeholder="e.g. Bottle" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Low Stock Alert</p>
+                <Input
+                  type="number"
+                  min="0"
+                  value={drinkLowThreshold}
+                  onChange={(e) => setDrinkLowThreshold(e.target.value)}
+                  placeholder="e.g. 5"
+                />
+              </div>
+            </>
+          )}
           <div className="md:col-span-2 lg:col-span-4 flex gap-2">
             <Button onClick={saveDrink} className="gap-2">
               <Plus className="h-4 w-4" />
-              {drinkEditId ? "Save Changes" : "Add Drink"}
+              {drinkEditId ? "Save Changes" : "Add Barista Item"}
             </Button>
             {drinkEditId && (
-              <Button variant="outline" onClick={() => { setDrinkEditId(null); setDrinkName(""); setDrinkPrice(""); setDrinkPrepMinutes("5"); setDrinkCategory("coffee"); }}>
+              <Button variant="outline" onClick={resetDrinkForm}>
                 Cancel
               </Button>
             )}
@@ -1631,6 +1749,16 @@ export default function BaristaPage() {
               </p>
             </div>
           </div>
+          <Button
+            onClick={() => {
+              resetDrinkForm();
+              setManagerTab("drinks");
+            }}
+            className="gap-2 font-black uppercase tracking-widest"
+          >
+            <Plus className="h-4 w-4" />
+            Add Barista Item
+          </Button>
         </header>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <Card className="border-none shadow-sm">
@@ -1659,7 +1787,7 @@ export default function BaristaPage() {
             <TabsTrigger value="finance" className="font-black uppercase text-[10px] tracking-widest">Finance</TabsTrigger>
             <TabsTrigger value="inventory" className="font-black uppercase text-[10px] tracking-widest">Inventory</TabsTrigger>
             <TabsTrigger value="sales" className="font-black uppercase text-[10px] tracking-widest">Sales</TabsTrigger>
-            <TabsTrigger value="drinks" className="font-black uppercase text-[10px] tracking-widest">Drinks</TabsTrigger>
+            <TabsTrigger value="drinks" className="font-black uppercase text-[10px] tracking-widest">Items / Drinks</TabsTrigger>
           </TabsList>
         </Tabs>
         {managerTab === "drinks" ? renderDrinksManager() : managerTab === "finance" ? renderFinanceTable() : managerTab === "sales" ? renderDirectorSalesTable() : (

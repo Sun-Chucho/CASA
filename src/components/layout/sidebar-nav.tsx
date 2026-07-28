@@ -82,7 +82,6 @@ export function SidebarNav({ role }: { role: Role }) {
   const filteredNav = useMemo(() => {
     const visible = NAV_ITEMS
       .filter(item => item.roles.includes(role))
-      .filter((item) => !(role === "inventory" && item.href === "/dashboard/inventory/barista-stock"))
       .filter((item) => !(role === "barista" && item.href === "/dashboard/live-chat"))
       .map((item) => {
         if (item.href !== "/dashboard/fnb-pos") return item;
