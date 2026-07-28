@@ -4,6 +4,7 @@ import {
   readServerSyncedStorageValue,
   writeServerSyncedStorageValue,
 } from "@/app/lib/firebase-server";
+import { sanitizeCasaHistory } from "@/app/lib/casa-history";
 
 type RouteContext = {
   params: Promise<{
@@ -97,6 +98,9 @@ function mergeRecordsByIdPreservingIncomingChanges(currentRecords: unknown[], in
 }
 
 function protectIncomingSyncedValue(key: string, incomingValue: unknown, currentValue: unknown) {
+  incomingValue = sanitizeCasaHistory(key, incomingValue);
+  currentValue = sanitizeCasaHistory(key, currentValue);
+
   if (key === "orange-hotel-cashier-state") {
     const currentTransactions = getCashierTransactions(currentValue);
     const incomingTransactions = getCashierTransactions(incomingValue);
@@ -160,7 +164,8 @@ function protectIncomingSyncedValue(key: string, incomingValue: unknown, current
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
     const { key } = await context.params;
-    const value = await readServerSyncedStorageValue(decodeStorageKey(key));
+    const decodedKey = decodeStorageKey(key);
+    const value = sanitizeCasaHistory(decodedKey, await readServerSyncedStorageValue(decodedKey));
     const etag = createStorageEtag(value);
 
     if (request.headers.get("if-none-match") === etag) {

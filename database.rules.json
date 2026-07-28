@@ -2,7 +2,43 @@
   "rules": {
     "casa": {
       ".read": "auth != null",
-      ".write": "auth != null"
+      ".write": "auth != null",
+      "orange-hotel-cashier-state": {
+        "transactions": {
+          "$index": {
+            ".validate": "newData.child('createdAt').val() >= 1783976400000"
+          }
+        }
+      },
+      "orange-hotel-kitchen-state": {
+        "tickets": {
+          "$index": {
+            ".validate": "!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1783976400000"
+          }
+        },
+        "payments": {
+          "$index": {
+            ".validate": "!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1783976400000"
+          }
+        }
+      },
+      "orange-hotel-barista-state": {
+        "tickets": {
+          "$index": {
+            ".validate": "!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1783976400000"
+          }
+        },
+        "payments": {
+          "$index": {
+            ".validate": "!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1783976400000"
+          }
+        }
+      },
+      "orange-hotel-expenses": {
+        "$index": {
+          ".validate": "!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1783976400000"
+        }
+      }
     }
   }
 }

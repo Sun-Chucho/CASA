@@ -5,6 +5,7 @@ import { mergeKitchenMenuItems, type KitchenMenuItem } from "@/app/lib/kitchen-m
 import { getDefaultRooms, type InventoryItem } from "@/app/lib/mock-data";
 import { DEFAULT_HARDWARE_SETTINGS } from "@/app/lib/hardware-settings";
 import { sanitizeForStorage } from "@/app/lib/storage-sanitize";
+import { sanitizeCasaHistory } from "@/app/lib/casa-history";
 
 // ── Connectivity monitoring ─────────────────────────────────────────────────
 let _isConnected = false;
@@ -235,11 +236,17 @@ function getLocalCacheRaw(key: string) {
 }
 
 function sanitizeSyncedValue<T>(key: string, value: T): T {
-  if (key !== "orange-hotel-kitchen-state" || value === null || value === undefined || typeof value !== "object") {
-    return value;
+  const historySanitizedValue = sanitizeCasaHistory(key, value);
+  if (
+    key !== "orange-hotel-kitchen-state" ||
+    historySanitizedValue === null ||
+    historySanitizedValue === undefined ||
+    typeof historySanitizedValue !== "object"
+  ) {
+    return historySanitizedValue;
   }
 
-  const snapshot = value as {
+  const snapshot = historySanitizedValue as {
     tickets?: unknown[];
     ticketSeq?: number;
     payments?: unknown[];
@@ -672,7 +679,7 @@ function protectSyncedValueBeforeWrite(key: string, localValue: unknown, remoteV
 function getCanonicalDefaultValue(key: string) {
   switch (key) {
     case "orange-hotel-cashier-state":
-      return { transactions: [], receiptSeq: 1 };
+      return { transactions: [], receiptSeq: 84920 };
     case "orange-hotel-kitchen-state":
       return { tickets: [], ticketSeq: 1, payments: [], menuItems: [] };
     case "orange-hotel-barista-state":
