@@ -10,7 +10,7 @@ import { KitchenPurchaseHistoryEntry, STORAGE_KITCHEN_PURCHASE_HISTORY } from "@
 import { MainStoreItem, STORAGE_MAIN_STORE_ITEMS, getStoreItemLabel, normalizeBaristaProductTarget, normalizeStockName } from "@/app/lib/inventory-transfer";
 import { getTotLimit } from "@/app/lib/barista-stock";
 import { normalizeRole } from "@/app/lib/auth";
-import { hydrateStorageKeyFromFirebase, purgeSyncedKeys, runOnceAcrossDevices } from "@/app/lib/firebase-sync";
+import { hydrateStorageKeyFromFirebase } from "@/app/lib/firebase-sync";
 import { readJson, readPosState, STORAGE_BARISTA_STATE, STORAGE_KITCHEN_STATE, writeJson, writePosState } from "@/app/lib/storage";
 import { usePathname, useRouter } from "next/navigation";
 import { Bell, Home, Hotel, Search, User, Clock, Menu, WalletCards, ReceiptText, Package } from "lucide-react";
@@ -32,10 +32,6 @@ const DIRECTOR_MOBILE_NAV = [
   { label: "Expenses", href: "/dashboard/expenses", icon: ReceiptText },
 ] as const;
 const KITCHEN_TRANSACTIONS_RESET_KEY = "orange-hotel-kitchen-transactions-reset-v3";
-const KITCHEN_RESET_KEY = "orange-hotel-kitchen-reset-marker-v2";
-runOnceAcrossDevices(KITCHEN_RESET_KEY, async () => {
-  await purgeSyncedKeys(["orange-hotel-kitchen-state", "orange-hotel-cancelled-tickets"]);
-});
 const KITCHEN_MENU_PRICE_FIX_KEY = "orange-hotel-kitchen-menu-price-fix-v2";
 const DOMPO_STOCK_FIX_KEY = "orange-hotel-dompo-750ml-stock-fix-v1";
 const BARISTA_STOCK_FIX_KEY = "orange-hotel-barista-stock-fix-v5";

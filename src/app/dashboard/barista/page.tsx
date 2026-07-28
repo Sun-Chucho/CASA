@@ -31,7 +31,7 @@ import { SyncStatusIndicator } from "@/components/sync-status-indicator";
 import { KitchenSessionManager } from "@/components/dashboard/kitchen-session-manager";
 import { CheckCircle2, Coffee, Lock, Minus, Pencil, Plus, Receipt, Search, Trash2, User, XCircle } from "lucide-react";
 import { useConfirmDialog } from "@/hooks/use-confirm-dialog";
-import { hydrateStorageKeyFromFirebase, purgeSyncedKeys, runOnceAcrossDevices, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
+import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
 import { DEFAULT_LOGIN_PASSWORD, getProfilePassword, readActiveSessionUsername, readLocalLoginProfiles, saveLoginProfileToServer, STORAGE_LOGIN_PROFILES, subscribeToSessionIdentity, upsertProfileUser } from "@/app/lib/login-profiles";
 
 type BaristaCategory = "all" | "espresso" | "coffee" | "tea" | "cold" | "snacks";
@@ -291,7 +291,6 @@ function applyCanonicalSellingPrices(menuItems: BaristaMenuItem[]) {
   return { menuItems: next, changed };
 }
 
-const BARISTA_RESET_KEY = "orange-hotel-barista-reset-v3";
 
 export default function BaristaPage() {
   const isDirector = useIsDirector();
@@ -435,17 +434,6 @@ export default function BaristaPage() {
     };
 
     const bootstrapBarista = async () => {
-      await runOnceAcrossDevices(BARISTA_RESET_KEY, async () => {
-        await purgeSyncedKeys([
-          activeBaristaKey,
-          STORAGE_TICKETS,
-          STORAGE_SEQ,
-          STORAGE_PAYMENTS,
-          STORAGE_MENU,
-          STORAGE_WASTE,
-        ]);
-      });
-
       await Promise.all([
         hydrateStorageKeyFromFirebase(activeBaristaKey).catch(() => undefined),
         hydrateStorageKeyFromFirebase(STORAGE_INVENTORY_ITEMS).catch(() => undefined),

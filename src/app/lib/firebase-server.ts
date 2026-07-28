@@ -1,5 +1,6 @@
 import { readFileSync } from "fs";
 import path from "path";
+import { createSign } from "crypto";
 
 const FIREBASE_API_KEY =
   process.env.NEXT_PUBLIC_FIREBASE_API_KEY ?? "AIzaSyAT55z0QVhfCtAAPvt0XZmZgEWGkLjaEsU";
@@ -9,13 +10,21 @@ const FIREBASE_DATABASE_URL =
 const FIREBASE_STORAGE_ROOT = "casa";
 
 const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH ?? path.join(process.cwd(), "casamotel-96c86-firebase-adminsdk-fbsvc-caa2bed17c.json");
-let serviceAccountConfig: Record<string, unknown> | null = null;
+type ServiceAccountConfig = {
+  client_email: string;
+  private_key: string;
+};
+
+let serviceAccountConfig: ServiceAccountConfig | null | undefined;
 
 function loadServiceAccountConfig() {
-  if (serviceAccountConfig) return serviceAccountConfig;
+  if (serviceAccountConfig !== undefined) return serviceAccountConfig;
   try {
-    const raw = readFileSync(serviceAccountPath, "utf8");
-    serviceAccountConfig = JSON.parse(raw) as Record<string, unknown>;
+    const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON ?? readFileSync(serviceAccountPath, "utf8");
+    const parsed = JSON.parse(raw) as Partial<ServiceAccountConfig>;
+    serviceAccountConfig = parsed.client_email && parsed.private_key
+      ? { client_email: parsed.client_email, private_key: parsed.private_key.replace(/\\n/g, "\n") }
+      : null;
   } catch {
     serviceAccountConfig = null;
   }
@@ -28,6 +37,55 @@ type FirebaseAnonSession = {
 };
 
 let anonSessionPromise: Promise<FirebaseAnonSession> | null = null;
+let serviceAccountSessionPromise: Promise<FirebaseAnonSession> | null = null;
+
+function encodeBase64Url(value: object) {
+  return Buffer.from(JSON.stringify(value)).toString("base64url");
+}
+
+async function getServiceAccountSession(serviceAccount: ServiceAccountConfig) {
+  if (!serviceAccountSessionPromise) {
+    serviceAccountSessionPromise = (async () => {
+      const now = Math.floor(Date.now() / 1000);
+      const unsignedToken = `${encodeBase64Url({ alg: "RS256", typ: "JWT" })}.${encodeBase64Url({
+        iss: serviceAccount.client_email,
+        scope: "https://www.googleapis.com/auth/firebase.database https://www.googleapis.com/auth/userinfo.email",
+        aud: "https://oauth2.googleapis.com/token",
+        iat: now,
+        exp: now + 3600,
+      })}`;
+      const signature = createSign("RSA-SHA256")
+        .update(unsignedToken)
+        .sign(serviceAccount.private_key, "base64url");
+      const response = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+          assertion: `${unsignedToken}.${signature}`,
+        }),
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error(`Firebase service authentication failed (${response.status})`);
+      const payload = (await response.json()) as { access_token?: string; expires_in?: number };
+      if (!payload.access_token) throw new Error("Firebase service authentication did not return an access token.");
+      return {
+        idToken: payload.access_token,
+        expiresAt: Date.now() + Math.max(60, payload.expires_in ?? 3600) * 1000 - 60000,
+      };
+    })().catch((error) => {
+      serviceAccountSessionPromise = null;
+      throw error;
+    });
+  }
+
+  const session = await serviceAccountSessionPromise;
+  if (Date.now() >= session.expiresAt) {
+    serviceAccountSessionPromise = null;
+    return getServiceAccountSession(serviceAccount);
+  }
+  return session;
+}
 
 function getDatabaseBaseUrl() {
   return FIREBASE_DATABASE_URL.replace(/\/+$/, "");
@@ -81,28 +139,32 @@ async function getAnonymousSession() {
 
 async function requestDatabase<T>(key: string, init?: RequestInit) {
   const serviceAccount = loadServiceAccountConfig();
-  if (serviceAccount?.private_key && serviceAccount?.client_email) {
-    void serviceAccount;
-  }
   const basePath = `${getDatabaseBaseUrl()}/${toStoragePath(key)}.json`;
 
-  const runRequest = async (idToken?: string) => {
-    const path = idToken ? `${basePath}?auth=${encodeURIComponent(idToken)}` : basePath;
+  const runRequest = async (token?: string, tokenType: "auth" | "access_token" = "auth") => {
+    const path = token ? `${basePath}?${tokenType}=${encodeURIComponent(token)}` : basePath;
     return fetch(path, {
       ...init,
       cache: "no-store",
     });
   };
 
-  let response: Response;
-  try {
-    const { idToken } = await getAnonymousSession();
-    response = await runRequest(idToken);
-  } catch {
-    response = await runRequest();
+  let response: Response | null = null;
+  if (serviceAccount) {
+    try {
+      const { idToken } = await getServiceAccountSession(serviceAccount);
+      response = await runRequest(idToken, "access_token");
+    } catch {}
   }
 
-  if ((response.status === 401 || response.status === 403) && !response.ok) {
+  if (!response || response.status === 401 || response.status === 403) {
+    try {
+      const { idToken } = await getAnonymousSession();
+      response = await runRequest(idToken);
+    } catch {}
+  }
+
+  if (!response || response.status === 401 || response.status === 403) {
     response = await runRequest();
   }
 

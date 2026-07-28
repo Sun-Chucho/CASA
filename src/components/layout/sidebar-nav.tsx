@@ -195,7 +195,13 @@ export function SidebarNav({ role }: { role: Role }) {
         </div>
         <button 
           onClick={() => {
-            localStorage.clear();
+            // Signing out must never erase the locally cached business data.
+            // The cache is the app's offline safety net and is re-used during
+            // Firebase hydration on the next session.
+            localStorage.removeItem("orange-hotel-role");
+            localStorage.removeItem("orange-hotel-shift");
+            localStorage.removeItem("orange-hotel-username");
+            localStorage.removeItem("orange-hotel-manager-session-version");
             window.location.href = logoutPath;
           }}
           className="flex items-center gap-3 px-3 py-2 w-full rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors font-bold text-xs uppercase tracking-widest"
