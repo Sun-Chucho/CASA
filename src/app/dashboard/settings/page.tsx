@@ -619,7 +619,9 @@ export default function SettingsPage() {
                     <div className="flex items-center justify-between p-4 rounded-xl bg-muted/20">
                       <div className="space-y-0.5">
                         <Label className="text-base font-bold">Auto Print Receipt</Label>
-                        <p className="text-xs text-muted-foreground">Send a raw receipt to the selected generic printer after each completed sale.</p>
+                        <p className="text-xs text-muted-foreground">
+                          Send two formatted ESC/POS raw receipts after each sale: one customer copy and one receptionist/bartender copy.
+                        </p>
                       </div>
                       <Switch
                         checked={hardwareSettings[lane].autoPrintReceipt}
