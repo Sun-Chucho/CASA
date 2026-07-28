@@ -7,7 +7,7 @@ const FIREBASE_API_KEY =
 const FIREBASE_DATABASE_URL =
   process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL ??
   "https://casamotel-96c86-default-rtdb.firebaseio.com/";
-const FIREBASE_STORAGE_ROOT = "casa";
+const FIREBASE_STORAGE_ROOT = "casa-v2";
 
 const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH ?? path.join(process.cwd(), "casamotel-96c86-firebase-adminsdk-fbsvc-caa2bed17c.json");
 type ServiceAccountConfig = {

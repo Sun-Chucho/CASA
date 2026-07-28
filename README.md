@@ -10,7 +10,7 @@ The customer booking landing page is at `/` and submits to `/api/bookings`.
 
 1. Copy `.env.example` to `.env.local`.
 2. Fill in the remaining Firebase web app values from the `casamotel-96c86` Firebase project settings.
-3. Deploy `database.rules.json` to Realtime Database so authenticated app sessions can read/write `casa`.
+3. Deploy `database.rules.json` to Realtime Database so authenticated app sessions can read/write the isolated `casa-v2` node.
 4. Enable Firebase Authentication anonymous sign-in. For server-only access, configure `FIREBASE_SERVICE_ACCOUNT_JSON` as a deployment secret.
 5. Set `BOOKING_BACKEND_URL` only if bookings should also be forwarded to an external backend.
 6. Set `NGENIUS_PAYMENT_ENABLED=true` plus the N-Genius variables only when live payment checkout is ready.

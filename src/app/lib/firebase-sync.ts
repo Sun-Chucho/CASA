@@ -143,14 +143,15 @@ export function subscribeToConnectionStatus(onChange: (connected: boolean) => vo
   };
 }
 
-const FIREBASE_STORAGE_ROOT = "casa";
+const FIREBASE_STORAGE_ROOT = "casa-v2";
+const CASA_LOCAL_STORAGE_PREFIX = "casa-v2:";
 
 function toStoragePath(key: string) {
   return `${FIREBASE_STORAGE_ROOT}/${key.replace(/[.#$[\]/]/g, "-")}`;
 }
 
 export function getUnifiedLocalKey(baseKey: string): string {
-  return baseKey;
+  return `${CASA_LOCAL_STORAGE_PREFIX}${baseKey}`;
 }
 
 export const FIREBASE_SYNC_KEYS = [
@@ -205,6 +206,31 @@ export const LEGACY_DEMO_KEYS = [
   "orange-hotel-kitchen-seq",
   "orange-hotel-barista-seq",
 ] as const;
+
+export function migrateVerifiedCasaLocalData() {
+  if (typeof window === "undefined") return;
+  const marker = `${CASA_LOCAL_STORAGE_PREFIX}verified-migration-v1`;
+  if (window.localStorage.getItem(marker) === "1") return;
+
+  const legacyCashierRaw = window.localStorage.getItem("orange-hotel-cashier-state");
+  if (legacyCashierRaw && !window.localStorage.getItem(getUnifiedLocalKey("orange-hotel-cashier-state"))) {
+    try {
+      const legacyCashierState = JSON.parse(legacyCashierRaw) as unknown;
+      const verifiedCashierState = sanitizeCasaHistory("orange-hotel-cashier-state", legacyCashierState);
+      const transactions = (verifiedCashierState as { transactions?: unknown[] } | null)?.transactions;
+      if (Array.isArray(transactions) && transactions.length > 0) {
+        window.localStorage.setItem(
+          getUnifiedLocalKey("orange-hotel-cashier-state"),
+          JSON.stringify(verifiedCashierState),
+        );
+      }
+    } catch {
+      // Invalid legacy data is intentionally ignored.
+    }
+  }
+
+  window.localStorage.setItem(marker, "1");
+}
 
 function readParsedLocalValue<T>(key: string) {
   if (typeof window === "undefined") return null;

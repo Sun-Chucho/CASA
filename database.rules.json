@@ -1,42 +1,51 @@
 {
   "rules": {
     "casa": {
+      ".read": false,
+      ".write": false
+    },
+    "casa-v2": {
       ".read": "auth != null",
       ".write": "auth != null",
+      "orange-hotel-rooms-state": {
+        "$index": {
+          ".validate": "(newData.child('number').val() === '100' && newData.child('price').val() === 100000) || ((newData.child('number').val() === '101' || newData.child('number').val() === '102' || newData.child('number').val() === '103' || newData.child('number').val() === '104' || newData.child('number').val() === '105' || newData.child('number').val() === '106' || newData.child('number').val() === '107') && newData.child('price').val() === 50000) || ((newData.child('number').val() === '108' || newData.child('number').val() === '109' || newData.child('number').val() === '110') && newData.child('price').val() === 100000) || (newData.child('number').val() === '111' && newData.child('price').val() === 120000) || ((newData.child('number').val() === '112' || newData.child('number').val() === '113' || newData.child('number').val() === '114' || newData.child('number').val() === '115' || newData.child('number').val() === '116' || newData.child('number').val() === '117') && newData.child('price').val() === 60000)"
+        }
+      },
       "orange-hotel-cashier-state": {
         "transactions": {
           "$index": {
-            ".validate": "newData.child('createdAt').val() >= 1783976400000"
+            ".validate": "(newData.child('roomNumber').val() === '100' && newData.child('ratePerNight').val() === 100000) || ((newData.child('roomNumber').val() === '101' || newData.child('roomNumber').val() === '102' || newData.child('roomNumber').val() === '103' || newData.child('roomNumber').val() === '104' || newData.child('roomNumber').val() === '105' || newData.child('roomNumber').val() === '106' || newData.child('roomNumber').val() === '107') && newData.child('ratePerNight').val() === 50000) || ((newData.child('roomNumber').val() === '108' || newData.child('roomNumber').val() === '109' || newData.child('roomNumber').val() === '110') && newData.child('ratePerNight').val() === 100000) || (newData.child('roomNumber').val() === '111' && newData.child('ratePerNight').val() === 120000) || ((newData.child('roomNumber').val() === '112' || newData.child('roomNumber').val() === '113' || newData.child('roomNumber').val() === '114' || newData.child('roomNumber').val() === '115' || newData.child('roomNumber').val() === '116' || newData.child('roomNumber').val() === '117') && newData.child('ratePerNight').val() === 60000)"
           }
         }
       },
       "orange-hotel-kitchen-state": {
         "tickets": {
           "$index": {
-            ".validate": "!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1783976400000"
+            ".validate": "!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1785099600000"
           }
         },
         "payments": {
           "$index": {
-            ".validate": "!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1783976400000"
+            ".validate": "!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1785099600000"
           }
         }
       },
       "orange-hotel-barista-state": {
         "tickets": {
           "$index": {
-            ".validate": "!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1783976400000"
+            ".validate": "!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1785099600000"
           }
         },
         "payments": {
           "$index": {
-            ".validate": "!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1783976400000"
+            ".validate": "!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1785099600000"
           }
         }
       },
       "orange-hotel-expenses": {
         "$index": {
-          ".validate": "!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1783976400000"
+          ".validate": "!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1785099600000"
         }
       }
     }

@@ -211,7 +211,7 @@ def build_html(labels: list[dict[str, str]]) -> str:
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Orange Hotel Barcode Labels</title>
+  <title>CASSA Hotel Barcode Labels</title>
   <style>
     :root {{
       --paper-width: 58mm;
