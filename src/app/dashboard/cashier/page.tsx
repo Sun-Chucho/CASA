@@ -26,7 +26,7 @@ import { Clock, Phone, Receipt, User } from "lucide-react";
 import { useIsDirector } from "@/hooks/use-is-director";
 import { useConfirmDialog } from "@/hooks/use-confirm-dialog";
 import { isBookingStillActive, readRoomsState, syncRoomsStateFromBookings, updateRoomStatusByNumber } from "@/app/lib/rooms-storage";
-import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
+import { getUnifiedLocalKey, hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
 import { getScopedStorageKey } from "@/app/lib/storage";
 
 type PaymentMethod = "cash" | "card" | "mobile-money" | "credit";
@@ -44,6 +44,7 @@ interface BookingRecord {
   id: string;
   receiptNo: string;
   createdAt: number;
+  enteredAt?: number;
   guestName: string;
   phone: string;
   roomType: RoomType;
@@ -76,8 +77,8 @@ const SPECIAL_PACKAGES: Record<
   "resident-with-breakfast": {
     label: "Resident with Breakfast",
     currency: "TSh",
-    standardRate: STANDARD_ROOM_PRICE,
-    platinumRate: STANDARD_ROOM_PRICE,
+    standardRate: 70000,
+    platinumRate: 70000,
   },
   "non-resident-with-breakfast": {
     label: "Non Resident with Breakfast",
@@ -88,8 +89,8 @@ const SPECIAL_PACKAGES: Record<
   "ninety-day-special": {
     label: "90 Day Special Package",
     currency: "TSh",
-    standardRate: STANDARD_ROOM_PRICE,
-    platinumRate: STANDARD_ROOM_PRICE,
+    standardRate: 70000,
+    platinumRate: 70000,
   },
 };
 
@@ -150,9 +151,9 @@ async function hydrateCashierStateFromServer() {
   const localSnapshot = readCashierState<BookingRecord>(STORAGE_TX, STORAGE_SEQ, 84920);
   const mergedSnapshot = mergeCashierSnapshots(localSnapshot, remoteSnapshot);
 
-  localStorage.setItem(activeKey, JSON.stringify(mergedSnapshot));
-  localStorage.setItem(STORAGE_TX, JSON.stringify(mergedSnapshot.transactions));
-  localStorage.setItem(STORAGE_SEQ, String(mergedSnapshot.receiptSeq));
+  localStorage.setItem(getUnifiedLocalKey(activeKey), JSON.stringify(mergedSnapshot));
+  localStorage.setItem(getUnifiedLocalKey(STORAGE_TX), JSON.stringify(mergedSnapshot.transactions));
+  localStorage.setItem(getUnifiedLocalKey(STORAGE_SEQ), String(mergedSnapshot.receiptSeq));
   window.dispatchEvent(new CustomEvent("orange-hotel-storage-updated", { detail: { key: activeKey } }));
 
   if (JSON.stringify(mergedSnapshot) !== JSON.stringify(remoteSnapshot)) {
@@ -267,6 +268,7 @@ export default function BookingPage() {
   const [transactions, setTransactions] = useState<BookingRecord[]>([]);
   const [receiptSeq, setReceiptSeq] = useState(84920);
   const [role, setRole] = useState<Role>("cashier");
+  const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
   const isManager = role === "manager";
 
   useEffect(() => {
@@ -521,13 +523,13 @@ export default function BookingPage() {
     resetBookingForm();
   };
 
-  const saveBooking = (status: "completed" | "credit", paymentMethod: PaymentMethod) => {
-    if (isDirector) return;
-    if (!canSubmitBooking) return;
+  const saveBooking = async (status: "completed" | "credit", paymentMethod: PaymentMethod) => {
+    if (isDirector || !canSubmitBooking) return false;
+    setSaveFeedback("Saving booking to CASA cloud...");
 
     if (editingBookingId) {
       const existingBooking = transactions.find((entry) => entry.id === editingBookingId);
-      if (!existingBooking) return;
+      if (!existingBooking) return false;
 
       const nextTransactions = transactions.map((entry) =>
         entry.id === editingBookingId
@@ -554,19 +556,25 @@ export default function BookingPage() {
           : entry,
       );
 
+      const saved = await writeCashierState(nextTransactions, receiptSeq);
+      if (!saved) {
+        setSaveFeedback("Booking was not uploaded. Please check the connection and try again.");
+        return false;
+      }
       setTransactions(nextTransactions);
-      writeCashierState(nextTransactions, receiptSeq);
       setRooms(syncRoomsStateFromBookings(nextTransactions, rooms));
 
       setTransactionTab(status === "credit" ? "credit" : "completed");
+      setSaveFeedback(null);
       resetBookingForm();
-      return;
+      return true;
     }
 
     const nextReceipt = receiptSeq + 1;
 
     const tx: BookingRecord = {
       id: `tx-${Date.now()}`,
+      enteredAt: Date.now(),
       receiptNo: `#${nextReceipt}`,
       createdAt: getBookingReportTimestamp(checkInDate, checkInTime),
       guestName: guestName.trim(),
@@ -591,12 +599,18 @@ export default function BookingPage() {
     }
 
     const nextTransactions = [tx, ...transactions];
+    const saved = await writeCashierState(nextTransactions, nextReceipt);
+    if (!saved) {
+      setSaveFeedback("Booking was not uploaded. Please check the connection and try again.");
+      return false;
+    }
     setTransactions(nextTransactions);
     setReceiptSeq(nextReceipt);
-    writeCashierState(nextTransactions, nextReceipt);
     setRooms(syncRoomsStateFromBookings(nextTransactions, rooms));
     setTransactionTab(status === "credit" ? "credit" : "completed");
+    setSaveFeedback(null);
     resetBookingForm();
+    return true;
   };
 
   const openSettlementPopup = () => {
@@ -618,8 +632,7 @@ export default function BookingPage() {
       actionLabel: "Book On Credit",
     });
     if (!approved) return;
-    saveBooking("credit", "credit");
-    redirectToBookedRooms("credit");
+    if (await saveBooking("credit", "credit")) redirectToBookedRooms("credit");
   };
 
   const completePaidBooking = async (paymentMethod: Exclude<PaymentMethod, "credit">) => {
@@ -632,8 +645,7 @@ export default function BookingPage() {
       actionLabel: "Complete Payment",
     });
     if (!approved) return;
-    saveBooking("completed", paymentMethod);
-    redirectToBookedRooms("completed");
+    if (await saveBooking("completed", paymentMethod)) redirectToBookedRooms("completed");
   };
 
   const openExtendStay = (booking: BookingRecord) => {
@@ -869,6 +881,9 @@ export default function BookingPage() {
             </div>
             {bookingBlockerMessage && (
               <p className="pt-2 text-xs font-bold text-amber-700">{bookingBlockerMessage}</p>
+            )}
+            {saveFeedback && (
+              <p className="pt-2 text-xs font-bold text-primary">{saveFeedback}</p>
             )}
           </div>
 

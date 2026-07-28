@@ -107,17 +107,30 @@ export function sanitizeCasaHistory<T>(key: string, value: T): T {
     const snapshot = value as Record<string, unknown>;
     const receiptSeq = Number(snapshot.receiptSeq);
     const transactions = Array.isArray(snapshot.transactions)
-      ? snapshot.transactions.filter((record) => {
-          if (typeof record !== "object" || record === null) return false;
+      ? snapshot.transactions.flatMap((record) => {
+          if (typeof record !== "object" || record === null) return [];
           const booking = record as Record<string, unknown>;
           const idMatch = /^tx-(\d+)$/.exec(String(booking.id ?? ""));
-          const enteredAt = idMatch ? Number(idMatch[1]) : null;
+          const explicitEnteredAt = Number(booking.enteredAt);
+          const enteredAt = Number.isFinite(explicitEnteredAt)
+            ? explicitEnteredAt
+            : idMatch
+              ? Number(idMatch[1])
+              : null;
           const roomNumber = String(booking.roomNumber ?? "");
+          const roomRateMatches =
+            CASA_ROOM_PRICES[roomNumber] === Number(booking.ratePerNight) ||
+            (booking.specialPackage === "resident-with-breakfast" && Number(booking.ratePerNight) === 70000) ||
+            (booking.specialPackage === "ninety-day-special" && Number(booking.ratePerNight) === 70000) ||
+            (booking.specialPackage === "non-resident-with-breakfast" && Number(booking.ratePerNight) === 150000);
           return (
             enteredAt !== null &&
             enteredAt >= CASA_DATA_START_MS &&
-            CASA_ROOM_PRICES[roomNumber] === Number(booking.ratePerNight)
-          );
+            roomNumber in CASA_ROOM_PRICES &&
+            roomRateMatches
+          )
+            ? [{ ...booking, enteredAt }]
+            : [];
         })
       : [];
     return {

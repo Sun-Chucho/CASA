@@ -880,58 +880,64 @@ function readSnapshotValue<T>(key: string, rawValue: T | null, onChange: (value:
   onChange(rawValue);
 }
 
-export function syncStorageValueToFirebase<T>(key: string, value: T) {
-  if (typeof window === "undefined") return;
-  let sanitizedValue: unknown = sanitizeForStorage(value);
+export async function syncStorageValueToFirebase<T>(key: string, value: T) {
+  if (typeof window === "undefined") return false;
+  let sanitizedValue: unknown = sanitizeForStorage(sanitizeSyncedValue(key, value));
   _pendingLocalWrites[key] = { value: sanitizedValue, createdAt: Date.now() };
 
   // Use the app's API as the primary write path. A disconnected Firebase
   // realtime socket can leave set() pending indefinitely, which previously
   // prevented the server fallback from running and left the UI on "Offline"
   // even though the browser and API were reachable.
-  void (async () => {
-    try {
-      const remoteValue = sanitizeForStorage(
-        sanitizeSyncedValue(key, await fetchServerSyncedStorageValue(key).catch(() => null)),
-      );
-      sanitizedValue = sanitizeForStorage(sanitizeSyncedValue(key, protectSyncedValueBeforeWrite(key, sanitizedValue, remoteValue)));
-      _pendingLocalWrites[key] = { value: sanitizedValue, createdAt: Date.now() };
-      await writeServerSyncedStorageValue(key, sanitizedValue);
-      markSyncHealthy(key);
-      return;
-    } catch (serverError) {
-      console.error(`Server sync failed for ${key}`, serverError);
-    }
+  try {
+    const remoteValue = sanitizeForStorage(
+      sanitizeSyncedValue(key, await fetchServerSyncedStorageValue(key).catch(() => null)),
+    );
+    sanitizedValue = sanitizeForStorage(sanitizeSyncedValue(key, protectSyncedValueBeforeWrite(key, sanitizedValue, remoteValue)));
+    _pendingLocalWrites[key] = { value: sanitizedValue, createdAt: Date.now() };
+    await writeServerSyncedStorageValue(key, sanitizedValue);
+    setLocalCache(key, JSON.stringify(sanitizedValue));
+    delete _pendingLocalWrites[key];
+    dispatchStorageUpdated(key);
+    markSyncHealthy(key);
+    return true;
+  } catch (serverError) {
+    console.error(`Server sync failed for ${key}`, serverError);
+  }
 
-    try {
-      await withTimeout(
-        ensureFirebaseAuthReady(),
-        DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
-        `Firebase authentication timed out for ${key}`,
-      );
-      const snapshot = await withTimeout(
-        get(ref(firebaseDatabase, toStoragePath(key))),
-        DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
-        `Firebase read timed out for ${key}`,
-      );
-      const remoteValue = snapshot.exists()
-        ? sanitizeForStorage(sanitizeSyncedValue(key, snapshot.val()))
-        : null;
-      sanitizedValue = sanitizeForStorage(
-        sanitizeSyncedValue(key, protectSyncedValueBeforeWrite(key, sanitizedValue, remoteValue)),
-      );
-      _pendingLocalWrites[key] = { value: sanitizedValue, createdAt: Date.now() };
-      await withTimeout(
-        set(ref(firebaseDatabase, toStoragePath(key)), sanitizedValue),
-        DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
-        `Firebase write timed out for ${key}`,
-      );
-      markSyncHealthy(key);
-    } catch (firebaseError) {
-      emitConnectionState(false);
-      console.error(`Firebase sync fallback failed for ${key}`, firebaseError);
-    }
-  })();
+  try {
+    await withTimeout(
+      ensureFirebaseAuthReady(),
+      DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
+      `Firebase authentication timed out for ${key}`,
+    );
+    const snapshot = await withTimeout(
+      get(ref(firebaseDatabase, toStoragePath(key))),
+      DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
+      `Firebase read timed out for ${key}`,
+    );
+    const remoteValue = snapshot.exists()
+      ? sanitizeForStorage(sanitizeSyncedValue(key, snapshot.val()))
+      : null;
+    sanitizedValue = sanitizeForStorage(
+      sanitizeSyncedValue(key, protectSyncedValueBeforeWrite(key, sanitizedValue, remoteValue)),
+    );
+    _pendingLocalWrites[key] = { value: sanitizedValue, createdAt: Date.now() };
+    await withTimeout(
+      set(ref(firebaseDatabase, toStoragePath(key)), sanitizedValue),
+      DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
+      `Firebase write timed out for ${key}`,
+    );
+    setLocalCache(key, JSON.stringify(sanitizedValue));
+    delete _pendingLocalWrites[key];
+    dispatchStorageUpdated(key);
+    markSyncHealthy(key);
+    return true;
+  } catch (firebaseError) {
+    emitConnectionState(false);
+    console.error(`Firebase sync fallback failed for ${key}`, firebaseError);
+    return false;
+  }
 }
 
 export async function hydrateStorageKeyFromFirebase(key: string) {

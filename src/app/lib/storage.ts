@@ -1,5 +1,6 @@
 import { getUnifiedLocalKey, removeStorageValueFromFirebase, syncStorageValueToFirebase } from "@/app/lib/firebase-sync";
 import { sanitizeForStorage } from "@/app/lib/storage-sanitize";
+import { sanitizeCasaHistory } from "@/app/lib/casa-history";
 
 export const STORAGE_CASHIER_STATE = "orange-hotel-cashier-state";
 export const STORAGE_KITCHEN_STATE = "orange-hotel-kitchen-state";
@@ -51,12 +52,12 @@ export function readJson<T>(key: string): T | null {
 
 export function writeJson<T>(key: string, value: T) {
   if (typeof window === "undefined") return;
-  const sanitizedValue = sanitizeForStorage(value);
+  const sanitizedValue = sanitizeForStorage(sanitizeCasaHistory(key, value));
   // Local cache is namespaced per hotel tier; the base key is used for the
   // change event and backend sync (which adds its own tier prefix to the path).
   localStorage.setItem(getUnifiedLocalKey(key), JSON.stringify(sanitizedValue));
   window.dispatchEvent(new CustomEvent("orange-hotel-storage-updated", { detail: { key } }));
-  syncStorageValueToFirebase(key, sanitizedValue);
+  return syncStorageValueToFirebase(key, sanitizedValue);
 }
 
 export function removeJson(key: string) {
@@ -91,7 +92,7 @@ export function readCashierState<TTransaction>(
 }
 
 export function writeCashierState<TTransaction>(transactions: TTransaction[], receiptSeq: number) {
-  writeJson(getActiveCashierStateKey(), { transactions, receiptSeq });
+  return writeJson(getActiveCashierStateKey(), { transactions, receiptSeq });
 }
 
 export function readPosState<TTicket, TPayment, TMenu>(
