@@ -600,11 +600,14 @@ function mergePosStateForSync(localValue: unknown, remoteValue: unknown) {
   const remoteTickets = Array.isArray(remoteSnapshot.tickets) ? remoteSnapshot.tickets : [];
   const localPayments = Array.isArray(localSnapshot.payments) ? localSnapshot.payments : [];
   const remotePayments = Array.isArray(remoteSnapshot.payments) ? remoteSnapshot.payments : [];
+  const localMenuItems = Array.isArray(localSnapshot.menuItems) ? localSnapshot.menuItems : [];
+  const remoteMenuItems = Array.isArray(remoteSnapshot.menuItems) ? remoteSnapshot.menuItems : [];
 
   return {
     ...localSnapshot,
     tickets: mergeRecordsById(localTickets, remoteTickets),
     payments: mergeRecordsById(localPayments, remotePayments),
+    menuItems: mergeRecordsById(localMenuItems, remoteMenuItems),
     ticketSeq: Math.max(
       Number.isFinite(localSnapshot.ticketSeq) ? Number(localSnapshot.ticketSeq) : 0,
       Number.isFinite(remoteSnapshot.ticketSeq) ? Number(remoteSnapshot.ticketSeq) : 0,
@@ -643,12 +646,15 @@ function mergePosStateForRemoteApply(localValue: unknown, remoteValue: unknown) 
   const remoteTickets = Array.isArray(remoteSnapshot.tickets) ? remoteSnapshot.tickets : [];
   const localPayments = Array.isArray(localSnapshot.payments) ? localSnapshot.payments : [];
   const remotePayments = Array.isArray(remoteSnapshot.payments) ? remoteSnapshot.payments : [];
+  const localMenuItems = Array.isArray(localSnapshot.menuItems) ? localSnapshot.menuItems : [];
+  const remoteMenuItems = Array.isArray(remoteSnapshot.menuItems) ? remoteSnapshot.menuItems : [];
 
   return {
     ...localSnapshot,
     ...remoteSnapshot,
     tickets: mergeRecordsByIdWithRemoteWins(localTickets, remoteTickets),
     payments: mergeRecordsByIdWithRemoteWins(localPayments, remotePayments),
+    menuItems: mergeRecordsByIdWithRemoteWins(localMenuItems, remoteMenuItems),
     ticketSeq: Math.max(
       Number.isFinite(localSnapshot.ticketSeq) ? Number(localSnapshot.ticketSeq) : 0,
       Number.isFinite(remoteSnapshot.ticketSeq) ? Number(remoteSnapshot.ticketSeq) : 0,

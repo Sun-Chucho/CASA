@@ -47,7 +47,7 @@ function formatItemLine(line: ReceiptLine, width: number) {
   return `${qtyLabel}${line.name.length > nameWidth ? `${line.name.slice(0, nameWidth - 1)}.` : line.name}`;
 }
 
-function buildReceiptContent(payload: ReceiptPayload, printerName: string, openDrawer: boolean) {
+function buildReceiptContent(payload: ReceiptPayload, openDrawer: boolean) {
   const width = 42;
   const separator = "-".repeat(width);
   const lines: string[] = [];
@@ -56,7 +56,7 @@ function buildReceiptContent(payload: ReceiptPayload, printerName: string, openD
     lines.push("\u001bp\u0000\u0019\u00fa");
   }
 
-  lines.push("MAWIO ARUSHA");
+  lines.push("CASSA HOTEL");
   lines.push(payload.department === "kitchen" ? "KITCHEN" : "BARISTA");
   lines.push(separator);
   lines.push(`Receipt: ${payload.code}`);
@@ -78,6 +78,60 @@ function buildReceiptContent(payload: ReceiptPayload, printerName: string, openD
   lines.push("\n\n\n");
 
   return lines.join("\n");
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function printWithBrowser(payload: ReceiptPayload): PrintResult {
+  try {
+    const content = buildReceiptContent(payload, false);
+    const frame = document.createElement("iframe");
+    frame.setAttribute("aria-hidden", "true");
+    frame.style.position = "fixed";
+    frame.style.right = "0";
+    frame.style.bottom = "0";
+    frame.style.width = "1px";
+    frame.style.height = "1px";
+    frame.style.border = "0";
+    frame.style.opacity = "0";
+    frame.srcdoc = `<!doctype html>
+      <html>
+        <head>
+          <title>${escapeHtml(payload.code)}</title>
+          <style>
+            @page { size: 80mm auto; margin: 4mm; }
+            html, body { margin: 0; padding: 0; background: #fff; color: #000; }
+            pre { margin: 0; white-space: pre-wrap; font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+          </style>
+        </head>
+        <body><pre>${escapeHtml(content)}</pre></body>
+      </html>`;
+
+    frame.onload = () => {
+      const printWindow = frame.contentWindow;
+      if (!printWindow) {
+        frame.remove();
+        return;
+      }
+      printWindow.focus();
+      printWindow.print();
+      window.setTimeout(() => frame.remove(), 60000);
+    };
+    document.body.appendChild(frame);
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: error instanceof Error ? error.message : "Browser receipt printing failed.",
+    };
+  }
 }
 
 export async function listSystemPrinters() {
@@ -115,32 +169,22 @@ export async function printDepartmentReceipt(payload: ReceiptPayload): Promise<P
   }
 
   const settings = readHardwareSettings()[payload.department];
-  if (!settings.autoPrintReceipt) {
-    return { ok: true, skipped: true, reason: "Auto print is disabled." };
-  }
+  if (settings.autoPrintReceipt && settings.printerName.trim() && window.orangeHotelHardware?.printRaw) {
+    try {
+      const content = buildReceiptContent(payload, settings.openDrawerOnSale);
+      const result = await window.orangeHotelHardware.printRaw({
+        printerName: settings.printerName,
+        content,
+        openDrawer: settings.openDrawerOnSale,
+      });
 
-  if (!settings.printerName.trim()) {
-    return { ok: false, skipped: true, reason: "No printer selected in hardware settings." };
-  }
-
-  if (!window.orangeHotelHardware?.printRaw) {
-    return { ok: false, skipped: true, reason: "No POS hardware bridge detected for raw printing." };
-  }
-
-  try {
-    const content = buildReceiptContent(payload, settings.printerName, settings.openDrawerOnSale);
-    const result = await window.orangeHotelHardware.printRaw({
-      printerName: settings.printerName,
-      content,
-      openDrawer: settings.openDrawerOnSale,
-    });
-
-    if (!result.ok) {
-      return { ok: false, reason: result.error || "Print failed." };
+      if (result.ok) {
+        return { ok: true };
+      }
+    } catch {
+      // Fall through to the browser print dialog so a receipt is still delivered.
     }
-
-    return { ok: true };
-  } catch (error) {
-    return { ok: false, reason: error instanceof Error ? error.message : "Print failed." };
   }
+
+  return printWithBrowser(payload);
 }
