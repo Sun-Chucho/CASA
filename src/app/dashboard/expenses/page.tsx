@@ -24,7 +24,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Save, WalletCards } from "lucide-react";
+import { Pencil, Save, WalletCards } from "lucide-react";
 
 function formatDate(value: number) {
   return new Intl.DateTimeFormat("en-GB", {
@@ -36,6 +36,12 @@ function formatDate(value: number) {
   }).format(new Date(value));
 }
 
+function toDateTimeLocal(value: number) {
+  const date = new Date(value);
+  const timezoneOffset = date.getTimezoneOffset() * 60_000;
+  return new Date(value - timezoneOffset).toISOString().slice(0, 16);
+}
+
 export default function ExpensesPage() {
   const [role, setRole] = useState<Role>("manager");
   const [department, setDepartment] = useState<ExpenseDepartment>("kitchen");
@@ -44,6 +50,9 @@ export default function ExpensesPage() {
   const [amountType, setAmountType] = useState<ExpenseAmountType>("cash");
   const [notes, setNotes] = useState("");
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
+  const [editingExpense, setEditingExpense] = useState<ExpenseRecord | null>(null);
+  const [editDate, setEditDate] = useState("");
+  const [editAmount, setEditAmount] = useState("");
   const [movingExpense, setMovingExpense] = useState<ExpenseRecord | null>(null);
   const [moveTarget, setMoveTarget] = useState<ExpenseDepartment>("kitchen");
 
@@ -110,6 +119,30 @@ export default function ExpensesPage() {
     const fallbackTarget = EXPENSE_DEPARTMENTS.find((item) => item.value !== expense.department)?.value ?? "kitchen";
     setMovingExpense(expense);
     setMoveTarget(fallbackTarget);
+  };
+
+  const openEditDialog = (expense: ExpenseRecord) => {
+    if (isDirector) return;
+    setEditingExpense(expense);
+    setEditDate(toDateTimeLocal(expense.createdAt));
+    setEditAmount(String(expense.amount));
+  };
+
+  const updateExpense = () => {
+    if (isDirector || !editingExpense) return;
+
+    const parsedAmount = Number(editAmount);
+    const parsedDate = new Date(editDate).getTime();
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0 || !Number.isFinite(parsedDate)) return;
+
+    const nextExpenses = expenses.map((expense) =>
+      expense.id === editingExpense.id
+        ? { ...expense, amount: parsedAmount, createdAt: parsedDate }
+        : expense,
+    );
+    setExpenses(nextExpenses);
+    writeJson(STORAGE_EXPENSES, nextExpenses);
+    setEditingExpense(null);
   };
 
   const moveExpense = () => {
@@ -234,9 +267,15 @@ export default function ExpensesPage() {
                   <TableCell className="text-right font-black">TSh {expense.amount.toLocaleString()}</TableCell>
                   {!isDirector && (
                     <TableCell className="text-right">
-                      <Button variant="outline" size="sm" onClick={() => openMoveDialog(expense)} className="font-black uppercase tracking-widest text-[10px]">
-                        Move
-                      </Button>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="outline" size="sm" onClick={() => openEditDialog(expense)} className="font-black uppercase tracking-widest text-[10px]">
+                          <Pencil className="mr-1 h-3.5 w-3.5" />
+                          Edit
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => openMoveDialog(expense)} className="font-black uppercase tracking-widest text-[10px]">
+                          Move
+                        </Button>
+                      </div>
                     </TableCell>
                   )}
                 </TableRow>
@@ -252,6 +291,58 @@ export default function ExpensesPage() {
           </Table>
         </CardContent>
       </Card>
+
+      {!isDirector && (
+        <Dialog open={!!editingExpense} onOpenChange={(open) => !open && setEditingExpense(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="font-black uppercase tracking-tight">Edit Expense</DialogTitle>
+              <DialogDescription>
+                Update the date and amount for {editingExpense?.title ?? "this expense"}.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="expense-edit-date" className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  Date and Time
+                </Label>
+                <Input
+                  id="expense-edit-date"
+                  type="datetime-local"
+                  value={editDate}
+                  onChange={(event) => setEditDate(event.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="expense-edit-amount" className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  Amount
+                </Label>
+                <Input
+                  id="expense-edit-amount"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={editAmount}
+                  onChange={(event) => setEditAmount(event.target.value)}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditingExpense(null)} className="font-black uppercase tracking-widest text-[10px]">
+                Cancel
+              </Button>
+              <Button
+                onClick={updateExpense}
+                disabled={!editDate || !editAmount || Number(editAmount) <= 0}
+                className="font-black uppercase tracking-widest text-[10px]"
+              >
+                <Save className="mr-2 h-4 w-4" />
+                Save Changes
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {!isDirector && (
       <Dialog open={!!movingExpense} onOpenChange={(open) => !open && setMovingExpense(null)}>
