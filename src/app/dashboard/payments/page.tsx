@@ -127,6 +127,13 @@ function toDayKey(value: number) {
   return date.toISOString().slice(0, 10);
 }
 
+function daysBetween(start: string, end: string) {
+  const startDate = new Date(`${start}T00:00:00`);
+  const endDate = new Date(`${end}T00:00:00`);
+  if (!Number.isFinite(startDate.getTime()) || !Number.isFinite(endDate.getTime())) return 0;
+  return Math.round((endDate.getTime() - startDate.getTime()) / 86_400_000);
+}
+
 function matchesPaymentDateFilter(createdAt: number, filter: PaymentDateFilter, selectedDate: string) {
   if (filter === "all") return true;
 
@@ -175,6 +182,9 @@ export default function PaymentsPage() {
   const [showMethodPopup, setShowMethodPopup] = useState(false);
   const [editingBookingId, setEditingBookingId] = useState<string | null>(null);
   const [payerNameDraft, setPayerNameDraft] = useState("");
+  const [roomNumberDraft, setRoomNumberDraft] = useState("");
+  const [checkInDateDraft, setCheckInDateDraft] = useState("");
+  const [checkOutDateDraft, setCheckOutDateDraft] = useState("");
 
   useEffect(() => {
     const savedRole = readStoredRole();
@@ -314,23 +324,42 @@ export default function PaymentsPage() {
 
   const openEditPayerDialog = (row: PaymentRow) => {
     if (isDirector || row.source !== "booking") return;
+    const booking = bookingTransactions.find((tx) => tx.id === row.id);
+    if (!booking) return;
     setEditingBookingId(row.id);
-    setPayerNameDraft(row.payer);
+    setPayerNameDraft(booking.guestName);
+    setRoomNumberDraft(booking.roomNumber);
+    setCheckInDateDraft(booking.checkInDate);
+    setCheckOutDateDraft(booking.checkOutDate);
   };
 
   const closeEditPayerDialog = () => {
     setEditingBookingId(null);
     setPayerNameDraft("");
+    setRoomNumberDraft("");
+    setCheckInDateDraft("");
+    setCheckOutDateDraft("");
   };
 
   const saveEditedPayer = () => {
     if (!editingBookingId) return;
     const nextName = payerNameDraft.trim();
-    if (!nextName) return;
+    const nextRoomNumber = roomNumberDraft.trim();
+    const nextNights = daysBetween(checkInDateDraft, checkOutDateDraft);
+    if (!nextName || !nextRoomNumber || nextNights < 1) return;
 
     const snapshot = readCashierState<BookingRecord>(STORAGE_BOOKING_TX, "orange-hotel-cashier-seq", 84920);
     const nextTransactions = snapshot.transactions.map((tx) =>
-      tx.id === editingBookingId ? { ...tx, guestName: nextName } : tx,
+      tx.id === editingBookingId
+        ? {
+            ...tx,
+            guestName: nextName,
+            roomNumber: nextRoomNumber,
+            checkInDate: checkInDateDraft,
+            checkOutDate: checkOutDateDraft,
+            nights: nextNights,
+          }
+        : tx,
     );
     setBookingTransactions(nextTransactions);
     writeCashierState(nextTransactions, snapshot.receiptSeq);
@@ -675,23 +704,49 @@ export default function PaymentsPage() {
       <Dialog open={Boolean(editingBookingId)} onOpenChange={(open) => !open && closeEditPayerDialog()}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-xl font-black uppercase tracking-tight">Edit Payer Name</DialogTitle>
-            <DialogDescription>Update the payer name for this reception booking payment.</DialogDescription>
+            <DialogTitle className="text-xl font-black uppercase tracking-tight">Edit Reception Payment</DialogTitle>
+            <DialogDescription>Update the payer, room number, and stay dates for this booking payment.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-2">
-            <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Payer Name</p>
-            <Input
-              value={payerNameDraft}
-              onChange={(event) => setPayerNameDraft(event.target.value)}
-              placeholder="Enter payer name"
-              className="h-11"
-            />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2 sm:col-span-2">
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Payer Name</p>
+              <Input
+                value={payerNameDraft}
+                onChange={(event) => setPayerNameDraft(event.target.value)}
+                placeholder="Enter payer name"
+                className="h-11"
+              />
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Room Number</p>
+              <Input
+                value={roomNumberDraft}
+                onChange={(event) => setRoomNumberDraft(event.target.value)}
+                placeholder="Enter room number"
+                className="h-11"
+              />
+            </div>
+            <div className="space-y-2">
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Check-in Date</p>
+              <Input type="date" value={checkInDateDraft} onChange={(event) => setCheckInDateDraft(event.target.value)} className="h-11" />
+            </div>
+            <div className="space-y-2">
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Check-out Date</p>
+              <Input type="date" min={checkInDateDraft} value={checkOutDateDraft} onChange={(event) => setCheckOutDateDraft(event.target.value)} className="h-11" />
+            </div>
+            {checkInDateDraft && checkOutDateDraft && daysBetween(checkInDateDraft, checkOutDateDraft) < 1 && (
+              <p className="text-sm font-bold text-red-600 sm:col-span-2">Check-out must be after check-in.</p>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={closeEditPayerDialog} className="font-black uppercase text-[10px] tracking-widest">
               Cancel
             </Button>
-            <Button onClick={saveEditedPayer} disabled={!payerNameDraft.trim()} className="font-black uppercase text-[10px] tracking-widest">
+            <Button
+              onClick={saveEditedPayer}
+              disabled={!payerNameDraft.trim() || !roomNumberDraft.trim() || daysBetween(checkInDateDraft, checkOutDateDraft) < 1}
+              className="font-black uppercase text-[10px] tracking-widest"
+            >
               Update
             </Button>
           </DialogFooter>

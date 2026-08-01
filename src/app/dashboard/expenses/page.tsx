@@ -51,6 +51,8 @@ export default function ExpensesPage() {
   const [notes, setNotes] = useState("");
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
   const [editingExpense, setEditingExpense] = useState<ExpenseRecord | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editNotes, setEditNotes] = useState("");
   const [editDate, setEditDate] = useState("");
   const [editAmount, setEditAmount] = useState("");
   const [movingExpense, setMovingExpense] = useState<ExpenseRecord | null>(null);
@@ -124,6 +126,8 @@ export default function ExpensesPage() {
   const openEditDialog = (expense: ExpenseRecord) => {
     if (isDirector) return;
     setEditingExpense(expense);
+    setEditTitle(expense.title);
+    setEditNotes(expense.notes ?? "");
     setEditDate(toDateTimeLocal(expense.createdAt));
     setEditAmount(String(expense.amount));
   };
@@ -133,11 +137,12 @@ export default function ExpensesPage() {
 
     const parsedAmount = Number(editAmount);
     const parsedDate = new Date(editDate).getTime();
-    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0 || !Number.isFinite(parsedDate)) return;
+    const nextTitle = editTitle.trim();
+    if (!nextTitle || !Number.isFinite(parsedAmount) || parsedAmount <= 0 || !Number.isFinite(parsedDate)) return;
 
     const nextExpenses = expenses.map((expense) =>
       expense.id === editingExpense.id
-        ? { ...expense, amount: parsedAmount, createdAt: parsedDate }
+        ? { ...expense, title: nextTitle, notes: editNotes.trim() || undefined, amount: parsedAmount, createdAt: parsedDate }
         : expense,
     );
     setExpenses(nextExpenses);
@@ -298,10 +303,22 @@ export default function ExpensesPage() {
             <DialogHeader>
               <DialogTitle className="font-black uppercase tracking-tight">Edit Expense</DialogTitle>
               <DialogDescription>
-                Update the date and amount for {editingExpense?.title ?? "this expense"}.
+                Update the description, notes, date, and amount for this expense.
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="expense-edit-title" className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  Description
+                </Label>
+                <Input id="expense-edit-title" value={editTitle} onChange={(event) => setEditTitle(event.target.value)} placeholder="Expense description" />
+              </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="expense-edit-notes" className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  Notes
+                </Label>
+                <Textarea id="expense-edit-notes" value={editNotes} onChange={(event) => setEditNotes(event.target.value)} placeholder="Optional expense notes" />
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="expense-edit-date" className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
                   Date and Time
@@ -333,7 +350,7 @@ export default function ExpensesPage() {
               </Button>
               <Button
                 onClick={updateExpense}
-                disabled={!editDate || !editAmount || Number(editAmount) <= 0}
+                disabled={!editTitle.trim() || !editDate || !editAmount || Number(editAmount) <= 0}
                 className="font-black uppercase tracking-widest text-[10px]"
               >
                 <Save className="mr-2 h-4 w-4" />

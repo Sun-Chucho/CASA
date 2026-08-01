@@ -51,7 +51,7 @@ type BaristaManagerPricingRow = {
   quantitySold: number;
 };
 type BaristaManagerPricingDraft = {
-  stock: string;
+  stockIn: string;
   buyingPrice: string;
   sellingPrice: string;
 };
@@ -810,7 +810,7 @@ export default function BaristaPage() {
     setManagerPricingDrafts((current) => ({
       ...current,
       [item.id]: {
-        stock: current[item.id]?.stock ?? String(item.stock),
+        stockIn: current[item.id]?.stockIn ?? "",
         buyingPrice: current[item.id]?.buyingPrice ?? String(item.buyingPrice),
         sellingPrice: current[item.id]?.sellingPrice ?? String(item.sellingPrice),
         [field]: value,
@@ -823,22 +823,23 @@ export default function BaristaPage() {
   // refresh or a new login cannot reintroduce an older value from another key.
   const saveBaristaManagerItem = async (item: BaristaManagerPricingRow) => {
     const draft = managerPricingDrafts[item.id] ?? {
-      stock: String(item.stock),
+      stockIn: "",
       buyingPrice: String(item.buyingPrice),
       sellingPrice: String(item.sellingPrice),
     };
-    const stock = Number(draft.stock);
+    const stockIn = draft.stockIn.trim() === "" ? 0 : Number(draft.stockIn);
+    let stock = item.stock + stockIn;
     const buyingPrice = Number(draft.buyingPrice);
     const sellingPrice = Number(draft.sellingPrice);
     if (
-      !Number.isFinite(stock) ||
-      stock < 0 ||
+      !Number.isFinite(stockIn) ||
+      stockIn < 0 ||
       !Number.isFinite(buyingPrice) ||
       buyingPrice < 0 ||
       !Number.isFinite(sellingPrice) ||
       sellingPrice < 0
     ) {
-      window.alert("Enter valid non-negative quantity, buying price and selling price values.");
+      window.alert("Enter valid non-negative stock-in, buying price and selling price values.");
       return;
     }
 
@@ -869,6 +870,9 @@ export default function BaristaPage() {
     );
     let nextStoreItems: Array<MainStoreItem & { lane?: "kitchen" | "barista" }>;
     if (index >= 0) {
+      // Add to the freshest persisted balance so a late sync cannot turn Stock In
+      // into an accidental stock overwrite.
+      stock = allStoreItems[index].stock + stockIn;
       nextStoreItems = allStoreItems.map((entry, idx) =>
         idx === index ? { ...entry, stock, buyingPrice, sellingPrice, updatedAt } : entry,
       );
@@ -935,31 +939,35 @@ export default function BaristaPage() {
       });
     }
 
+    const writes = [
+      writeJson(activeBaristaKey, {
+        tickets: snapshot.tickets,
+        ticketSeq: snapshot.ticketSeq,
+        payments: snapshot.payments,
+        menuItems: nextMenuItems,
+      }),
+      writeJson(STORAGE_MAIN_STORE_ITEMS, nextStoreItems),
+      writeJson(STORAGE_INVENTORY_ITEMS, nextInventoryItems),
+    ];
+    // writeJson updates the device before its cloud promise resolves. Reflect and
+    // clear the intake immediately so retrying a failed sync cannot add it twice.
+    setStoredMenuItems(nextMenuItems);
+    setBaristaStoreItems(nextStoreItems.filter((entry) => entry.lane === "barista"));
+    setInventoryItems(nextInventoryItems);
+    setManagerPricingDrafts((current) => {
+      const nextDrafts = { ...current };
+      delete nextDrafts[item.id];
+      return nextDrafts;
+    });
+
     try {
-      await Promise.all([
-        writeJson(activeBaristaKey, {
-          tickets: snapshot.tickets,
-          ticketSeq: snapshot.ticketSeq,
-          payments: snapshot.payments,
-          menuItems: nextMenuItems,
-        }),
-        writeJson(STORAGE_MAIN_STORE_ITEMS, nextStoreItems),
-        writeJson(STORAGE_INVENTORY_ITEMS, nextInventoryItems),
-      ]);
-      setStoredMenuItems(nextMenuItems);
-      setBaristaStoreItems(nextStoreItems.filter((entry) => entry.lane === "barista"));
-      setInventoryItems(nextInventoryItems);
-      setManagerPricingDrafts((current) => {
-        const nextDrafts = { ...current };
-        delete nextDrafts[item.id];
-        return nextDrafts;
-      });
+      await Promise.all(writes);
       setSavedBaristaItemId(item.id);
       window.setTimeout(() => {
         setSavedBaristaItemId((current) => (current === item.id ? "" : current));
       }, 3000);
     } catch {
-      window.alert("The values were saved on this device, but cloud synchronization did not complete. Check the connection and press Save again.");
+      window.alert("The values were saved on this device, but cloud synchronization did not complete. They will synchronize when the connection is restored.");
     } finally {
       setSavingBaristaItemId("");
     }
@@ -1839,7 +1847,7 @@ export default function BaristaPage() {
             <CardHeader>
               <CardTitle className="text-xl font-black uppercase tracking-tight">Barista Inventory & Pricing</CardTitle>
               <CardDescription>
-                Adjust quantity and prices, then press Save. The same values are stored for the POS, Barista stock and inventory.
+                Enter newly received stock to add it to the current balance, adjust prices if needed, then press Save.
               </CardDescription>
             </CardHeader>
             <CardContent className="p-0">
@@ -1847,7 +1855,8 @@ export default function BaristaPage() {
                 <TableHeader className="bg-muted/10">
                   <TableRow>
                     <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Item</TableHead>
-                    <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Quantity</TableHead>
+                    <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Current Stock</TableHead>
+                    <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Stock In</TableHead>
                     <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Qty Sold</TableHead>
                     <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Buying Price (Cost)</TableHead>
                     <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Selling Price (POS)</TableHead>
@@ -1859,13 +1868,17 @@ export default function BaristaPage() {
                     <TableRow key={item.id}>
                       <TableCell className="font-bold">{item.name}</TableCell>
                       <TableCell className="font-bold">
+                        {item.stock} {item.unit}
+                      </TableCell>
+                      <TableCell className="font-bold">
                         <div className="flex items-center gap-1">
                           <Input
                             type="number"
                             min="0"
-                            value={managerPricingDrafts[item.id]?.stock ?? String(item.stock)}
+                            value={managerPricingDrafts[item.id]?.stockIn ?? ""}
+                            placeholder="0"
                             className="h-9 w-20"
-                            onChange={(event) => updateManagerPricingDraft(item, "stock", event.target.value)}
+                            onChange={(event) => updateManagerPricingDraft(item, "stockIn", event.target.value)}
                           />
                           {item.unit ? (
                             <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">{item.unit}</span>
@@ -1920,7 +1933,7 @@ export default function BaristaPage() {
                           ) : savingBaristaItemId === item.id ? (
                             "Saving..."
                           ) : (
-                            "Save"
+                            managerPricingDrafts[item.id]?.stockIn ? "Stock In / Save" : "Save"
                           )}
                         </Button>
                       </TableCell>
@@ -1928,7 +1941,7 @@ export default function BaristaPage() {
                   ))}
                   {baristaManagerPricingRows.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={6} className="py-10 text-center font-black uppercase text-[10px] tracking-widest text-muted-foreground">
+                      <TableCell colSpan={7} className="py-10 text-center font-black uppercase text-[10px] tracking-widest text-muted-foreground">
                         No barista menu items yet
                       </TableCell>
                     </TableRow>
