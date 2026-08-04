@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { readStoredRole } from "@/app/lib/auth";
-import { Role } from "@/app/lib/mock-data";
+import { getCasaRoomPrice, Role } from "@/app/lib/mock-data";
 import { getActiveBaristaStateKey, getActiveKitchenStateKey, readCashierState, readPosState, writeCashierState, writePosState } from "@/app/lib/storage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -44,6 +44,7 @@ interface BookingRecord {
   checkOutDate: string;
   checkOutTime: string;
   nights: number;
+  ratePerNight?: number;
   total: number;
   status: TransactionStatus;
   paymentBreakdown?: BookingPaymentBreakdownItem[];
@@ -185,6 +186,9 @@ export default function PaymentsPage() {
   const [roomNumberDraft, setRoomNumberDraft] = useState("");
   const [checkInDateDraft, setCheckInDateDraft] = useState("");
   const [checkOutDateDraft, setCheckOutDateDraft] = useState("");
+  const adjustedNights = daysBetween(checkInDateDraft, checkOutDateDraft);
+  const adjustedRate = roomNumberDraft.trim() ? getCasaRoomPrice(roomNumberDraft.trim()) : 0;
+  const adjustedTotal = adjustedNights > 0 ? adjustedNights * adjustedRate : 0;
 
   useEffect(() => {
     const savedRole = readStoredRole();
@@ -358,6 +362,8 @@ export default function PaymentsPage() {
             checkInDate: checkInDateDraft,
             checkOutDate: checkOutDateDraft,
             nights: nextNights,
+            ratePerNight: adjustedRate,
+            total: nextNights * adjustedRate,
           }
         : tx,
     );
@@ -737,6 +743,22 @@ export default function PaymentsPage() {
             {checkInDateDraft && checkOutDateDraft && daysBetween(checkInDateDraft, checkOutDateDraft) < 1 && (
               <p className="text-sm font-bold text-red-600 sm:col-span-2">Check-out must be after check-in.</p>
             )}
+            {roomNumberDraft.trim() && adjustedNights > 0 && (
+              <div className="space-y-2 rounded-lg border bg-muted/20 p-3 sm:col-span-2">
+                <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  <span>Rate / Night</span>
+                  <span>TSh {adjustedRate.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  <span>Nights</span>
+                  <span>{adjustedNights}</span>
+                </div>
+                <div className="flex justify-between border-t pt-2 text-sm font-black uppercase tracking-widest">
+                  <span>Updated Total</span>
+                  <span>TSh {adjustedTotal.toLocaleString()}</span>
+                </div>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={closeEditPayerDialog} className="font-black uppercase text-[10px] tracking-widest">
@@ -744,7 +766,7 @@ export default function PaymentsPage() {
             </Button>
             <Button
               onClick={saveEditedPayer}
-              disabled={!payerNameDraft.trim() || !roomNumberDraft.trim() || daysBetween(checkInDateDraft, checkOutDateDraft) < 1}
+              disabled={!payerNameDraft.trim() || !roomNumberDraft.trim() || adjustedNights < 1}
               className="font-black uppercase text-[10px] tracking-widest"
             >
               Update
