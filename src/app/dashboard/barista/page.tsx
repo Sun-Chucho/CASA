@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
 import { readStoredRole } from "@/app/lib/auth";
 import { InventoryItem, ROOMS, Role } from "@/app/lib/mock-data";
 import {
@@ -259,11 +260,16 @@ function buildSeedMenuItems(): BaristaMenuItem[] {
 }
 
 export default function BaristaPage() {
+  const pathname = usePathname();
+  const initialView = pathname.endsWith("/restock") ? "restock" : "pos";
   const isDirector = useIsDirector();
   const { confirm, dialog } = useConfirmDialog();
   const [role, setRole] = useState<Role | null>(null);
   const isManager = role === "manager";
-  const [managerTab, setManagerTab] = useState<"inventory" | "finance" | "sales" | "drinks">("finance");
+  const isBaristaRestock = role === "barista" && initialView === "restock";
+  const [managerTab, setManagerTab] = useState<"inventory" | "finance" | "sales" | "drinks">(
+    initialView === "restock" ? "inventory" : "finance",
+  );
   const [drinkEditId, setDrinkEditId] = useState<string | null>(null);
   const [drinkName, setDrinkName] = useState("");
   const [drinkPrice, setDrinkPrice] = useState("");
@@ -1785,7 +1791,7 @@ export default function BaristaPage() {
     </div>
   );
 
-  if (isManager) {
+  if (isManager || isBaristaRestock) {
   return (
     <div className="space-y-6">
       {dialog}
@@ -1795,9 +1801,13 @@ export default function BaristaPage() {
               <Coffee className="w-7 h-7" />
             </div>
             <div>
-              <h1 className="text-3xl font-black tracking-tight">Barista Setup</h1>
+              <h1 className="text-3xl font-black tracking-tight">
+                {isBaristaRestock ? "Restock / Stock In" : "Barista Setup"}
+              </h1>
               <p className="text-muted-foreground text-sm uppercase font-bold tracking-wider">
-                Inventory visibility for barista operations
+                {isBaristaRestock
+                  ? "Record received stock and add new barista items"
+                  : "Inventory visibility for barista operations"}
               </p>
             </div>
           </div>
@@ -1812,7 +1822,7 @@ export default function BaristaPage() {
             Add Barista Item
           </Button>
         </header>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        {isManager && <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <Card className="border-none shadow-sm">
             <CardContent className="p-4">
               <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Barista Capital</p>
@@ -1833,13 +1843,17 @@ export default function BaristaPage() {
               </p>
             </CardContent>
           </Card>
-        </div>
+        </div>}
         <Tabs value={managerTab} onValueChange={(value) => setManagerTab(value as "inventory" | "finance" | "sales" | "drinks")}>
-          <TabsList className="h-10">
-            <TabsTrigger value="finance" className="font-black uppercase text-[10px] tracking-widest">Finance</TabsTrigger>
-            <TabsTrigger value="inventory" className="font-black uppercase text-[10px] tracking-widest">Inventory</TabsTrigger>
-            <TabsTrigger value="sales" className="font-black uppercase text-[10px] tracking-widest">Sales</TabsTrigger>
-            <TabsTrigger value="drinks" className="font-black uppercase text-[10px] tracking-widest">Items / Drinks</TabsTrigger>
+          <TabsList className={isBaristaRestock ? "grid h-10 w-full grid-cols-2 md:w-[360px]" : "h-10"}>
+            {isManager && <TabsTrigger value="finance" className="font-black uppercase text-[10px] tracking-widest">Finance</TabsTrigger>}
+            <TabsTrigger value="inventory" className="font-black uppercase text-[10px] tracking-widest">
+              {isBaristaRestock ? "Restock / Stock In" : "Inventory"}
+            </TabsTrigger>
+            {isManager && <TabsTrigger value="sales" className="font-black uppercase text-[10px] tracking-widest">Sales</TabsTrigger>}
+            <TabsTrigger value="drinks" className="font-black uppercase text-[10px] tracking-widest">
+              {isBaristaRestock ? "Add Items" : "Items / Drinks"}
+            </TabsTrigger>
           </TabsList>
         </Tabs>
         {managerTab === "drinks" ? renderDrinksManager() : managerTab === "finance" ? renderFinanceTable() : managerTab === "sales" ? renderDirectorSalesTable() : (
