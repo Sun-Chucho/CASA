@@ -548,7 +548,23 @@ function getRecordRevision(record: unknown) {
   return Number.isFinite(revision) ? revision : 0;
 }
 
+function getManualPaymentRevision(record: unknown) {
+  if (typeof record !== "object" || record === null) return 0;
+  const revision = Number((record as { paymentMethodEditedAt?: unknown }).paymentMethodEditedAt ?? 0);
+  return Number.isFinite(revision) ? revision : 0;
+}
+
 function chooseRecordBySettlementPriority(currentRecord: unknown, incomingRecord: unknown) {
+  // A receptionist may intentionally move a settled payment back to credit.
+  // That is a lower settlement state, so the generic priority rule would
+  // otherwise restore the stale remote "completed" record. An explicit manual
+  // payment revision is authoritative in either direction.
+  const currentPaymentRevision = getManualPaymentRevision(currentRecord);
+  const incomingPaymentRevision = getManualPaymentRevision(incomingRecord);
+  if (currentPaymentRevision !== incomingPaymentRevision && Math.max(currentPaymentRevision, incomingPaymentRevision) > 0) {
+    return incomingPaymentRevision > currentPaymentRevision ? incomingRecord : currentRecord;
+  }
+
   const currentPriority = getSettlementPriority(currentRecord);
   const incomingPriority = getSettlementPriority(incomingRecord);
   if (currentPriority !== incomingPriority) {

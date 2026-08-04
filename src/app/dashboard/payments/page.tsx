@@ -188,6 +188,8 @@ export default function PaymentsPage() {
   const [checkInDateDraft, setCheckInDateDraft] = useState("");
   const [checkOutDateDraft, setCheckOutDateDraft] = useState("");
   const [paymentMethodDraft, setPaymentMethodDraft] = useState<PaymentMethod>("cash");
+  const [savingEditedPayment, setSavingEditedPayment] = useState(false);
+  const [editPaymentFeedback, setEditPaymentFeedback] = useState<string | null>(null);
   const adjustedNights = daysBetween(checkInDateDraft, checkOutDateDraft);
   const adjustedRate = roomNumberDraft.trim() ? getCasaRoomPrice(roomNumberDraft.trim()) : 0;
   const adjustedTotal = adjustedNights > 0 ? adjustedNights * adjustedRate : 0;
@@ -340,6 +342,7 @@ export default function PaymentsPage() {
     setCheckInDateDraft(booking.checkInDate);
     setCheckOutDateDraft(booking.checkOutDate);
     setPaymentMethodDraft(booking.status === "credit" ? "credit" : booking.payment);
+    setEditPaymentFeedback(null);
   };
 
   const closeEditPayerDialog = () => {
@@ -349,10 +352,11 @@ export default function PaymentsPage() {
     setCheckInDateDraft("");
     setCheckOutDateDraft("");
     setPaymentMethodDraft("cash");
+    setEditPaymentFeedback(null);
   };
 
-  const saveEditedPayer = () => {
-    if (!editingBookingId) return;
+  const saveEditedPayer = async () => {
+    if (!editingBookingId || savingEditedPayment) return;
     const nextName = payerNameDraft.trim();
     const nextRoomNumber = roomNumberDraft.trim();
     const nextNights = daysBetween(checkInDateDraft, checkOutDateDraft);
@@ -382,9 +386,19 @@ export default function PaymentsPage() {
           }
         : tx,
     );
-    setBookingTransactions(nextTransactions);
-    writeCashierState(nextTransactions, snapshot.receiptSeq);
-    closeEditPayerDialog();
+    setSavingEditedPayment(true);
+    setEditPaymentFeedback(null);
+    try {
+      const saved = await writeCashierState(nextTransactions, snapshot.receiptSeq);
+      if (!saved) {
+        setEditPaymentFeedback("The payment update is saved on this device but has not reached the cloud. Check the connection and try Update again.");
+        return;
+      }
+      setBookingTransactions(nextTransactions);
+      closeEditPayerDialog();
+    } finally {
+      setSavingEditedPayment(false);
+    }
   };
 
   const applyPaidMethod = (method: "cash" | "card" | "mobile") => {
@@ -787,17 +801,22 @@ export default function PaymentsPage() {
                 </div>
               </div>
             )}
+            {editPaymentFeedback && (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs font-bold text-amber-800 sm:col-span-2">
+                {editPaymentFeedback}
+              </p>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={closeEditPayerDialog} className="font-black uppercase text-[10px] tracking-widest">
               Cancel
             </Button>
             <Button
-              onClick={saveEditedPayer}
-              disabled={!payerNameDraft.trim() || !roomNumberDraft.trim() || adjustedNights < 1}
+              onClick={() => void saveEditedPayer()}
+              disabled={!payerNameDraft.trim() || !roomNumberDraft.trim() || adjustedNights < 1 || savingEditedPayment}
               className="font-black uppercase text-[10px] tracking-widest"
             >
-              Update
+              {savingEditedPayment ? "Saving..." : "Update"}
             </Button>
           </DialogFooter>
         </DialogContent>
