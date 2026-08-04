@@ -35,7 +35,21 @@ import { useConfirmDialog } from "@/hooks/use-confirm-dialog";
 import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
 import { DEFAULT_LOGIN_PASSWORD, getProfilePassword, readActiveSessionUsername, readLocalLoginProfiles, saveLoginProfileToServer, STORAGE_LOGIN_PROFILES, subscribeToSessionIdentity, upsertProfileUser } from "@/app/lib/login-profiles";
 
-type BaristaCategory = "all" | "espresso" | "coffee" | "tea" | "cold" | "snacks";
+type BaristaCategory =
+  | "all"
+  | "espresso"
+  | "coffee"
+  | "tea"
+  | "beer"
+  | "wine"
+  | "spirits"
+  | "cider"
+  | "soft-drinks"
+  | "water-juice"
+  | "energy-drinks"
+  | "malt"
+  | "cold"
+  | "snacks";
 type ServiceMode = "restaurant" | "room-service" | "take-away";
 type BaristaPaymentMethod = "cash" | "card" | "mobile" | "credit";
 type BaristaPaymentStatus = "completed" | "credit";
@@ -104,6 +118,8 @@ interface BaristaPaymentRecord {
   status: BaristaPaymentStatus;
   method: BaristaPaymentMethod;
   lines?: BaristaOrderLine[];
+  historical?: boolean;
+  recordedAt?: number;
 }
 
 interface CancelledBaristaTicket extends BaristaTicket {
@@ -126,6 +142,25 @@ const STORAGE_MENU = "orange-hotel-barista-menu";
 const STORAGE_PAYMENTS = "orange-hotel-barista-payments";
 const STORAGE_CANCELLED = "orange-hotel-cancelled-tickets";
 const STORAGE_WASTE = "orange-hotel-barista-waste";
+
+const BARISTA_CATEGORIES: Array<{ value: BaristaCategory; label: string }> = [
+  { value: "all", label: "All" },
+  { value: "beer", label: "Beer" },
+  { value: "wine", label: "Wine" },
+  { value: "spirits", label: "Spirits" },
+  { value: "cider", label: "Cider" },
+  { value: "malt", label: "Malt" },
+  { value: "soft-drinks", label: "Soft Drinks" },
+  { value: "water-juice", label: "Water / Juice" },
+  { value: "energy-drinks", label: "Energy Drinks" },
+  { value: "espresso", label: "Espresso" },
+  { value: "coffee", label: "Coffee" },
+  { value: "tea", label: "Tea" },
+  { value: "cold", label: "Iced Drinks" },
+  { value: "snacks", label: "Snacks" },
+];
+
+const ALCOHOL_CATEGORIES = new Set<BaristaCategory>(["beer", "wine", "spirits", "cider"]);
 
 function matchesSalesDateFilter(createdAt: number | undefined, filter: SalesDateFilter) {
   if (filter === "all") return true;
@@ -162,18 +197,37 @@ const normalizeCategory = (value: string, itemName = ""): Exclude<BaristaCategor
   const normalizedValue = value.trim().toLowerCase();
   const normalizedName = itemName.trim().toLowerCase();
 
-  if (normalizedValue === "espresso" || normalizedValue === "coffee" || normalizedValue === "tea" || normalizedValue === "cold" || normalizedValue === "snacks") {
+  if (
+    normalizedValue === "espresso" ||
+    normalizedValue === "coffee" ||
+    normalizedValue === "tea" ||
+    normalizedValue === "cold" ||
+    normalizedValue === "snacks" ||
+    normalizedValue === "beer" ||
+    normalizedValue === "wine" ||
+    normalizedValue === "cider" ||
+    normalizedValue === "malt"
+  ) {
     return normalizedValue;
   }
 
-  if (normalizedValue === "soft drink" || normalizedValue === "soda" || normalizedValue === "energy drink" || normalizedValue === "water" || normalizedValue === "beer" || normalizedValue === "wine" || normalizedValue === "cider" || normalizedValue === "spirit" || normalizedValue === "sparkling" || normalizedValue === "whisky" || normalizedValue === "gin" || normalizedValue === "liqueur" || normalizedValue === "cognac" || normalizedValue === "aperitif" || normalizedValue === "malt" || normalizedValue === "bar") {
-    return "cold";
-  }
+  if (normalizedValue === "soft drink" || normalizedValue === "soft-drinks" || normalizedValue === "soda") return "soft-drinks";
+  if (normalizedValue === "energy drink" || normalizedValue === "energy-drinks") return "energy-drinks";
+  if (normalizedValue === "water" || normalizedValue === "juice" || normalizedValue === "water-juice") return "water-juice";
+  if (normalizedValue === "sparkling") return "wine";
+  if (["spirit", "spirits", "whisky", "gin", "liqueur", "cognac", "aperitif", "vodka", "rum", "brandy"].includes(normalizedValue)) return "spirits";
 
   if (normalizedName.includes("espresso") || normalizedName.includes("macchiato")) return "espresso";
   if (normalizedName.includes("tea")) return "tea";
   if (normalizedName.includes("ice cream") || normalizedName.includes("snack")) return "snacks";
-  if (normalizedName.includes("iced") || normalizedName.includes("soda") || normalizedName.includes("water") || normalizedName.includes("juice") || normalizedName.includes("beer") || normalizedName.includes("wine")) return "cold";
+  if (normalizedName.includes("beer") || normalizedName.includes("lager") || normalizedName.includes("heineken")) return "beer";
+  if (normalizedName.includes("wine")) return "wine";
+  if (normalizedName.includes("cider") || normalizedName.includes("savanna") || normalizedName.includes("brutal fruit")) return "cider";
+  if (normalizedName.includes("malt")) return "malt";
+  if (normalizedName.includes("energy") || normalizedName.includes("red bull")) return "energy-drinks";
+  if (normalizedName.includes("soda") || normalizedName.includes("coca") || normalizedName.includes("pepsi")) return "soft-drinks";
+  if (normalizedName.includes("water") || normalizedName.includes("juice")) return "water-juice";
+  if (normalizedName.includes("iced")) return "cold";
   return "coffee";
 };
 
@@ -214,14 +268,46 @@ function normalizeBaristaMenuItemsFromInventory(inventory: InventoryItem[]): Bar
 function syncBaristaMenuItemsWithSharedInventory(
   menuItems: BaristaMenuItem[],
   inventory: InventoryItem[],
-  _storeItems: MainStoreItem[],
+  storeItems: MainStoreItem[],
 ) {
   // The POS menu is authoritative: seeded drinks plus manager edits. Stock
   // levels are resolved separately at render time via getMenuStockStatus.
   if (menuItems.length === 0) {
     return normalizeBaristaMenuItemsFromInventory(inventory);
   }
-  return menuItems;
+  return menuItems.map((menuItem) => {
+    const target = normalizeBaristaTarget(menuItem.name);
+    const storeMatch = storeItems.find(
+      (item) => normalizeBaristaTarget(getStoreItemLabel(item)) === target,
+    );
+    const inventoryMatch = inventory.find((item) => {
+      const names = [item.name, item.size ? `${item.name} ${item.size}` : item.name];
+      return names.some((name) => normalizeBaristaTarget(name) === target);
+    });
+    const seedMatch = BARISTA_INVENTORY_SEED.find((item) => {
+      if (!item.name) return false;
+      return normalizeBaristaTarget(
+        getBaristaInventoryLabel({ name: item.name, size: item.size ?? "" }),
+      ) === target;
+    });
+    const inventoryCategory = inventoryMatch?.category?.trim().toLowerCase() === "bar"
+      ? undefined
+      : inventoryMatch?.category;
+    const sourceCategory =
+      storeMatch?.subCategory ??
+      inventoryMatch?.subCategory ??
+      inventoryCategory ??
+      seedMatch?.category ??
+      menuItem.category;
+    const category = normalizeCategory(sourceCategory, menuItem.name);
+    return category === menuItem.category ? menuItem : { ...menuItem, category };
+  });
+}
+
+function getLocalDateInputValue() {
+  const now = new Date();
+  const offsetMs = now.getTimezoneOffset() * 60_000;
+  return new Date(now.getTime() - offsetMs).toISOString().slice(0, 10);
 }
 
 function normalizeBaristaTarget(name: string) {
@@ -261,12 +347,17 @@ function buildSeedMenuItems(): BaristaMenuItem[] {
 
 export default function BaristaPage() {
   const pathname = usePathname();
-  const initialView = pathname.endsWith("/restock") ? "restock" : "pos";
+  const initialView = pathname.endsWith("/restock")
+    ? "restock"
+    : pathname.endsWith("/past-sales")
+      ? "past-sales"
+      : "pos";
   const isDirector = useIsDirector();
   const { confirm, dialog } = useConfirmDialog();
   const [role, setRole] = useState<Role | null>(null);
   const isManager = role === "manager";
   const isBaristaRestock = role === "barista" && initialView === "restock";
+  const isBaristaPastSales = role === "barista" && initialView === "past-sales";
   const [managerTab, setManagerTab] = useState<"inventory" | "finance" | "sales" | "drinks">(
     initialView === "restock" ? "inventory" : "finance",
   );
@@ -288,6 +379,12 @@ export default function BaristaPage() {
   const [category, setCategory] = useState<BaristaCategory>("all");
   const [serviceMode, setServiceMode] = useState<ServiceMode>("restaurant");
   const [searchTerm, setSearchTerm] = useState("");
+  const [pastSaleDate, setPastSaleDate] = useState(getLocalDateInputValue);
+  const [pastSaleSearch, setPastSaleSearch] = useState("");
+  const [pastSaleMethod, setPastSaleMethod] = useState<Exclude<BaristaPaymentMethod, "credit">>("cash");
+  const [pastSaleCart, setPastSaleCart] = useState<CartLine[]>([]);
+  const [pastSaleFeedback, setPastSaleFeedback] = useState<string | null>(null);
+  const [savingPastSale, setSavingPastSale] = useState(false);
   const [tableNumber, setTableNumber] = useState("");
   const [roomNumber, setRoomNumber] = useState("");
 
@@ -609,6 +706,24 @@ export default function BaristaPage() {
   const menuItems = useMemo(
     () => normalizeBaristaMenuItems(storedMenuItems, baristaStoreItems),
     [baristaStoreItems, storedMenuItems],
+  );
+
+  const alcoholMenuItems = useMemo(() => {
+    const search = pastSaleSearch.trim().toLowerCase();
+    return menuItems.filter(
+      (item) =>
+        ALCOHOL_CATEGORIES.has(item.category) &&
+        (!search || `${item.name} ${item.category}`.toLowerCase().includes(search)),
+    );
+  }, [menuItems, pastSaleSearch]);
+
+  const pastSaleTotal = useMemo(
+    () => pastSaleCart.reduce((sum, line) => sum + line.item.price * line.qty, 0),
+    [pastSaleCart],
+  );
+  const recordedPastSales = useMemo(
+    () => baristaPayments.filter((payment) => payment.historical === true).sort((a, b) => b.createdAt - a.createdAt),
+    [baristaPayments],
   );
 
   const filteredMenu = useMemo(
@@ -1309,6 +1424,89 @@ export default function BaristaPage() {
     );
   };
 
+  const addToPastSale = (item: BaristaMenuItem) => {
+    setPastSaleFeedback(null);
+    setPastSaleCart((current) => {
+      const existing = current.find((line) => line.item.id === item.id);
+      if (existing) {
+        return current.map((line) => (line.item.id === item.id ? { ...line, qty: line.qty + 1 } : line));
+      }
+      return [...current, { item, qty: 1 }];
+    });
+  };
+
+  const changePastSaleQuantity = (itemId: string, change: number) => {
+    setPastSaleFeedback(null);
+    setPastSaleCart((current) =>
+      current
+        .map((line) =>
+          line.item.id === itemId ? { ...line, qty: Math.max(0, line.qty + change) } : line,
+        )
+        .filter((line) => line.qty > 0),
+    );
+  };
+
+  const recordPastSale = async () => {
+    if (!isBaristaPastSales || !pastSaleDate || pastSaleCart.length === 0 || pastSaleTotal <= 0) return;
+    const saleTimestamp = new Date(`${pastSaleDate}T12:00:00`).getTime();
+    if (!Number.isFinite(saleTimestamp) || pastSaleDate > getLocalDateInputValue()) {
+      setPastSaleFeedback("Choose a valid past or current sales date.");
+      return;
+    }
+
+    const approved = await confirm({
+      title: "Record Past Bar Sale",
+      description: `Record TSh ${pastSaleTotal.toLocaleString()} in alcohol sales for ${pastSaleDate}? Current stock will not be changed.`,
+      actionLabel: "Record Sale",
+    });
+    if (!approved) return;
+
+    setSavingPastSale(true);
+    setPastSaleFeedback(null);
+    try {
+      const activeBaristaKey = getActiveBaristaStateKey();
+      const snapshot = readPosState<BaristaTicket, BaristaPaymentRecord, BaristaMenuItem>(
+        activeBaristaKey,
+        STORAGE_TICKETS,
+        STORAGE_SEQ,
+        STORAGE_PAYMENTS,
+        STORAGE_MENU,
+        490,
+      );
+      const nextSeq = snapshot.ticketSeq + 1;
+      const recordedAt = Date.now();
+      const paymentRecord: BaristaPaymentRecord = {
+        id: `bp-history-${recordedAt}`,
+        ticketId: `historical-${recordedAt}`,
+        code: `B-H-${nextSeq}`,
+        createdAt: saleTimestamp,
+        mode: "take-away",
+        destination: "Historical Bar Sale",
+        total: pastSaleTotal,
+        status: "completed",
+        method: pastSaleMethod,
+        lines: pastSaleCart.map((line) => ({ name: line.item.name, qty: line.qty })),
+        historical: true,
+        recordedAt,
+      };
+      const nextPayments = [paymentRecord, ...snapshot.payments];
+
+      await writePosState(
+        activeBaristaKey,
+        snapshot.tickets,
+        nextSeq,
+        nextPayments,
+        snapshot.menuItems,
+      );
+      setTicketSeq(nextSeq);
+      setBaristaPayments(nextPayments);
+      setPastSaleCart([]);
+      setPastSaleFeedback(`Past sale ${paymentRecord.code} recorded. Current stock was not changed.`);
+    } finally {
+      setSavingPastSale(false);
+    }
+  };
+
   const removeLine = (itemId: string) => {
     if (isDirector) return;
     setCart((current) => current.filter((line) => line.item.id !== itemId));
@@ -1628,9 +1826,9 @@ export default function BaristaPage() {
     }
   };
 
-  const DRINK_CATEGORIES: Array<Exclude<BaristaCategory, "all">> = [
-    "espresso", "coffee", "tea", "cold", "snacks",
-  ];
+  const DRINK_CATEGORIES = BARISTA_CATEGORIES.filter(
+    (entry): entry is { value: Exclude<BaristaCategory, "all">; label: string } => entry.value !== "all",
+  );
 
   const renderDrinksManager = () => (
     <div className="space-y-6">
@@ -1671,8 +1869,8 @@ export default function BaristaPage() {
               value={drinkCategory}
               onChange={(e) => setDrinkCategory(e.target.value as Exclude<BaristaCategory, "all">)}
             >
-              {DRINK_CATEGORIES.map((cat) => (
-                <option key={cat} value={cat}>{cat.charAt(0).toUpperCase() + cat.slice(1)}</option>
+              {DRINK_CATEGORIES.map((entry) => (
+                <option key={entry.value} value={entry.value}>{entry.label}</option>
               ))}
             </select>
           </div>
@@ -1790,6 +1988,192 @@ export default function BaristaPage() {
       </Card>
     </div>
   );
+
+  if (isBaristaPastSales) {
+    return (
+      <div className="space-y-6">
+        {dialog}
+        <header>
+          <h1 className="text-3xl font-black tracking-tight">Record Past Bar Sales</h1>
+          <p className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
+            Backdate alcohol sales without changing the current accurate stock balance
+          </p>
+        </header>
+
+        <Card className="border-amber-200 bg-amber-50/60 shadow-none">
+          <CardContent className="p-4 text-xs font-black uppercase tracking-widest text-amber-800">
+            Historical entries update barista sales and financial reports only. They never deduct bottles or tots from current stock.
+          </CardContent>
+        </Card>
+
+        <div className="grid gap-6 xl:grid-cols-3">
+          <Card className="border-none shadow-sm xl:col-span-2">
+            <CardHeader className="space-y-4">
+              <div>
+                <CardTitle className="text-xl font-black uppercase tracking-tight">Alcohol Sold</CardTitle>
+                <CardDescription>Select the products and quantities sold on the historical date.</CardDescription>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Sales Date</p>
+                  <Input
+                    type="date"
+                    max={getLocalDateInputValue()}
+                    value={pastSaleDate}
+                    onChange={(event) => {
+                      setPastSaleDate(event.target.value);
+                      setPastSaleFeedback(null);
+                    }}
+                    className="h-11"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Search Alcohol</p>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      value={pastSaleSearch}
+                      onChange={(event) => setPastSaleSearch(event.target.value)}
+                      placeholder="Beer, wine, whisky..."
+                      className="h-11 pl-10"
+                    />
+                  </div>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {alcoholMenuItems.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => addToPastSale(item)}
+                    className="rounded-xl border bg-white p-4 text-left transition hover:border-primary hover:shadow-sm"
+                  >
+                    <Badge variant="outline" className="text-[9px] font-black uppercase tracking-widest">
+                      {BARISTA_CATEGORIES.find((entry) => entry.value === item.category)?.label ?? item.category}
+                    </Badge>
+                    <p className="mt-3 font-black">{item.name}</p>
+                    <p className="mt-2 text-sm font-black text-primary">TSh {item.price.toLocaleString()}</p>
+                  </button>
+                ))}
+                {alcoholMenuItems.length === 0 && (
+                  <p className="col-span-full py-10 text-center text-xs font-black uppercase tracking-widest text-muted-foreground">
+                    No matching alcohol items found
+                  </p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="h-fit border-none shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-xl font-black uppercase tracking-tight">Past Sale</CardTitle>
+              <CardDescription>{pastSaleDate || "Choose a sales date"}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-3">
+                {pastSaleCart.map((line) => (
+                  <div key={line.item.id} className="rounded-xl border p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-black">{line.item.name}</p>
+                        <p className="text-xs font-bold text-muted-foreground">
+                          TSh {(line.item.price * line.qty).toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button type="button" size="sm" variant="outline" onClick={() => changePastSaleQuantity(line.item.id, -1)} className="h-8 w-8 p-0">
+                          <Minus className="h-3 w-3" />
+                        </Button>
+                        <span className="min-w-6 text-center font-black">{line.qty}</span>
+                        <Button type="button" size="sm" variant="outline" onClick={() => changePastSaleQuantity(line.item.id, 1)} className="h-8 w-8 p-0">
+                          <Plus className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {pastSaleCart.length === 0 && (
+                  <p className="py-6 text-center text-xs font-black uppercase tracking-widest text-muted-foreground">No items selected</p>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Payment Method</p>
+                <select
+                  value={pastSaleMethod}
+                  onChange={(event) => setPastSaleMethod(event.target.value as Exclude<BaristaPaymentMethod, "credit">)}
+                  className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm font-bold"
+                >
+                  <option value="cash">Cash</option>
+                  <option value="card">Card</option>
+                  <option value="mobile">Mobile Money</option>
+                </select>
+              </div>
+
+              <div className="flex justify-between border-t pt-4 text-lg font-black">
+                <span>Total</span>
+                <span className="text-primary">TSh {pastSaleTotal.toLocaleString()}</span>
+              </div>
+
+              {pastSaleFeedback && (
+                <p className="rounded-lg border bg-muted/20 p-3 text-xs font-bold">{pastSaleFeedback}</p>
+              )}
+
+              <Button
+                onClick={() => void recordPastSale()}
+                disabled={!pastSaleDate || pastSaleCart.length === 0 || pastSaleTotal <= 0 || savingPastSale}
+                className="h-11 w-full font-black uppercase text-[10px] tracking-widest"
+              >
+                {savingPastSale ? "Recording..." : "Record Past Sale"}
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card className="border-none shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-xl font-black uppercase tracking-tight">Recorded Past Sales</CardTitle>
+            <CardDescription>Historical bar entries already included in sales and financial reports.</CardDescription>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader className="bg-muted/10">
+                <TableRow>
+                  <TableHead className="font-black uppercase text-[10px] tracking-widest">Date</TableHead>
+                  <TableHead className="font-black uppercase text-[10px] tracking-widest">Reference</TableHead>
+                  <TableHead className="font-black uppercase text-[10px] tracking-widest">Items</TableHead>
+                  <TableHead className="font-black uppercase text-[10px] tracking-widest">Method</TableHead>
+                  <TableHead className="text-right font-black uppercase text-[10px] tracking-widest">Total</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {recordedPastSales.map((payment) => (
+                  <TableRow key={payment.id}>
+                    <TableCell className="font-bold">{new Date(payment.createdAt).toLocaleDateString()}</TableCell>
+                    <TableCell className="font-black">{payment.code}</TableCell>
+                    <TableCell className="font-bold text-sm">
+                      {payment.lines?.map((line) => `${line.name} x${line.qty}`).join(" | ") || "-"}
+                    </TableCell>
+                    <TableCell className="font-black uppercase text-[10px] tracking-widest">{payment.method}</TableCell>
+                    <TableCell className="text-right font-black">TSh {payment.total.toLocaleString()}</TableCell>
+                  </TableRow>
+                ))}
+                {recordedPastSales.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5} className="py-10 text-center text-xs font-black uppercase tracking-widest text-muted-foreground">
+                      No past sales recorded yet
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   if (isManager || isBaristaRestock) {
   return (
@@ -2285,13 +2669,12 @@ export default function BaristaPage() {
               </div>
 
               <Tabs value={category} onValueChange={(value) => setCategory(value as BaristaCategory)}>
-                <TabsList className="w-full grid grid-cols-3 md:grid-cols-6 h-auto gap-1 bg-muted/30 p-1.5 rounded-xl">
-                  <TabsTrigger value="all" className="font-black uppercase text-[10px] tracking-widest rounded-lg">All</TabsTrigger>
-                  <TabsTrigger value="espresso" className="font-black uppercase text-[10px] tracking-widest rounded-lg">Espresso</TabsTrigger>
-                  <TabsTrigger value="coffee" className="font-black uppercase text-[10px] tracking-widest rounded-lg">Coffee</TabsTrigger>
-                  <TabsTrigger value="tea" className="font-black uppercase text-[10px] tracking-widest rounded-lg">Tea</TabsTrigger>
-                  <TabsTrigger value="cold" className="font-black uppercase text-[10px] tracking-widest rounded-lg">Cold</TabsTrigger>
-                  <TabsTrigger value="snacks" className="font-black uppercase text-[10px] tracking-widest rounded-lg">Snacks</TabsTrigger>
+                <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 rounded-xl bg-muted/30 p-1.5">
+                  {BARISTA_CATEGORIES.map((entry) => (
+                    <TabsTrigger key={entry.value} value={entry.value} className="font-black uppercase text-[10px] tracking-widest rounded-lg">
+                      {entry.label}
+                    </TabsTrigger>
+                  ))}
                 </TabsList>
               </Tabs>
 
@@ -2314,7 +2697,7 @@ export default function BaristaPage() {
                   >
                     <div className="flex items-center justify-between mb-3">
                       <Badge variant="outline" className="uppercase text-[9px] font-black tracking-widest">
-                          {item.category}
+                          {BARISTA_CATEGORIES.find((entry) => entry.value === item.category)?.label ?? item.category}
                       </Badge>
                         <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest text-right">
                           <span className="block">{stockStatus.label}</span>
@@ -2741,4 +3124,5 @@ export default function BaristaPage() {
       )}
     </div>
   );
+
 }

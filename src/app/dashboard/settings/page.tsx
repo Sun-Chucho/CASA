@@ -31,7 +31,7 @@ import { subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
 import { normalizeRole } from "@/app/lib/auth";
 import { Role } from "@/app/lib/mock-data";
 import {
-  DEFAULT_LOGIN_PASSWORD,
+  getDefaultLoginPassword,
   getProfilePassword,
   LoginProfileEntry,
   readActiveSessionUsername,
@@ -253,7 +253,7 @@ export default function SettingsPage() {
       return;
     }
 
-    const expectedPassword = getProfilePassword(activeProfile, normalizedUsername, DEFAULT_LOGIN_PASSWORD);
+    const expectedPassword = getProfilePassword(activeProfile, normalizedUsername, getDefaultLoginPassword(role));
     if (currentPassword !== expectedPassword) {
       setAccountFeedback({ type: "error", message: "Current password is incorrect." });
       return;

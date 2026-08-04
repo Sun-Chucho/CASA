@@ -68,6 +68,13 @@ function readHistoryTimestamp(record: unknown) {
 }
 
 function keepCasaHistoryRecord(record: unknown) {
+  if (typeof record === "object" && record !== null) {
+    const historical = (record as Record<string, unknown>).historical === true;
+    const recordedAt = Number((record as Record<string, unknown>).recordedAt);
+    if (historical && Number.isFinite(recordedAt) && recordedAt >= CASA_DATA_START_MS) {
+      return true;
+    }
+  }
   const timestamp = readHistoryTimestamp(record);
   // Records without a usable date are preserved rather than guessed at.
   return timestamp === null || timestamp >= CASA_DATA_START_MS;

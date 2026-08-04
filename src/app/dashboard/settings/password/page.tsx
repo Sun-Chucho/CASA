@@ -5,7 +5,7 @@ import { Lock, User } from "lucide-react";
 import { normalizeRole } from "@/app/lib/auth";
 import { Role } from "@/app/lib/mock-data";
 import {
-  DEFAULT_LOGIN_PASSWORD,
+  getDefaultLoginPassword,
   getProfilePassword,
   LoginProfileEntry,
   readLocalLoginProfiles,
@@ -61,7 +61,7 @@ export default function PasswordSettingsPage() {
       return;
     }
 
-    const expectedPassword = getProfilePassword(activeProfile, normalizedUsername, DEFAULT_LOGIN_PASSWORD);
+    const expectedPassword = getProfilePassword(activeProfile, normalizedUsername, getDefaultLoginPassword(role));
     if (currentPassword !== expectedPassword) {
       setFeedback({ type: "error", message: "Current password is incorrect." });
       return;

@@ -45,6 +45,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Menu Create', href: '/dashboard/menu-create', icon: FileSpreadsheet, roles: ['manager'] },
   { label: 'Company Stock', href: '/dashboard/company-stock', icon: Building2, roles: ['manager', 'director', 'inventory'] },
   { label: 'F&B POS', href: '/dashboard/fnb-pos', icon: Utensils, roles: ['kitchen', 'barista'] },
+  { label: 'Record Past Sales', href: '/dashboard/barista/past-sales', icon: ReceiptText, roles: ['barista'] },
   { label: 'Restock / Stock In', href: '/dashboard/barista/restock', icon: Package, roles: ['barista'] },
   { label: 'Booking', href: '/dashboard/cashier', icon: ShoppingCart, roles: ['manager', 'director', 'cashier'] },
   { label: 'Cash Requests', href: '/dashboard/cash-requests', icon: HandCoins, roles: ['cashier'] },
@@ -65,7 +66,7 @@ const NAV_ITEMS: NavItem[] = [
 const ROLE_NAV_PRIORITY: Partial<Record<Role, string[]>> = {
   cashier: ['/dashboard/cashier', '/dashboard/laundry', '/dashboard/cash-requests', '/dashboard/website-bookings', '/dashboard/live-chat'],
   kitchen: ['/dashboard/kitchen'],
-  barista: ['/dashboard/barista', '/dashboard/barista/restock'],
+  barista: ['/dashboard/barista', '/dashboard/barista/past-sales', '/dashboard/barista/restock'],
 };
 
 export function SidebarNav({ role }: { role: Role }) {
