@@ -1,4 +1,31 @@
-const CACHE_NAME = "cassa-hotel-shell-v1";
+const CACHE_NAME = "cassa-hotel-shell-v2";
+
+async function cacheFirst(request) {
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(request);
+  if (cached) return cached;
+
+  const response = await fetch(request);
+  if (response.ok) {
+    await cache.put(request, response.clone());
+  }
+  return response;
+}
+
+async function networkFirst(request) {
+  const cache = await caches.open(CACHE_NAME);
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      await cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    const cached = await cache.match(request);
+    if (cached) return cached;
+    throw new Error("Network unavailable and no cached response exists.");
+  }
+}
 
 self.addEventListener("fetch", (event) => {
   const { request } = event;
@@ -11,37 +38,36 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Always prefer fresh app code so deployed fixes are not trapped behind stale caches.
-  if (
-    request.destination === "document" ||
-    request.destination === "manifest" ||
-    request.destination === "script" ||
-    request.destination === "style" ||
-    request.url.includes("/_next/")
-  ) {
-    event.respondWith(fetch(request));
+  const url = new URL(request.url);
+
+  // API responses contain live business data and must never enter the asset cache.
+  if (url.pathname.startsWith("/api/")) {
     return;
   }
 
-  event.respondWith(
-    caches.open(CACHE_NAME).then(async (cache) => {
-      const cached = await cache.match(request);
-      if (cached) {
-        void fetch(request).then((response) => {
-          if (response.ok) {
-            void cache.put(request, response.clone());
-          }
-        }).catch(() => undefined);
-        return cached;
-      }
+  // Next static files are content-hashed. Cache-first is safe and prevents the
+  // same JavaScript, CSS, fonts, and optimized images from consuming CDN data
+  // again on every visit.
+  if (
+    url.pathname.startsWith("/_next/static/") ||
+    url.pathname.startsWith("/_next/image") ||
+    request.destination === "script" ||
+    request.destination === "style" ||
+    request.destination === "font" ||
+    request.destination === "image"
+  ) {
+    event.respondWith(cacheFirst(request));
+    return;
+  }
 
-      const response = await fetch(request);
-      if (response.ok) {
-        void cache.put(request, response.clone());
-      }
-      return response;
-    }),
-  );
+  // Documents remain network-first so deployments are picked up immediately,
+  // while the last successful response remains available offline.
+  if (request.destination === "document" || request.destination === "manifest") {
+    event.respondWith(networkFirst(request));
+    return;
+  }
+
+  event.respondWith(cacheFirst(request));
 });
 
 self.addEventListener("install", (event) => {

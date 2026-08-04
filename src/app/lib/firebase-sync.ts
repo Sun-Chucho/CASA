@@ -13,10 +13,17 @@ let _firebaseRealtimeConnected = false;
 const _connectionListeners = new Set<(connected: boolean) => void>();
 const _lastSyncedAt: Record<string, number> = {};
 const _pendingLocalWrites: Record<string, { value: unknown; createdAt: number }> = {};
-const FALLBACK_POLL_INTERVAL_MS = 10000;
+// Realtime Firebase listeners remain the primary update path. The API poll is
+// only a recovery mechanism, so polling large snapshots every ten seconds was
+// unnecessary and generated substantial CDN/server traffic when realtime auth
+// was unavailable.
+const FALLBACK_POLL_INTERVAL_MS = 120000;
 const PENDING_LOCAL_WRITE_TTL_MS = 15000;
 const DIRECT_FIREBASE_WRITE_TIMEOUT_MS = 5000;
 const SERVER_SYNC_ETAG_PREFIX = "orange-hotel-server-sync-etag";
+const HYDRATION_DEDUP_WINDOW_MS = 30000;
+const _hydrationInFlight = new Map<string, Promise<void>>();
+const _lastHydratedAt: Record<string, number> = {};
 
 function dispatchStorageUpdated(key: string) {
   if (typeof window === "undefined") return;
@@ -955,11 +962,9 @@ export async function syncStorageValueToFirebase<T>(key: string, value: T) {
   // prevented the server fallback from running and left the UI on "Offline"
   // even though the browser and API were reachable.
   try {
-    const remoteValue = sanitizeForStorage(
-      sanitizeSyncedValue(key, await fetchServerSyncedStorageValue(key).catch(() => null)),
-    );
-    sanitizedValue = sanitizeForStorage(sanitizeSyncedValue(key, protectSyncedValueBeforeWrite(key, sanitizedValue, remoteValue)));
-    _pendingLocalWrites[key] = { value: sanitizedValue, createdAt: Date.now() };
+    // The API performs its own conflict-safe merge against the remote value.
+    // Sending the local snapshot directly avoids downloading the entire remote
+    // dataset before every write.
     await writeServerSyncedStorageValue(key, sanitizedValue);
     setLocalCache(key, JSON.stringify(sanitizedValue));
     delete _pendingLocalWrites[key];
@@ -1005,7 +1010,7 @@ export async function syncStorageValueToFirebase<T>(key: string, value: T) {
   }
 }
 
-export async function hydrateStorageKeyFromFirebase(key: string) {
+async function hydrateStorageKeyFromFirebaseInternal(key: string) {
   if (typeof window === "undefined") return;
 
   const applyHydratedValue = (value: unknown) => {
@@ -1079,6 +1084,21 @@ export async function hydrateStorageKeyFromFirebase(key: string) {
   }
 }
 
+export function hydrateStorageKeyFromFirebase(key: string): Promise<void> {
+  const existing = _hydrationInFlight.get(key);
+  if (existing) return existing;
+  if ((_lastHydratedAt[key] ?? 0) > Date.now() - HYDRATION_DEDUP_WINDOW_MS) {
+    return Promise.resolve();
+  }
+
+  const hydration = hydrateStorageKeyFromFirebaseInternal(key).finally(() => {
+    _hydrationInFlight.delete(key);
+    _lastHydratedAt[key] = Date.now();
+  });
+  _hydrationInFlight.set(key, hydration);
+  return hydration;
+}
+
 export async function hydrateDefaultAppStateFromFirebase() {
   await Promise.all(FIREBASE_SYNC_KEYS.map((key) => hydrateStorageKeyFromFirebase(key)));
 }
@@ -1126,6 +1146,7 @@ export function subscribeToSyncedStorageKey<T>(key: string, onChange: (value: T 
   };
 
   const pollServerSnapshot = async () => {
+    if (document.visibilityState !== "visible" || !window.navigator.onLine) return;
     try {
       const remoteValue = sanitizeForStorage(sanitizeSyncedValue(key, await fetchServerSyncedStorageValue<T>(key)));
       if (remoteValue === null) return;
@@ -1154,6 +1175,15 @@ export function subscribeToSyncedStorageKey<T>(key: string, onChange: (value: T 
       void pollServerSnapshot();
     }, FALLBACK_POLL_INTERVAL_MS);
   };
+
+  const resumeFallbackPolling = () => {
+    if (document.visibilityState === "visible" && window.navigator.onLine) {
+      void pollServerSnapshot();
+    }
+  };
+
+  window.addEventListener("online", resumeFallbackPolling);
+  document.addEventListener("visibilitychange", resumeFallbackPolling);
 
   void ensureFirebaseAuthReady()
     .then(() => {
@@ -1208,6 +1238,8 @@ export function subscribeToSyncedStorageKey<T>(key: string, onChange: (value: T 
     isDisposed = true;
     window.removeEventListener("orange-hotel-storage-updated", handleCustomEvent as EventListener);
     window.removeEventListener("storage", handleStorageEvent);
+    window.removeEventListener("online", resumeFallbackPolling);
+    document.removeEventListener("visibilitychange", resumeFallbackPolling);
     firebaseUnsubscribe();
     stopFallbackPolling();
   };
