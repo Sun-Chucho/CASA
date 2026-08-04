@@ -48,6 +48,7 @@ interface BookingRecord {
   total: number;
   status: TransactionStatus;
   paymentBreakdown?: BookingPaymentBreakdownItem[];
+  paymentMethodEditedAt?: number;
 }
 
 interface KitchenPaymentRecord {
@@ -186,6 +187,7 @@ export default function PaymentsPage() {
   const [roomNumberDraft, setRoomNumberDraft] = useState("");
   const [checkInDateDraft, setCheckInDateDraft] = useState("");
   const [checkOutDateDraft, setCheckOutDateDraft] = useState("");
+  const [paymentMethodDraft, setPaymentMethodDraft] = useState<PaymentMethod>("cash");
   const adjustedNights = daysBetween(checkInDateDraft, checkOutDateDraft);
   const adjustedRate = roomNumberDraft.trim() ? getCasaRoomPrice(roomNumberDraft.trim()) : 0;
   const adjustedTotal = adjustedNights > 0 ? adjustedNights * adjustedRate : 0;
@@ -222,7 +224,9 @@ export default function PaymentsPage() {
       );
 
       const correctedBookingTransactions: BookingRecord[] = cashierSnapshot.transactions.map((tx): BookingRecord => {
-        const forcedMethod = RECEPTION_METHOD_FIXES.get(normalizeReceiptNo(tx.receiptNo));
+        const forcedMethod = tx.paymentMethodEditedAt
+          ? undefined
+          : RECEPTION_METHOD_FIXES.get(normalizeReceiptNo(tx.receiptNo));
         const fallbackMethod =
           tx.status !== "credit" && (!tx.payment || tx.payment === "credit") ? "cash" : tx.payment;
         return {
@@ -335,6 +339,7 @@ export default function PaymentsPage() {
     setRoomNumberDraft(booking.roomNumber);
     setCheckInDateDraft(booking.checkInDate);
     setCheckOutDateDraft(booking.checkOutDate);
+    setPaymentMethodDraft(booking.status === "credit" ? "credit" : booking.payment);
   };
 
   const closeEditPayerDialog = () => {
@@ -343,6 +348,7 @@ export default function PaymentsPage() {
     setRoomNumberDraft("");
     setCheckInDateDraft("");
     setCheckOutDateDraft("");
+    setPaymentMethodDraft("cash");
   };
 
   const saveEditedPayer = () => {
@@ -364,6 +370,15 @@ export default function PaymentsPage() {
             nights: nextNights,
             ratePerNight: adjustedRate,
             total: nextNights * adjustedRate,
+            payment: paymentMethodDraft,
+            status:
+              paymentMethodDraft === "credit"
+                ? "credit" as const
+                : tx.status === "checked-out"
+                  ? "checked-out" as const
+                  : "completed" as const,
+            paymentBreakdown: undefined,
+            paymentMethodEditedAt: Date.now(),
           }
         : tx,
     );
@@ -711,7 +726,7 @@ export default function PaymentsPage() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="text-xl font-black uppercase tracking-tight">Edit Reception Payment</DialogTitle>
-            <DialogDescription>Update the payer, room number, and stay dates for this booking payment.</DialogDescription>
+            <DialogDescription>Update the payer, room number, stay dates, and payment method for this booking payment.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2 sm:col-span-2">
@@ -731,6 +746,19 @@ export default function PaymentsPage() {
                 placeholder="Enter room number"
                 className="h-11"
               />
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Payment Method</p>
+              <select
+                value={paymentMethodDraft}
+                onChange={(event) => setPaymentMethodDraft(event.target.value as PaymentMethod)}
+                className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm font-bold"
+              >
+                <option value="cash">Cash</option>
+                <option value="card">Card</option>
+                <option value="mobile-money">Mobile Money</option>
+                <option value="credit">Credit</option>
+              </select>
             </div>
             <div className="space-y-2">
               <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Check-in Date</p>
