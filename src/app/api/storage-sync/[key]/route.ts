@@ -73,7 +73,22 @@ function getRecordRevision(record: unknown) {
   return Number.isFinite(revision) ? revision : 0;
 }
 
+function getManualPaymentRevision(record: unknown) {
+  if (typeof record !== "object" || record === null) return 0;
+  const revision = Number((record as { paymentMethodEditedAt?: unknown }).paymentMethodEditedAt ?? 0);
+  return Number.isFinite(revision) ? revision : 0;
+}
+
 function chooseRecordBySettlementPriority(currentRecord: unknown, incomingRecord: unknown) {
+  // Explicit receptionist payment edits must be accepted in both directions.
+  // In particular, moving a record from paid back to credit is intentional and
+  // must not be rejected merely because credit has a lower settlement priority.
+  const currentPaymentRevision = getManualPaymentRevision(currentRecord);
+  const incomingPaymentRevision = getManualPaymentRevision(incomingRecord);
+  if (currentPaymentRevision !== incomingPaymentRevision && Math.max(currentPaymentRevision, incomingPaymentRevision) > 0) {
+    return incomingPaymentRevision > currentPaymentRevision ? incomingRecord : currentRecord;
+  }
+
   const currentPriority = getSettlementPriority(currentRecord);
   const incomingPriority = getSettlementPriority(incomingRecord);
   if (currentPriority !== incomingPriority) {
