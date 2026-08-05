@@ -1,4 +1,4 @@
-import { get, onValue, ref, remove, set } from "firebase/database";
+import { get, onValue, ref, remove, runTransaction, set } from "firebase/database";
 import { ensureFirebaseAuthReady, firebaseDatabase } from "@/app/lib/firebase";
 import { getStoreItemLabel, type MainStoreItem } from "@/app/lib/inventory-transfer";
 import { mergeKitchenMenuItems, type KitchenMenuItem } from "@/app/lib/kitchen-menu";
@@ -24,6 +24,36 @@ const SERVER_SYNC_ETAG_PREFIX = "orange-hotel-server-sync-etag";
 const HYDRATION_DEDUP_WINDOW_MS = 30000;
 const _hydrationInFlight = new Map<string, Promise<void>>();
 const _lastHydratedAt: Record<string, number> = {};
+const _serverReadsInFlight = new Map<string, Promise<unknown | null>>();
+
+function getServerSyncEtagKey(key: string) {
+  return `${SERVER_SYNC_ETAG_PREFIX}:${key}`;
+}
+
+function readServerSyncEtag(key: string) {
+  if (typeof window === "undefined") return null;
+  const etagKey = getServerSyncEtagKey(key);
+  const persistentEtag = window.localStorage.getItem(etagKey);
+  if (persistentEtag) return persistentEtag;
+
+  // Preserve ETags created by the previous release, then keep them across
+  // tabs and browser restarts so unchanged snapshots return an empty 304.
+  const legacyEtag = window.sessionStorage.getItem(etagKey);
+  if (legacyEtag) {
+    window.localStorage.setItem(etagKey, legacyEtag);
+  }
+  return legacyEtag;
+}
+
+function writeServerSyncEtag(key: string, etag: string | null) {
+  if (typeof window === "undefined") return;
+  const etagKey = getServerSyncEtagKey(key);
+  if (etag) {
+    window.localStorage.setItem(etagKey, etag);
+  } else {
+    window.localStorage.removeItem(etagKey);
+  }
+}
 
 function dispatchStorageUpdated(key: string) {
   if (typeof window === "undefined") return;
@@ -56,10 +86,9 @@ function markSyncHealthy(key?: string) {
   _connectionListeners.forEach((fn) => fn(true));
 }
 
-async function fetchServerSyncedStorageValue<T>(key: string): Promise<T | null> {
-  const etagKey = `${SERVER_SYNC_ETAG_PREFIX}:${key}`;
+async function fetchServerSyncedStorageValueRequest<T>(key: string): Promise<T | null> {
   const headers: Record<string, string> = {};
-  const cachedEtag = typeof window !== "undefined" ? window.sessionStorage.getItem(etagKey) : null;
+  const cachedEtag = readServerSyncEtag(key);
   if (cachedEtag) {
     headers["If-None-Match"] = cachedEtag;
   }
@@ -83,12 +112,21 @@ async function fetchServerSyncedStorageValue<T>(key: string): Promise<T | null> 
   }
 
   const nextEtag = response.headers.get("ETag");
-  if (nextEtag && typeof window !== "undefined") {
-    window.sessionStorage.setItem(etagKey, nextEtag);
-  }
+  writeServerSyncEtag(key, nextEtag);
 
   const payload = (await response.json()) as { value?: T | null };
   return payload.value ?? null;
+}
+
+async function fetchServerSyncedStorageValue<T>(key: string): Promise<T | null> {
+  const existing = _serverReadsInFlight.get(key);
+  if (existing) return existing as Promise<T | null>;
+
+  const request = fetchServerSyncedStorageValueRequest<T>(key).finally(() => {
+    _serverReadsInFlight.delete(key);
+  });
+  _serverReadsInFlight.set(key, request);
+  return request;
 }
 
 async function writeServerSyncedStorageValue<T>(key: string, value: T) {
@@ -106,6 +144,8 @@ async function writeServerSyncedStorageValue<T>(key: string, value: T) {
   if (!response.ok) {
     throw new Error(`Server sync write failed for ${key}`);
   }
+
+  writeServerSyncEtag(key, response.headers.get("ETag"));
 }
 
 async function removeServerSyncedStorageValue(key: string) {
@@ -120,6 +160,11 @@ async function removeServerSyncedStorageValue(key: string) {
 
   if (!response.ok) {
     throw new Error(`Server sync delete failed for ${key}`);
+  }
+
+  if (typeof window !== "undefined") {
+    window.localStorage.removeItem(getServerSyncEtagKey(key));
+    window.sessionStorage.removeItem(getServerSyncEtagKey(key));
   }
 }
 
@@ -954,17 +999,37 @@ function readSnapshotValue<T>(key: string, rawValue: T | null, onChange: (value:
 
 export async function syncStorageValueToFirebase<T>(key: string, value: T) {
   if (typeof window === "undefined") return false;
-  let sanitizedValue: unknown = sanitizeForStorage(sanitizeSyncedValue(key, value));
+  const sanitizedValue: unknown = sanitizeForStorage(sanitizeSyncedValue(key, value));
   _pendingLocalWrites[key] = { value: sanitizedValue, createdAt: Date.now() };
 
-  // Use the app's API as the primary write path. A disconnected Firebase
-  // realtime socket can leave set() pending indefinitely, which previously
-  // prevented the server fallback from running and left the UI on "Offline"
-  // even though the browser and API were reachable.
+  // Write straight to Firebase during normal operation. Routing every growing
+  // POS snapshot through a Vercel Function made each save count as incoming
+  // Fast Origin Transfer. The transaction preserves concurrent records and
+  // the timeout keeps the API available as a reliable fallback.
   try {
-    // The API performs its own conflict-safe merge against the remote value.
-    // Sending the local snapshot directly avoids downloading the entire remote
-    // dataset before every write.
+    await withTimeout(
+      ensureFirebaseAuthReady(),
+      DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
+      `Firebase authentication timed out for ${key}`,
+    );
+    const transaction = await withTimeout(
+      runTransaction(ref(firebaseDatabase, toStoragePath(key)), (remoteValue) =>
+        sanitizeForStorage(sanitizeSyncedValue(key, protectSyncedValueBeforeWrite(key, sanitizedValue, remoteValue))),
+      ),
+      DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
+      `Firebase transaction timed out for ${key}`,
+    );
+    const committedValue = sanitizeForStorage(sanitizeSyncedValue(key, transaction.snapshot.val()));
+    setLocalCache(key, JSON.stringify(committedValue));
+    delete _pendingLocalWrites[key];
+    dispatchStorageUpdated(key);
+    markSyncHealthy(key);
+    return true;
+  } catch (firebaseError) {
+    console.error(`Firebase direct sync failed for ${key}`, firebaseError);
+  }
+
+  try {
     await writeServerSyncedStorageValue(key, sanitizedValue);
     setLocalCache(key, JSON.stringify(sanitizedValue));
     delete _pendingLocalWrites[key];
@@ -972,40 +1037,8 @@ export async function syncStorageValueToFirebase<T>(key: string, value: T) {
     markSyncHealthy(key);
     return true;
   } catch (serverError) {
-    console.error(`Server sync failed for ${key}`, serverError);
-  }
-
-  try {
-    await withTimeout(
-      ensureFirebaseAuthReady(),
-      DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
-      `Firebase authentication timed out for ${key}`,
-    );
-    const snapshot = await withTimeout(
-      get(ref(firebaseDatabase, toStoragePath(key))),
-      DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
-      `Firebase read timed out for ${key}`,
-    );
-    const remoteValue = snapshot.exists()
-      ? sanitizeForStorage(sanitizeSyncedValue(key, snapshot.val()))
-      : null;
-    sanitizedValue = sanitizeForStorage(
-      sanitizeSyncedValue(key, protectSyncedValueBeforeWrite(key, sanitizedValue, remoteValue)),
-    );
-    _pendingLocalWrites[key] = { value: sanitizedValue, createdAt: Date.now() };
-    await withTimeout(
-      set(ref(firebaseDatabase, toStoragePath(key)), sanitizedValue),
-      DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
-      `Firebase write timed out for ${key}`,
-    );
-    setLocalCache(key, JSON.stringify(sanitizedValue));
-    delete _pendingLocalWrites[key];
-    dispatchStorageUpdated(key);
-    markSyncHealthy(key);
-    return true;
-  } catch (firebaseError) {
     emitConnectionState(false);
-    console.error(`Firebase sync fallback failed for ${key}`, firebaseError);
+    console.error(`Server sync fallback failed for ${key}`, serverError);
     return false;
   }
 }

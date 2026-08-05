@@ -234,9 +234,20 @@ export async function PUT(request: NextRequest, context: RouteContext) {
     const decodedKey = decodeStorageKey(key);
     const body = (await request.json()) as { value?: unknown };
     const currentValue = await readServerSyncedStorageValue(decodedKey).catch(() => null);
-    const nextValue = protectIncomingSyncedValue(decodedKey, body.value ?? null, currentValue);
+    const incomingValue = body.value ?? null;
+    const nextValue = protectIncomingSyncedValue(decodedKey, incomingValue, currentValue);
     await writeServerSyncedStorageValue(decodedKey, nextValue);
-    return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
+    const headers: Record<string, string> = { "Cache-Control": "no-store" };
+    // Only let the client reuse this ETag when its local snapshot exactly
+    // matches what was committed. A conflict-safe merge may have retained
+    // additional remote records that the client still needs to download.
+    if (JSON.stringify(nextValue) === JSON.stringify(incomingValue)) {
+      headers.ETag = createStorageEtag(nextValue);
+    }
+    return new NextResponse(null, {
+      status: 204,
+      headers,
+    });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to write synced storage value." },
@@ -249,7 +260,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   try {
     const { key } = await context.params;
     await writeServerSyncedStorageValue(decodeStorageKey(key), null);
-    return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
+    return new NextResponse(null, { status: 204, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to delete synced storage value." },
