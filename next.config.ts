@@ -61,6 +61,8 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  // Enable Brotli/Gzip compression for API responses to reduce bandwidth
+  compress: true,
 };
 
 export default nextConfig;

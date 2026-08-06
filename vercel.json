@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "builds": [{ "src": "next.config.ts", "use": "@vercel/next" }],
+  "cron": [
+    {
+      "path": "/api/backup",
+      "schedule": "${process.env.BACKUP_CRON_SCHEDULE || '0 0 * * *'}"
+    },
+    {
+      "path": "/api/usage/monitor",
+      "schedule": "0 */6 * * *"
+    }
+  ]
+}
