@@ -1,27 +1,33 @@
 import { adminFirestore } from '@/lib/firebaseAdmin';
-import { collection, getDocs, doc, setDoc, serverTimestamp } from 'firebase-admin/firestore';
+// import admin from 'firebase-admin'; // removed unused import
 import type { NextRequest } from 'next/server';
 
 export async function GET(request: NextRequest) {
-  try {
+  // Ensure Firebase is initialized
+  if (!adminFirestore) {
+    return new Response(JSON.stringify({ ok: false, error: 'Firebase not initialized' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
     // Fetch data from critical collections
-    const roomsSnap = await getDocs(collection(adminFirestore, 'room_sales'));
-    const expensesSnap = await getDocs(collection(adminFirestore, 'expenses'));
-    const barsSnap = await getDocs(collection(adminFirestore, 'bar_sales'));
+    const roomsSnap = await adminFirestore.collection('room_sales').get();
+    const expensesSnap = await adminFirestore.collection('expenses').get();
+    const barsSnap = await adminFirestore.collection('bar_sales').get();
 
     const rooms = roomsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
     const expenses = expensesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
     const bars = barsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-    const backupDoc = doc(collection(adminFirestore, 'backups'));
-    await setDoc(backupDoc, {
-      createdAt: serverTimestamp(),
+    const backupRef = await adminFirestore.collection('backups').add({
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
       rooms,
       expenses,
       bars,
     });
 
-    return new Response(JSON.stringify({ ok: true, backupId: backupDoc.id }), {
+    return new Response(JSON.stringify({ ok: true, backupId: backupRef.id }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });

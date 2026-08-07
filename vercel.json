@@ -1,10 +1,11 @@
 {
-  "version": 2,
-  "builds": [{ "src": "next.config.ts", "use": "@vercel/next" }],
-  "cron": [
+    "version": 2,
+  "name": "cassa-motel",
+  "builds": [{ "src": "package.json", "use": "@vercel/next" }],
+  "crons": [
     {
       "path": "/api/backup",
-      "schedule": "${process.env.BACKUP_CRON_SCHEDULE || '0 0 * * *'}"
+      "schedule": "0 0 * * *"
     },
     {
       "path": "/api/usage/monitor",

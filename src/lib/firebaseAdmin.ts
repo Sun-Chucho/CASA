@@ -14,4 +14,4 @@ if (!getApps().length && serviceAccount) {
   initializeApp({ credential: cert(serviceAccount) });
 }
 
-export const adminFirestore = getFirestore();
+export const adminFirestore = serviceAccount ? getFirestore() : null;

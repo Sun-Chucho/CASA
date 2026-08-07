@@ -1,6 +1,6 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
 import { adminFirestore } from '@/lib/firebaseAdmin';
-import { collection, setDoc, doc } from 'firebase-admin/firestore';
+// Removed invalid import; using adminFirestore directly
 
 interface OfflineWrite {
   collection: string;
@@ -41,8 +41,9 @@ export async function processQueue() {
   while (cursor) {
     const { collection: coll, data, id } = cursor.value;
     try {
-      const docRef = id ? doc(collection(adminFirestore, coll), id) : doc(collection(adminFirestore, coll));
-      await setDoc(docRef, data);
+      const collectionRef = adminFirestore.collection(coll);
+      const docRef = id ? collectionRef.doc(id) : collectionRef.doc();
+      await docRef.set(data);
       await cursor.delete();
     } catch (e) {
       console.error('Failed to sync offline write', e);
