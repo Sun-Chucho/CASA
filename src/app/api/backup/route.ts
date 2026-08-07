@@ -1,5 +1,5 @@
 import { adminFirestore } from '@/lib/firebaseAdmin';
-// import admin from 'firebase-admin'; // removed unused import
+import { FieldValue } from 'firebase-admin/firestore';
 import type { NextRequest } from 'next/server';
 
 export async function GET(request: NextRequest) {
@@ -11,6 +11,7 @@ export async function GET(request: NextRequest) {
     });
   }
 
+  try {
     // Fetch data from critical collections
     const roomsSnap = await adminFirestore.collection('room_sales').get();
     const expensesSnap = await adminFirestore.collection('expenses').get();
@@ -21,7 +22,7 @@ export async function GET(request: NextRequest) {
     const bars = barsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
     const backupRef = await adminFirestore.collection('backups').add({
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(),
       rooms,
       expenses,
       bars,

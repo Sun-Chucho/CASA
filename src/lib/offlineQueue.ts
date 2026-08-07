@@ -34,6 +34,10 @@ export async function enqueueWrite(collectionName: string, data: any, id?: strin
 }
 
 export async function processQueue() {
+  if (!adminFirestore) {
+    return;
+  }
+
   const db = await getDb();
   const tx = db.transaction('offline-writes', 'readwrite');
   const store = tx.objectStore('offline-writes');
