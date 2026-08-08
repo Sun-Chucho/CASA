@@ -17,6 +17,7 @@ export interface MainStoreItem {
   damages?: number;
   receivedStock?: number;
   updatedAt?: number;
+  deletedAt?: number;
 }
 
 export interface StoreMovementLog {

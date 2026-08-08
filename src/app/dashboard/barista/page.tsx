@@ -79,6 +79,7 @@ interface BaristaMenuItem {
   prepMinutes: number;
   barcode?: string;
   updatedAt?: number;
+  deletedAt?: number;
   // Supplier cost, used only for manager costing — never shown in POS.
   buyingPrice?: number;
 }
@@ -375,6 +376,7 @@ export default function BaristaPage() {
   const [managerPricingDrafts, setManagerPricingDrafts] = useState<Record<string, BaristaManagerPricingDraft>>({});
   const [savingBaristaItemId, setSavingBaristaItemId] = useState("");
   const [savedBaristaItemId, setSavedBaristaItemId] = useState("");
+  const [deletingBaristaItemId, setDeletingBaristaItemId] = useState("");
   const [directorTab, setDirectorTab] = useState<"inventory" | "finance" | "purchases" | "sales">("finance");
   const [directorSalesDateFilter, setDirectorSalesDateFilter] = useState<SalesDateFilter>("day");
   const [category, setCategory] = useState<BaristaCategory>("all");
@@ -471,13 +473,14 @@ export default function BaristaPage() {
       const inventory = readJson<InventoryItem[]>(STORAGE_INVENTORY_ITEMS) ?? [];
       setInventoryItems(inventory);
 
-      let menuItems = snapshot.menuItems;
-      if (menuItems.length === 0) {
+      let menuItems = snapshot.menuItems.filter(isActiveBaristaMenuItem);
+      if (menuItems.length === 0 && snapshot.menuItems.length === 0) {
         menuItems = buildSeedMenuItems();
         writePosState(activeBaristaKey, snapshot.tickets, snapshot.ticketSeq, snapshot.payments, menuItems);
       }
 
-      setStoredMenuItems(syncBaristaMenuItemsWithSharedInventory(menuItems, inventory, readJson<MainStoreItem[]>(STORAGE_MAIN_STORE_ITEMS) ?? []));
+      const activeStoreItems = (readJson<MainStoreItem[]>(STORAGE_MAIN_STORE_ITEMS) ?? []).filter((item) => !item.deletedAt);
+      setStoredMenuItems(syncBaristaMenuItemsWithSharedInventory(menuItems, inventory, activeStoreItems));
       setPosHydrated(true);
     };
 
@@ -504,7 +507,7 @@ export default function BaristaPage() {
     const savedStoreItems = readJson<Array<MainStoreItem & { lane?: "kitchen" | "barista" }>>(STORAGE_MAIN_STORE_ITEMS);
     const savedMovements = readJson<StoreMovementLog[]>(STORAGE_STORE_MOVEMENTS);
     const savedUsage = readJson<StoreUsageLog[]>(STORAGE_STORE_USAGE);
-    setBaristaStoreItems(Array.isArray(savedStoreItems) ? savedStoreItems.filter((entry) => entry.lane === "barista") : []);
+    setBaristaStoreItems(Array.isArray(savedStoreItems) ? savedStoreItems.filter((entry) => entry.lane === "barista" && !entry.deletedAt) : []);
     setFromStoreEntries(Array.isArray(savedMovements) ? savedMovements.filter((entry) => entry.destination === "barista") : []);
     setUsageLogs(Array.isArray(savedUsage) ? savedUsage.filter((entry) => entry.destination === "barista") : []);
   };
@@ -536,10 +539,12 @@ export default function BaristaPage() {
       STORAGE_MENU,
       490,
     );
-    const syncedMenuItems = syncBaristaMenuItemsWithSharedInventory(snapshot.menuItems, inventoryItems, baristaStoreItems);
+    const activeSnapshotMenuItems = snapshot.menuItems.filter(isActiveBaristaMenuItem);
+    const syncedMenuItems = syncBaristaMenuItemsWithSharedInventory(activeSnapshotMenuItems, inventoryItems, baristaStoreItems);
 
-    if (JSON.stringify(syncedMenuItems) !== JSON.stringify(snapshot.menuItems)) {
-      writePosState(activeBaristaKey, snapshot.tickets, snapshot.ticketSeq, snapshot.payments, syncedMenuItems);
+    if (JSON.stringify(syncedMenuItems) !== JSON.stringify(activeSnapshotMenuItems)) {
+      const deletedMenuItems = snapshot.menuItems.filter((item) => !isActiveBaristaMenuItem(item));
+      writePosState(activeBaristaKey, snapshot.tickets, snapshot.ticketSeq, snapshot.payments, [...syncedMenuItems, ...deletedMenuItems]);
     }
 
     if (JSON.stringify(syncedMenuItems) !== JSON.stringify(storedMenuItems)) {
@@ -570,8 +575,9 @@ export default function BaristaPage() {
     const updatedAt = Date.now();
     const allStoreItems = readJson<Array<MainStoreItem & { lane?: "kitchen" | "barista" }>>(STORAGE_MAIN_STORE_ITEMS) ?? [];
     const otherStoreItems = allStoreItems.filter((entry) => entry.lane !== "barista");
+    const deletedBaristaItems = allStoreItems.filter((entry) => entry.lane === "barista" && entry.deletedAt);
     const currentBaristaItems = allStoreItems
-      .filter((entry) => entry.lane === "barista")
+      .filter((entry) => entry.lane === "barista" && !entry.deletedAt)
       .map((entry) => ({ ...entry, lane: "barista" as const }));
     const nextBaristaItems = [...currentBaristaItems];
     let nextInventoryItems = readJson<InventoryItem[]>(STORAGE_INVENTORY_ITEMS) ?? [];
@@ -665,7 +671,7 @@ export default function BaristaPage() {
       nextInventoryItems = adjustInventoryQuantity(nextInventoryItems, "Bar", inventoryLabel, line.qty);
     }
 
-    const nextStoreItems = [...otherStoreItems, ...nextBaristaItems];
+    const nextStoreItems = [...otherStoreItems, ...deletedBaristaItems, ...nextBaristaItems];
     setBaristaStoreItems(nextBaristaItems);
     writeJson(STORAGE_MAIN_STORE_ITEMS, nextStoreItems);
     writeJson(STORAGE_INVENTORY_ITEMS, nextInventoryItems);
@@ -711,12 +717,62 @@ export default function BaristaPage() {
 
   const alcoholMenuItems = useMemo(() => {
     const search = pastSaleSearch.trim().toLowerCase();
-    return menuItems.filter(
+    const catalog = new Map<string, BaristaMenuItem>();
+    const addCandidate = (item: BaristaMenuItem) => {
+      const target = normalizeBaristaTarget(item.name);
+      if (!target) return;
+      const existing = catalog.get(target);
+      if (!existing || (existing.price <= 0 && item.price > 0)) catalog.set(target, item);
+    };
+
+    menuItems.forEach(addCandidate);
+    baristaStoreItems.forEach((item) => {
+      const itemTarget = normalizeBaristaTarget(getStoreItemLabel(item));
+      const inventoryMatch = inventoryItems.find((entry) => {
+        const names = [entry.name, entry.size ? `${entry.name} ${entry.size}` : entry.name];
+        return names.some((name) => normalizeBaristaTarget(name) === itemTarget);
+      });
+      addCandidate({
+        id: `past-store-${item.id}`,
+        name: getStoreItemLabel(item),
+        price: item.sellingPrice ?? inventoryMatch?.sellingPrice ?? inventoryMatch?.price ?? 0,
+        buyingPrice: item.buyingPrice ?? inventoryMatch?.buyingPrice ?? 0,
+        category: normalizeCategory(item.subCategory ?? inventoryMatch?.subCategory ?? inventoryMatch?.category ?? "", item.name),
+        prepMinutes: 2,
+      });
+    });
+    inventoryItems
+      .filter((item) => item.category.trim().toLowerCase() !== "kitchen")
+      .forEach((item) => addCandidate({
+        id: `past-inventory-${item.id}`,
+        name: getBaristaInventoryLabel(item),
+        price: item.sellingPrice || item.price || 0,
+        buyingPrice: item.buyingPrice,
+        category: normalizeCategory(item.subCategory ?? item.category, item.name),
+        prepMinutes: 2,
+      }));
+    buildSeedMenuItems().forEach((item) => addCandidate({ ...item, id: `past-${item.id}` }));
+    baristaPayments.forEach((payment) => {
+      payment.lines?.forEach((line) => {
+        const target = normalizeBaristaTarget(line.name);
+        if (catalog.has(target)) return;
+        const inferredPrice = payment.lines?.length === 1 && line.qty > 0 ? payment.total / line.qty : 0;
+        addCandidate({
+          id: `past-history-${target}`,
+          name: line.name,
+          price: inferredPrice,
+          category: normalizeCategory("", line.name),
+          prepMinutes: 2,
+        });
+      });
+    });
+
+    return Array.from(catalog.values()).filter(
       (item) =>
         ALCOHOL_CATEGORIES.has(item.category) &&
         (!search || `${item.name} ${item.category}`.toLowerCase().includes(search)),
-    );
-  }, [menuItems, pastSaleSearch]);
+    ).sort((a, b) => a.name.localeCompare(b.name));
+  }, [baristaPayments, baristaStoreItems, inventoryItems, menuItems, pastSaleSearch]);
 
   const pastSaleTotal = useMemo(
     () => pastSaleCart.reduce((sum, line) => sum + line.item.price * line.qty, 0),
@@ -988,7 +1044,7 @@ export default function BaristaPage() {
 
     const allStoreItems = readJson<Array<MainStoreItem & { lane?: "kitchen" | "barista" }>>(STORAGE_MAIN_STORE_ITEMS) ?? [];
     const index = allStoreItems.findIndex(
-      (entry) => entry.lane === "barista" && normalizeBaristaTarget(getStoreItemLabel(entry)) === target,
+      (entry) => entry.lane === "barista" && !entry.deletedAt && normalizeBaristaTarget(getStoreItemLabel(entry)) === target,
     );
     let nextStoreItems: Array<MainStoreItem & { lane?: "kitchen" | "barista" }>;
     if (index >= 0) {
@@ -1022,7 +1078,7 @@ export default function BaristaPage() {
     const allInventoryItems = readJson<InventoryItem[]>(STORAGE_INVENTORY_ITEMS) ?? [];
     let matchedInventory = false;
     const nextInventoryItems = allInventoryItems.map((inventoryItem) => {
-      if (inventoryItem.category.trim().toLowerCase() === "kitchen") return inventoryItem;
+      if (inventoryItem.category.trim().toLowerCase() === "kitchen" || inventoryItem.status === "INACTIVE") return inventoryItem;
       const inventoryTargets = [
         inventoryItem.name,
         inventoryItem.size ? `${inventoryItem.name} ${inventoryItem.size}` : inventoryItem.name,
@@ -1073,8 +1129,8 @@ export default function BaristaPage() {
     ];
     // writeJson updates the device before its cloud promise resolves. Reflect and
     // clear the intake immediately so retrying a failed sync cannot add it twice.
-    setStoredMenuItems(nextMenuItems);
-    setBaristaStoreItems(nextStoreItems.filter((entry) => entry.lane === "barista"));
+    setStoredMenuItems(nextMenuItems.filter(isActiveBaristaMenuItem));
+    setBaristaStoreItems(nextStoreItems.filter((entry) => entry.lane === "barista" && !entry.deletedAt));
     setInventoryItems(nextInventoryItems);
     setManagerPricingDrafts((current) => {
       const nextDrafts = { ...current };
@@ -1092,6 +1148,71 @@ export default function BaristaPage() {
       window.alert("The values were saved on this device, but cloud synchronization did not complete. They will synchronize when the connection is restored.");
     } finally {
       setSavingBaristaItemId("");
+    }
+  };
+
+  const deleteBaristaItem = async (itemId: string, itemName?: string) => {
+    const activeBaristaKey = getActiveBaristaStateKey();
+    const snapshot = readPosState<BaristaTicket, BaristaPaymentRecord, BaristaMenuItem>(
+      activeBaristaKey, STORAGE_TICKETS, STORAGE_SEQ, STORAGE_PAYMENTS, STORAGE_MENU, 490,
+    );
+    const selectedItem = snapshot.menuItems.find((item) => item.id === itemId);
+    if (!selectedItem || selectedItem.deletedAt) return;
+
+    const approved = await confirm({
+      title: "Delete Barista Entry",
+      description: `Delete ${itemName ?? selectedItem.name} from Restock / Stock In and the POS menu? Its existing sales history will be kept.`,
+      actionLabel: "Delete Entry",
+    });
+    if (!approved) return;
+
+    const deletedAt = Date.now();
+    const target = normalizeBaristaTarget(selectedItem.name);
+    const linkedToken = getLinkedRecordToken(selectedItem.id);
+    const nextMenuItems = snapshot.menuItems.map((item) =>
+      item.id === itemId ? { ...item, deletedAt, updatedAt: deletedAt } : item,
+    );
+    const hasRemainingTarget = nextMenuItems.some(
+      (item) => isActiveBaristaMenuItem(item) && normalizeBaristaTarget(item.name) === target,
+    );
+    const isLinkedRecord = (id: string, label: string) =>
+      (linkedToken !== null && id.endsWith(linkedToken)) ||
+      (!hasRemainingTarget && normalizeBaristaTarget(label) === target);
+
+    const allStoreItems = readJson<Array<MainStoreItem & { lane?: "kitchen" | "barista" }>>(STORAGE_MAIN_STORE_ITEMS) ?? [];
+    const nextStoreItems = allStoreItems.map((item) =>
+      item.lane === "barista" && isLinkedRecord(item.id, getStoreItemLabel(item))
+        ? { ...item, stock: 0, deletedAt, updatedAt: deletedAt }
+        : item,
+    );
+    const allInventoryItems = readJson<InventoryItem[]>(STORAGE_INVENTORY_ITEMS) ?? [];
+    const nextInventoryItems = allInventoryItems.map((item) => {
+      const label = item.size ? `${item.name} ${item.size}` : item.name;
+      return item.category.trim().toLowerCase() !== "kitchen" && isLinkedRecord(item.id, label)
+        ? { ...item, status: "INACTIVE" as const, stock: 0, updatedAt: deletedAt }
+        : item;
+    });
+
+    setDeletingBaristaItemId(itemId);
+    try {
+      const results = await Promise.all([
+        writePosState(activeBaristaKey, snapshot.tickets, snapshot.ticketSeq, snapshot.payments, nextMenuItems),
+        writeJson(STORAGE_MAIN_STORE_ITEMS, nextStoreItems),
+        writeJson(STORAGE_INVENTORY_ITEMS, nextInventoryItems),
+      ]);
+      setStoredMenuItems(nextMenuItems.filter(isActiveBaristaMenuItem));
+      setBaristaStoreItems(nextStoreItems.filter((item) => item.lane === "barista" && !item.deletedAt));
+      setInventoryItems(nextInventoryItems);
+      setManagerPricingDrafts((current) => {
+        const next = { ...current };
+        delete next[itemId];
+        return next;
+      });
+      if (results.some((result) => !result)) {
+        window.alert("The entry was deleted on this device and will synchronize when the connection is restored.");
+      }
+    } finally {
+      setDeletingBaristaItemId("");
     }
   };
 
@@ -1653,7 +1774,7 @@ export default function BaristaPage() {
       setTickets(nextTickets);
       setTicketSeq(snapshot.ticketSeq);
       setBaristaPayments(sourcePayments);
-      setStoredMenuItems(sourceMenuItems);
+      setStoredMenuItems(sourceMenuItems.filter(isActiveBaristaMenuItem));
       writePosState(activeBaristaKey, nextTickets, snapshot.ticketSeq, sourcePayments, sourceMenuItems);
     } finally {
       setDeliveringTicketId(null);
@@ -1731,19 +1852,19 @@ export default function BaristaPage() {
         const previousTarget = normalizeBaristaTarget(previousItem.name);
         const storedItems = readJson<Array<MainStoreItem & { lane?: "kitchen" | "barista" }>>(STORAGE_MAIN_STORE_ITEMS) ?? [];
         const nextStoreItems = storedItems.map((item) =>
-          item.lane === "barista" && normalizeBaristaTarget(getStoreItemLabel(item)) === previousTarget
+          item.lane === "barista" && !item.deletedAt && normalizeBaristaTarget(getStoreItemLabel(item)) === previousTarget
             ? { ...item, name, size: "", subCategory: drinkCategory, sellingPrice: price, updatedAt }
             : item,
         );
         if (JSON.stringify(nextStoreItems) !== JSON.stringify(storedItems)) {
           syncWrites.push(writeJson(STORAGE_MAIN_STORE_ITEMS, nextStoreItems));
-          setBaristaStoreItems(nextStoreItems.filter((item) => item.lane === "barista"));
+          setBaristaStoreItems(nextStoreItems.filter((item) => item.lane === "barista" && !item.deletedAt));
         }
 
         const storedInventory = readJson<InventoryItem[]>(STORAGE_INVENTORY_ITEMS) ?? [];
         const nextInventory = storedInventory.map((item) => {
           const labels = [item.name, item.size ? `${item.name} ${item.size}` : item.name];
-          return item.category.trim().toLowerCase() !== "kitchen" && labels.some((label) => normalizeBaristaTarget(label) === previousTarget)
+          return item.category.trim().toLowerCase() !== "kitchen" && item.status !== "INACTIVE" && labels.some((label) => normalizeBaristaTarget(label) === previousTarget)
             ? { ...item, name, size: "", subCategory: drinkCategory, sellingPrice: price, price, updatedAt }
             : item;
         });
@@ -1798,7 +1919,7 @@ export default function BaristaPage() {
         },
       ];
       syncWrites.push(writeJson(STORAGE_MAIN_STORE_ITEMS, nextStoreItems));
-      setBaristaStoreItems(nextStoreItems.filter((item) => item.lane === "barista"));
+      setBaristaStoreItems(nextStoreItems.filter((item) => item.lane === "barista" && !item.deletedAt));
 
       const storedInventory = readJson<InventoryItem[]>(STORAGE_INVENTORY_ITEMS) ?? [];
       const nextInventory: InventoryItem[] = [
@@ -1825,7 +1946,7 @@ export default function BaristaPage() {
       setInventoryItems(nextInventory);
     }
     syncWrites.push(writePosState(activeBaristaKey, snapshot.tickets, snapshot.ticketSeq, snapshot.payments, next));
-    setStoredMenuItems(next);
+    setStoredMenuItems(next.filter(isActiveBaristaMenuItem));
     resetDrinkForm();
     const completedWrites = syncWrites.filter((write): write is Promise<boolean> => Boolean(write));
     const results = await Promise.all(completedWrites);
@@ -1843,19 +1964,7 @@ export default function BaristaPage() {
   };
 
   const deleteDrink = async (id: string) => {
-    const approved = await confirm({
-      title: "Delete Drink",
-      description: "Are you sure you want to remove this drink from the menu?",
-      actionLabel: "Delete",
-    });
-    if (!approved) return;
-    const activeBaristaKey = getActiveBaristaStateKey();
-    const snapshot = readPosState<BaristaTicket, BaristaPaymentRecord, BaristaMenuItem>(
-      activeBaristaKey, STORAGE_TICKETS, STORAGE_SEQ, STORAGE_PAYMENTS, STORAGE_MENU, 490,
-    );
-    const next = snapshot.menuItems.filter((item) => item.id !== id);
-    writePosState(activeBaristaKey, snapshot.tickets, snapshot.ticketSeq, snapshot.payments, next);
-    setStoredMenuItems(next);
+    await deleteBaristaItem(id);
     if (drinkEditId === id) {
       setDrinkEditId(null);
       setDrinkName("");
@@ -2354,23 +2463,37 @@ export default function BaristaPage() {
                         </div>
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          size="sm"
-                          onClick={() => void saveBaristaManagerItem(item)}
-                          disabled={savingBaristaItemId === item.id}
-                          className="min-w-24 gap-2 font-black uppercase tracking-widest"
-                        >
-                          {savedBaristaItemId === item.id ? (
-                            <>
-                              <CheckCircle2 className="h-4 w-4" />
-                              Saved
-                            </>
-                          ) : savingBaristaItemId === item.id ? (
-                            "Saving..."
-                          ) : (
-                            managerPricingDrafts[item.id]?.stockIn ? "Stock In / Save" : "Save"
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            size="sm"
+                            onClick={() => void saveBaristaManagerItem(item)}
+                            disabled={savingBaristaItemId === item.id || deletingBaristaItemId === item.id}
+                            className="min-w-24 gap-2 font-black uppercase tracking-widest"
+                          >
+                            {savedBaristaItemId === item.id ? (
+                              <>
+                                <CheckCircle2 className="h-4 w-4" />
+                                Saved
+                              </>
+                            ) : savingBaristaItemId === item.id ? (
+                              "Saving..."
+                            ) : (
+                              managerPricingDrafts[item.id]?.stockIn ? "Stock In / Save" : "Save"
+                            )}
+                          </Button>
+                          {isBaristaRestock && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void deleteBaristaItem(item.id, item.name)}
+                              disabled={deletingBaristaItemId === item.id || savingBaristaItemId === item.id}
+                              className="gap-2 border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              {deletingBaristaItemId === item.id ? "Deleting..." : "Delete"}
+                            </Button>
                           )}
-                        </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -3162,4 +3285,12 @@ export default function BaristaPage() {
     </div>
   );
 
+}
+
+function getLinkedRecordToken(id: string) {
+  return id.match(/(\d{10,})$/)?.[1] ?? null;
+}
+
+function isActiveBaristaMenuItem(item: BaristaMenuItem) {
+  return !item.deletedAt;
 }
