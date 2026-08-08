@@ -12,6 +12,15 @@ type RouteContext = {
   }>;
 };
 
+const SERVER_SYNC_API_ENABLED = process.env.ENABLE_SERVER_SYNC_API === "true";
+
+function disabledResponse() {
+  return NextResponse.json(
+    { error: "Server-proxied state sync is disabled; use direct Firebase sync." },
+    { status: 503, headers: { "Cache-Control": "private, no-store" } },
+  );
+}
+
 function decodeStorageKey(rawKey: string) {
   return decodeURIComponent(rawKey);
 }
@@ -206,6 +215,7 @@ function protectIncomingSyncedValue(key: string, incomingValue: unknown, current
 }
 
 export async function GET(request: NextRequest, context: RouteContext) {
+  if (!SERVER_SYNC_API_ENABLED) return disabledResponse();
   try {
     const { key } = await context.params;
     const decodedKey = decodeStorageKey(key);
@@ -229,6 +239,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
 }
 
 export async function PUT(request: NextRequest, context: RouteContext) {
+  if (!SERVER_SYNC_API_ENABLED) return disabledResponse();
   try {
     const { key } = await context.params;
     const decodedKey = decodeStorageKey(key);
@@ -257,6 +268,7 @@ export async function PUT(request: NextRequest, context: RouteContext) {
 }
 
 export async function DELETE(request: NextRequest, context: RouteContext) {
+  if (!SERVER_SYNC_API_ENABLED) return disabledResponse();
   try {
     const { key } = await context.params;
     await writeServerSyncedStorageValue(decodeStorageKey(key), null);

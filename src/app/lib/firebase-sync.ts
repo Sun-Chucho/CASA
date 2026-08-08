@@ -17,14 +17,42 @@ const _pendingLocalWrites: Record<string, { value: unknown; createdAt: number }>
 // only a recovery mechanism, so polling large snapshots every ten seconds was
 // unnecessary and generated substantial CDN/server traffic when realtime auth
 // was unavailable.
-const FALLBACK_POLL_INTERVAL_MS = 120000;
-const PENDING_LOCAL_WRITE_TTL_MS = 15000;
-const DIRECT_FIREBASE_WRITE_TIMEOUT_MS = 5000;
+const DIRECT_FIREBASE_WRITE_TIMEOUT_MS = 15000;
+// Full business snapshots must not be proxied through Vercel during normal
+// operation. Opt in only for a short-lived recovery deployment if required.
+const SERVER_SYNC_FALLBACK_ENABLED = process.env.NEXT_PUBLIC_ENABLE_SERVER_SYNC_FALLBACK === "true";
 const SERVER_SYNC_ETAG_PREFIX = "orange-hotel-server-sync-etag";
+const PENDING_SYNC_MARKER_PREFIX = "orange-hotel-pending-sync";
 const HYDRATION_DEDUP_WINDOW_MS = 30000;
 const _hydrationInFlight = new Map<string, Promise<void>>();
 const _lastHydratedAt: Record<string, number> = {};
 const _serverReadsInFlight = new Map<string, Promise<unknown | null>>();
+let _pendingFlushInFlight = false;
+let _pendingRetryTimer: number | null = null;
+
+function getPendingSyncMarkerKey(key: string) {
+  return `${PENDING_SYNC_MARKER_PREFIX}:${getUnifiedLocalKey(key)}`;
+}
+
+function hasPendingSyncMarker(key: string) {
+  return typeof window !== "undefined" && window.localStorage.getItem(getPendingSyncMarkerKey(key)) !== null;
+}
+
+function markPendingSync(key: string) {
+  if (typeof window !== "undefined") window.localStorage.setItem(getPendingSyncMarkerKey(key), String(Date.now()));
+}
+
+function clearPendingSync(key: string) {
+  if (typeof window !== "undefined") window.localStorage.removeItem(getPendingSyncMarkerKey(key));
+}
+
+function schedulePendingFirebaseFlush() {
+  if (typeof window === "undefined" || _pendingRetryTimer !== null) return;
+  _pendingRetryTimer = window.setTimeout(() => {
+    _pendingRetryTimer = null;
+    void flushPendingFirebaseWrites();
+  }, 30000);
+}
 
 function getServerSyncEtagKey(key: string) {
   return `${SERVER_SYNC_ETAG_PREFIX}:${key}`;
@@ -74,8 +102,9 @@ function getEffectiveConnectionState() {
 
 function emitConnectionState(connected: boolean) {
   _firebaseRealtimeConnected = connected;
-  _isConnected = getEffectiveConnectionState();
+  _isConnected = connected ? getEffectiveConnectionState() : false;
   _connectionListeners.forEach((fn) => fn(_isConnected));
+  if (connected) void flushPendingFirebaseWrites();
 }
 
 function markSyncHealthy(key?: string) {
@@ -185,6 +214,11 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
 }
 
 if (typeof window !== "undefined") {
+  window.addEventListener("online", () => {
+    void ensureFirebaseAuthReady()
+      .then(() => flushPendingFirebaseWrites())
+      .catch(() => emitConnectionState(false));
+  });
   void ensureFirebaseAuthReady()
     .then(() => {
       onValue(ref(firebaseDatabase, ".info/connected"), (snapshot) => {
@@ -192,8 +226,7 @@ if (typeof window !== "undefined") {
       });
     })
     .catch((error) => {
-      _isConnected = window.navigator.onLine;
-      _connectionListeners.forEach((fn) => fn(_isConnected));
+      emitConnectionState(false);
       console.error("Firebase connection monitoring failed", error);
     });
 }
@@ -204,7 +237,7 @@ export function isFirebaseConnected() {
 
 export function subscribeToConnectionStatus(onChange: (connected: boolean) => void) {
   _connectionListeners.add(onChange);
-  onChange(_isConnected || getEffectiveConnectionState() || (typeof window !== "undefined" ? window.navigator.onLine : false));
+  onChange(_isConnected || getEffectiveConnectionState());
   return () => {
     _connectionListeners.delete(onChange);
   };
@@ -502,12 +535,7 @@ function areSnapshotsEqual(a: unknown, b: unknown) {
 
 function shouldIgnoreRemoteValue(key: string, remoteValue: unknown) {
   const pending = _pendingLocalWrites[key];
-  if (!pending) return false;
-
-  if (Date.now() - pending.createdAt > PENDING_LOCAL_WRITE_TTL_MS) {
-    delete _pendingLocalWrites[key];
-    return false;
-  }
+  if (!pending) return hasPendingSyncMarker(key) && getLocalSyncedValue(key) !== null;
 
   if (areSnapshotsEqual(remoteValue, pending.value)) {
     delete _pendingLocalWrites[key];
@@ -1001,6 +1029,7 @@ export async function syncStorageValueToFirebase<T>(key: string, value: T) {
   if (typeof window === "undefined") return false;
   const sanitizedValue: unknown = sanitizeForStorage(sanitizeSyncedValue(key, value));
   _pendingLocalWrites[key] = { value: sanitizedValue, createdAt: Date.now() };
+  markPendingSync(key);
 
   // Write straight to Firebase during normal operation. Routing every growing
   // POS snapshot through a Vercel Function made each save count as incoming
@@ -1022,6 +1051,7 @@ export async function syncStorageValueToFirebase<T>(key: string, value: T) {
     const committedValue = sanitizeForStorage(sanitizeSyncedValue(key, transaction.snapshot.val()));
     setLocalCache(key, JSON.stringify(committedValue));
     delete _pendingLocalWrites[key];
+    clearPendingSync(key);
     dispatchStorageUpdated(key);
     markSyncHealthy(key);
     return true;
@@ -1029,10 +1059,17 @@ export async function syncStorageValueToFirebase<T>(key: string, value: T) {
     console.error(`Firebase direct sync failed for ${key}`, firebaseError);
   }
 
+  if (!SERVER_SYNC_FALLBACK_ENABLED) {
+    emitConnectionState(false);
+    schedulePendingFirebaseFlush();
+    return false;
+  }
+
   try {
     await writeServerSyncedStorageValue(key, sanitizedValue);
     setLocalCache(key, JSON.stringify(sanitizedValue));
     delete _pendingLocalWrites[key];
+    clearPendingSync(key);
     dispatchStorageUpdated(key);
     markSyncHealthy(key);
     return true;
@@ -1040,6 +1077,23 @@ export async function syncStorageValueToFirebase<T>(key: string, value: T) {
     emitConnectionState(false);
     console.error(`Server sync fallback failed for ${key}`, serverError);
     return false;
+  }
+}
+
+async function flushPendingFirebaseWrites() {
+  if (_pendingFlushInFlight || typeof window === "undefined" || !window.navigator.onLine) return;
+  const pendingKeys = Object.keys(_pendingLocalWrites);
+  if (pendingKeys.length === 0) return;
+
+  _pendingFlushInFlight = true;
+  try {
+    for (const key of pendingKeys) {
+      const latest = _pendingLocalWrites[key];
+      if (!latest) continue;
+      await syncStorageValueToFirebase(key, latest.value);
+    }
+  } finally {
+    _pendingFlushInFlight = false;
   }
 }
 
@@ -1077,7 +1131,9 @@ async function hydrateStorageKeyFromFirebaseInternal(key: string) {
     const canonicalScore = getSnapshotScore(key, canonicalValue);
 
     let preferredValue: unknown = canonicalValue;
-    if (remoteScore > 0) {
+    if (hasPendingSyncMarker(key) && localValue !== null) {
+      preferredValue = protectSyncedValueBeforeWrite(key, localValue, remoteValue);
+    } else if (remoteScore > 0) {
       preferredValue = mergeRemoteValueForLocalApply(key, remoteValue);
     } else if (localScore >= remoteScore && localScore >= canonicalScore) {
       preferredValue = localValue;
@@ -1094,12 +1150,17 @@ async function hydrateStorageKeyFromFirebaseInternal(key: string) {
         DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
         `Firebase reconciliation timed out while hydrating ${key}`,
       );
-      await writeServerSyncedStorageValue(key, sanitizedPreferredValue).catch(() => undefined);
     }
 
+    clearPendingSync(key);
+    delete _pendingLocalWrites[key];
     markSyncHealthy(key);
   } catch (error) {
     console.error(`Firebase direct hydrate failed for ${key}`, error);
+    if (!SERVER_SYNC_FALLBACK_ENABLED) {
+      emitConnectionState(false);
+      return;
+    }
     try {
       const serverValue = sanitizeForStorage(sanitizeSyncedValue(key, await fetchServerSyncedStorageValue(key)));
       if (hasUsableSyncedValue(key, serverValue)) {
@@ -1202,11 +1263,11 @@ export function subscribeToSyncedStorageKey<T>(key: string, onChange: (value: T 
   };
 
   const ensureFallbackPolling = () => {
-    if (pollTimer !== null || isDisposed) return;
+    if (!SERVER_SYNC_FALLBACK_ENABLED || pollTimer !== null || isDisposed) return;
     void pollServerSnapshot();
     pollTimer = window.setInterval(() => {
       void pollServerSnapshot();
-    }, FALLBACK_POLL_INTERVAL_MS);
+    }, 120000);
   };
 
   const resumeFallbackPolling = () => {
@@ -1249,7 +1310,6 @@ export function subscribeToSyncedStorageKey<T>(key: string, onChange: (value: T 
           readSnapshotValue<T>(key, mergedValue as T, onChange);
           if (!areSnapshotsEqual(nextValue, mergedValue)) {
             void set(ref(firebaseDatabase, toStoragePath(key)), mergedValue).catch(() => undefined);
-            void writeServerSyncedStorageValue(key, mergedValue).catch(() => undefined);
           }
           markSyncHealthy(key);
           stopFallbackPolling();
@@ -1285,6 +1345,10 @@ export function removeStorageValueFromFirebase(key: string) {
     .then(() => markSyncHealthy(key))
     .catch((error) => {
       console.error(`Firebase remove failed for ${key}`, error);
+      if (!SERVER_SYNC_FALLBACK_ENABLED) {
+        emitConnectionState(false);
+        return;
+      }
       void removeServerSyncedStorageValue(key)
         .then(() => markSyncHealthy(key))
         .catch((serverError) => {
@@ -1314,17 +1378,17 @@ export async function runOnceAcrossDevices(markerKey: string, action: () => Prom
   if (window.localStorage.getItem(localMarker) === "1") return;
 
   try {
-    const response = await fetch(`/api/storage-sync/${encodeURIComponent(markerKey)}`);
+    await ensureFirebaseAuthReady();
+    const markerRef = ref(firebaseDatabase, toStoragePath(markerKey));
+    const marker = await get(markerRef);
     // If the backend marker cannot be verified, do nothing — never run a
     // destructive action blindly. The next load retries.
-    if (!response.ok) return;
-    const payload = (await response.json()) as { value?: unknown };
-    if (payload.value) {
+    if (marker.exists()) {
       window.localStorage.setItem(localMarker, "1");
       return;
     }
     await action();
-    await writeServerSyncedStorageValue(markerKey, { done: true, at: Date.now() });
+    await set(markerRef, { done: true, at: Date.now() });
     window.localStorage.setItem(localMarker, "1");
   } catch {
     // Leave markers unset so a later load can retry.
@@ -1351,12 +1415,11 @@ export async function purgeSyncedKeys(keys: string[]) {
       keys.map((key) => remove(ref(firebaseDatabase, toStoragePath(key))).catch(() => null)),
     );
   } catch {
-    await Promise.all(keys.map((key) => removeServerSyncedStorageValue(key).catch(() => null)));
+    if (SERVER_SYNC_FALLBACK_ENABLED) {
+      await Promise.all(keys.map((key) => removeServerSyncedStorageValue(key).catch(() => null)));
+    }
   }
 
-  // Best-effort: also clear the REST mirror so a stale server snapshot can't be
-  // re-hydrated after the Firebase node is emptied.
-  await Promise.all(keys.map((key) => removeServerSyncedStorageValue(key).catch(() => null)));
 }
 
 export async function clearFirebaseBusinessState() {
@@ -1365,8 +1428,12 @@ export async function clearFirebaseBusinessState() {
     await Promise.all([...FIREBASE_SYNC_KEYS, ...LEGACY_DEMO_KEYS].map((key) => remove(ref(firebaseDatabase, toStoragePath(key))).catch(() => null)));
     markSyncHealthy();
   } catch {
-    await Promise.all([...FIREBASE_SYNC_KEYS, ...LEGACY_DEMO_KEYS].map((key) => removeServerSyncedStorageValue(key).catch(() => null)));
-    markSyncHealthy();
+    if (SERVER_SYNC_FALLBACK_ENABLED) {
+      await Promise.all([...FIREBASE_SYNC_KEYS, ...LEGACY_DEMO_KEYS].map((key) => removeServerSyncedStorageValue(key).catch(() => null)));
+      markSyncHealthy();
+    } else {
+      emitConnectionState(false);
+    }
   }
 }
 
@@ -1441,16 +1508,20 @@ export async function getRemoteRecordCounts(): Promise<Record<string, number>> {
     );
     markSyncHealthy();
   } catch {
-    await Promise.all(
-      FIREBASE_SYNC_KEYS.map(async (key) => {
-        try {
-          const value = await fetchServerSyncedStorageValue(key);
-          counts[key] = countRecords(value);
-        } catch {
-          counts[key] = -1;
-        }
-      }),
-    );
+    if (SERVER_SYNC_FALLBACK_ENABLED) {
+      await Promise.all(
+        FIREBASE_SYNC_KEYS.map(async (key) => {
+          try {
+            const value = await fetchServerSyncedStorageValue(key);
+            counts[key] = countRecords(value);
+          } catch {
+            counts[key] = -1;
+          }
+        }),
+      );
+    } else {
+      FIREBASE_SYNC_KEYS.forEach((key) => { counts[key] = -1; });
+    }
   }
   return counts;
 }
@@ -1467,8 +1538,12 @@ export async function wipeStorageCategory(key: string) {
     await set(ref(firebaseDatabase, toStoragePath(key)), defaultValue);
     markSyncHealthy(key);
   } catch {
-    await writeServerSyncedStorageValue(key, defaultValue);
-    markSyncHealthy(key);
+    if (SERVER_SYNC_FALLBACK_ENABLED) {
+      await writeServerSyncedStorageValue(key, defaultValue);
+      markSyncHealthy(key);
+    } else {
+      emitConnectionState(false);
+    }
   }
 
   // Trigger local state updates

@@ -1,5 +1,4 @@
 {
-  "version": 2,
-  "name": "cassa-motel",
-  "builds": [{ "src": "package.json", "use": "@vercel/next" }]
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs"
 }

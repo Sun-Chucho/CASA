@@ -1,7 +1,7 @@
 import { getApp, getApps, initializeApp } from "firebase/app";
 import { getAnalytics, isSupported, type Analytics } from "firebase/analytics";
-import { browserLocalPersistence, getAuth, onAuthStateChanged, setPersistence, signInAnonymously } from "firebase/auth";
-import { getDatabase, onValue, ref } from "firebase/database";
+import { browserLocalPersistence, getAuth, setPersistence, signInAnonymously } from "firebase/auth";
+import { getDatabase } from "firebase/database";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY ?? "AIzaSyAT55z0QVhfCtAAPvt0XZmZgEWGkLjaEsU",
@@ -25,8 +25,6 @@ export const firebaseAuth = getAuth(firebaseApp);
 export const firebaseDatabase = getDatabase(firebaseApp);
 
 let authReadyPromise: Promise<void> | null = null;
-const AUTH_READY_TIMEOUT_MS = 2500;
-
 export function ensureFirebaseAuthReady() {
   if (typeof window === "undefined") {
     return Promise.resolve();
@@ -44,42 +42,8 @@ export function ensureFirebaseAuthReady() {
         return;
       }
 
-      await new Promise<void>((resolve) => {
-        let settled = false;
-        const finish = () => {
-          if (settled) return;
-          settled = true;
-          resolve();
-        };
-
-        const timeoutId = window.setTimeout(() => {
-          console.warn("Firebase auth bootstrap timed out, continuing without client auth.");
-          unsubscribe();
-          finish();
-        }, AUTH_READY_TIMEOUT_MS);
-
-        const unsubscribe = onAuthStateChanged(
-          firebaseAuth,
-          (user) => {
-            if (!user) return;
-            window.clearTimeout(timeoutId);
-            unsubscribe();
-            finish();
-          },
-          () => {
-            window.clearTimeout(timeoutId);
-            unsubscribe();
-            finish();
-          },
-        );
-
-        signInAnonymously(firebaseAuth).catch((error) => {
-          window.clearTimeout(timeoutId);
-          console.warn("Firebase anonymous auth unavailable, continuing without client auth.", error);
-          unsubscribe();
-          finish();
-        });
-      });
+      const credential = await signInAnonymously(firebaseAuth);
+      if (!credential.user) throw new Error("Firebase anonymous authentication did not return a user.");
     })().catch((error) => {
       authReadyPromise = null;
       throw error;
@@ -87,18 +51,6 @@ export function ensureFirebaseAuthReady() {
   }
 
   return authReadyPromise;
-}
-
-// Keep the active CASA storage root warm and connected. Durable browser
-// persistence is handled by the casa-v2 localStorage cache in firebase-sync.
-if (typeof window !== "undefined") {
-  void ensureFirebaseAuthReady()
-    .then(() => {
-      onValue(ref(firebaseDatabase, "casa-v2"), () => {}, { onlyOnce: false });
-    })
-    .catch((error) => {
-      console.error("Firebase authentication bootstrap failed", error);
-    });
 }
 
 let analyticsPromise: Promise<Analytics | null> | null = null;

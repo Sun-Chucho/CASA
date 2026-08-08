@@ -39,14 +39,18 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EXPENSE_DEPARTMENTS, ExpenseRecord, getExpenseAmountTypeLabel, STORAGE_EXPENSES } from "@/app/lib/expenses";
 import { LaundryRecord, STORAGE_LAUNDRY_RECORDS } from "@/app/lib/laundry";
+import { ROOMS } from "@/app/lib/mock-data";
 
 type ReportRange = "daily" | "weekly" | "monthly" | "all-time";
+type AnalyticsView = "analytics" | "reports";
 
 type BookingTransaction = {
   createdAt?: number;
   total?: number;
   guestName?: string;
   status?: "completed" | "checked-out" | "credit";
+  nights?: number;
+  roomNumber?: string;
 };
 
 type PosPaymentRecord = {
@@ -138,7 +142,63 @@ function calculateGrowth(current: number, previous: number) {
   return `${rounded >= 0 ? "+" : ""}${rounded}%`;
 }
 
+function escapeCsvCell(value: string | number) {
+  const text = String(value);
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function getOperatingExpenseLabel(expense: ExpenseRecord) {
+  const title = expense.title.toLowerCase();
+  if (expense.department === "staff-salary-allowance" || /salary|allowance|wage|payroll/.test(title)) return "Salary & Allowances";
+  if (/internet|wi-?fi|dstv|television|\btv\b/.test(title)) return "TV / Internet";
+  if (/electric|power|luku/.test(title)) return "Electricity";
+  if (/generator|diesel|petrol|fuel/.test(title)) return "Generator / Fuel";
+  if (expense.department === "staff-food") return "Staff Food";
+  if (expense.department === "office") return "Office & Administration";
+  if (expense.department === "rooms") return "Rooms & Housekeeping";
+  if (expense.department === "managing-director") return "Managing Director";
+  if (expense.department === "utilities-government") return "Utilities & Government";
+  return "Maintenance & Other";
+}
+
+function StatementHeader({ label }: { label: string }) {
+  return (
+    <tr className="border-y bg-muted/60">
+      <th colSpan={2} className="px-5 py-3 text-left text-[10px] font-black uppercase tracking-[0.22em] md:px-8">{label}</th>
+    </tr>
+  );
+}
+
+function StatementRow({ label, value, plain = false }: { label: string; value: number; plain?: boolean }) {
+  return (
+    <tr className="border-b border-black/5">
+      <td className="px-5 py-2.5 font-semibold md:px-8">{label}</td>
+      <td className="px-5 py-2.5 text-right font-bold tabular-nums md:px-8">{plain ? value.toLocaleString() : `TSh ${value.toLocaleString()}`}</td>
+    </tr>
+  );
+}
+
+function StatementTotal({ label, value, positive, prominent = false }: { label: string; value: number; positive?: boolean; prominent?: boolean }) {
+  const tone = positive === undefined ? "" : positive ? "text-green-700" : "text-red-700";
+  return (
+    <tr className={prominent ? "border-y-2 border-black bg-[#f7faf6]" : "border-b border-black/20 bg-muted/20"}>
+      <td className={`px-5 py-3 font-black uppercase md:px-8 ${tone}`}>{label}</td>
+      <td className={`px-5 py-3 text-right font-black tabular-nums md:px-8 ${prominent ? "text-xl" : ""} ${tone}`}>TSh {value.toLocaleString()}</td>
+    </tr>
+  );
+}
+
+function StatementPercent({ label, value, prominent = false }: { label: string; value: number; prominent?: boolean }) {
+  return (
+    <tr className={prominent ? "bg-black text-white" : "border-b border-black/10"}>
+      <td className="px-5 py-3 font-black uppercase md:px-8">{label}</td>
+      <td className="px-5 py-3 text-right font-black tabular-nums md:px-8">{value.toFixed(1)}%</td>
+    </tr>
+  );
+}
+
 export default function AnalyticsPage() {
+  const [view, setView] = useState<AnalyticsView>("analytics");
   const [range, setRange] = useState<ReportRange>("daily");
   const [selectedMonth, setSelectedMonth] = useState<string>("");
   const [bookings, setBookings] = useState<BookingTransaction[]>([]);
@@ -236,13 +296,11 @@ export default function AnalyticsPage() {
     return events;
   }, [baristaPayments, bookings, expenses, kitchenPayments, laundryRecords]);
 
-  const revenueEvents = useMemo(() => businessEvents.filter((event) => event.source !== "expense"), [businessEvents]);
-
   const availableMonths = useMemo(() => {
-    const monthKeys = Array.from(new Set(revenueEvents.map((event) => toMonthKey(event.timestamp))));
+    const monthKeys = Array.from(new Set(businessEvents.map((event) => toMonthKey(event.timestamp))));
     if (monthKeys.length === 0) monthKeys.push(toMonthKey(Date.now()));
     return monthKeys.sort((a, b) => b.localeCompare(a));
-  }, [revenueEvents]);
+  }, [businessEvents]);
 
   useEffect(() => {
     if (!selectedMonth || !availableMonths.includes(selectedMonth)) {
@@ -374,9 +432,15 @@ export default function AnalyticsPage() {
         previousTotal += payment.total;
       }
     });
+    laundryRecords.forEach((record) => {
+      if (record.status === "credit" || !record.createdAt || !record.totalAmount) return;
+      if (previousRows.includes(toDayKey(record.createdAt))) {
+        previousTotal += record.totalAmount;
+      }
+    });
 
     return calculateGrowth(currentTotal, previousTotal);
-  }, [baristaPayments, bookings, history, kitchenPayments, range]);
+  }, [baristaPayments, bookings, history, kitchenPayments, laundryRecords, range]);
 
   const pieData = useMemo(
     () => [
@@ -476,6 +540,115 @@ export default function AnalyticsPage() {
     };
   }, [beverageRows, recipeRows, stockSalesRows]);
 
+  const financialStatement = useMemo(() => {
+    const month = selectedMonth || availableMonths[0] || toMonthKey(Date.now());
+    const monthEvents = businessEvents.filter((event) => toMonthKey(event.timestamp) === month);
+    const monthExpenses = expenses.filter((expense) => toMonthKey(expense.createdAt) === month);
+    const reportBookings = bookings.filter(
+      (booking) => booking.status !== "credit" && Boolean(booking.createdAt) && toMonthKey(booking.createdAt!) === month,
+    );
+
+    const revenue = {
+      rooms: monthEvents.filter((event) => event.source === "rooms").reduce((sum, event) => sum + event.total, 0),
+      kitchen: monthEvents.filter((event) => event.source === "kitchen").reduce((sum, event) => sum + event.total, 0),
+      bar: monthEvents.filter((event) => event.source === "barista").reduce((sum, event) => sum + event.total, 0),
+      laundry: monthEvents.filter((event) => event.source === "laundry").reduce((sum, event) => sum + event.total, 0),
+      conference: 0,
+    };
+    const totalRevenue = revenue.rooms + revenue.kitchen + revenue.bar + revenue.laundry + revenue.conference;
+
+    // Kitchen and barista purchases are direct costs; the remaining saved expenses are OPEX.
+    const drinksCost = monthExpenses
+      .filter((expense) => expense.department === "barista")
+      .reduce((sum, expense) => sum + expense.amount, 0);
+    const kitchenCost = monthExpenses
+      .filter((expense) => expense.department === "kitchen")
+      .reduce((sum, expense) => sum + expense.amount, 0);
+    const directCosts = drinksCost + kitchenCost;
+    const grossProfit = totalRevenue - directCosts;
+
+    const operatingTotals = new Map<string, number>();
+    monthExpenses
+      .filter((expense) => expense.department !== "barista" && expense.department !== "kitchen")
+      .forEach((expense) => {
+        const label = getOperatingExpenseLabel(expense);
+        operatingTotals.set(label, (operatingTotals.get(label) ?? 0) + expense.amount);
+      });
+    const preferredLabels = [
+      "Salary & Allowances",
+      "TV / Internet",
+      "Electricity",
+      "Generator / Fuel",
+      "Staff Food",
+      "Office & Administration",
+      "Rooms & Housekeeping",
+      "Managing Director",
+      "Utilities & Government",
+      "Maintenance & Other",
+    ];
+    const operatingExpenses = preferredLabels.map((label) => ({ label, value: operatingTotals.get(label) ?? 0 }));
+    const totalOpex = operatingExpenses.reduce((sum, row) => sum + row.value, 0);
+    const netProfit = grossProfit - totalOpex;
+    const roomsSold = reportBookings.length;
+
+    return {
+      month,
+      capacity: ROOMS.length,
+      roomsSold,
+      revenue,
+      totalRevenue,
+      drinksCost,
+      kitchenCost,
+      directCosts,
+      grossProfit,
+      grossProfitMargin: totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0,
+      operatingExpenses,
+      totalOpex,
+      netProfit,
+      netProfitMargin: totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0,
+    };
+  }, [availableMonths, bookings, businessEvents, expenses, selectedMonth]);
+
+  const exportFinancialStatement = () => {
+    const rows: Array<[string, string | number]> = [
+      ["CASSA MOTEL FINANCIAL STATEMENT", formatMonthLabel(financialStatement.month)],
+      ["Generated", new Date().toLocaleString()],
+      ["", ""],
+      ["CAPACITY", ""],
+      ["Total Rooms", financialStatement.capacity],
+      ["Rooms Sold", financialStatement.roomsSold],
+      ["", ""],
+      ["REVENUE", ""],
+      ["Room Sales", financialStatement.revenue.rooms],
+      ["Kitchen", financialStatement.revenue.kitchen],
+      ["Bar", financialStatement.revenue.bar],
+      ["Laundry", financialStatement.revenue.laundry],
+      ["Conference", financialStatement.revenue.conference],
+      ["TOTAL REVENUE", financialStatement.totalRevenue],
+      ["", ""],
+      ["DIRECT COST / COGS", ""],
+      ["Drinks", financialStatement.drinksCost],
+      ["LN & DN", financialStatement.kitchenCost],
+      ["TOTAL DIRECT COST", financialStatement.directCosts],
+      ["GROSS PROFIT", financialStatement.grossProfit],
+      ["GROSS PROFIT MARGIN", `${financialStatement.grossProfitMargin.toFixed(1)}%`],
+      ["", ""],
+      ["OPERATING EXPENSES", ""],
+      ...financialStatement.operatingExpenses.map((row): [string, number] => [row.label, row.value]),
+      ["TOTAL OPEX", financialStatement.totalOpex],
+      ["NET PROFIT", financialStatement.netProfit],
+      ["NET PROFIT MARGIN", `${financialStatement.netProfitMargin.toFixed(1)}%`],
+    ];
+    const csv = rows.map((row) => row.map(escapeCsvCell).join(",")).join("\r\n");
+    const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `cassa-financial-statement-${financialStatement.month}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   const exportReport = () => {
     const payload = {
       generatedAt: new Date().toISOString(),
@@ -508,11 +681,11 @@ export default function AnalyticsPage() {
             <BarChart3 className="w-7 h-7 text-primary" />
           </div>
           <div>
-            <h1 className="text-2xl font-black tracking-tight uppercase md:text-3xl">MD Reports</h1>
-            <p className="text-muted-foreground text-sm uppercase font-bold tracking-wider">Daily, weekly, monthly, and all-time business reports</p>
+            <h1 className="text-2xl font-black tracking-tight uppercase md:text-3xl">MD Analytics &amp; Reports</h1>
+            <p className="text-muted-foreground text-sm uppercase font-bold tracking-wider">Live performance and financial statements from recorded system data</p>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
+        {view === "analytics" && <div className="flex flex-wrap gap-2">
           <Tabs value={range} onValueChange={(value) => setRange(value as ReportRange)}>
             <TabsList className="h-10 flex-wrap">
               <TabsTrigger value="daily" className="text-[10px] font-black uppercase tracking-widest">Daily</TabsTrigger>
@@ -524,8 +697,92 @@ export default function AnalyticsPage() {
           <Button size="sm" className="bg-primary font-black uppercase tracking-widest text-[10px]" onClick={exportReport}>
             <Download className="w-4 h-4 mr-2" /> Export Report
           </Button>
-        </div>
+        </div>}
       </header>
+
+      <Tabs value={view} onValueChange={(value) => setView(value as AnalyticsView)}>
+        <TabsList className="grid h-11 w-full grid-cols-2 md:w-[360px]">
+          <TabsTrigger value="analytics" className="font-black uppercase tracking-widest">Analytics</TabsTrigger>
+          <TabsTrigger value="reports" className="font-black uppercase tracking-widest">Reports</TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      {view === "reports" && (
+        <div className="space-y-4">
+          <Card className="border-none bg-white shadow-sm">
+            <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <CardTitle className="text-lg font-black uppercase tracking-tight">Financial Statement Month</CardTitle>
+                <CardDescription>Every available month is derived from saved revenue or expense records.</CardDescription>
+              </div>
+              <Button onClick={exportFinancialStatement} className="font-black uppercase tracking-widest text-[10px]">
+                <Download className="mr-2 h-4 w-4" /> Download CSV
+              </Button>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-6">
+                {availableMonths.map((month) => (
+                  <button
+                    key={month}
+                    type="button"
+                    onClick={() => setSelectedMonth(month)}
+                    className={`rounded-lg border p-3 text-left transition-colors ${
+                      financialStatement.month === month ? "border-primary bg-primary/10 text-primary" : "hover:border-primary/40"
+                    }`}
+                  >
+                    <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Statement</p>
+                    <p className="mt-1 text-sm font-black uppercase">{formatMonthLabel(month)}</p>
+                  </button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="overflow-hidden border-none bg-white shadow-lg">
+            <div className="bg-black px-5 py-6 text-white md:px-8">
+              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-primary">Cassa Motel</p>
+              <h2 className="mt-2 text-2xl font-black uppercase tracking-tight">Monthly Financial Statement</h2>
+              <p className="mt-1 text-sm font-bold uppercase text-white/60">{formatMonthLabel(financialStatement.month)} · TSh</p>
+            </div>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[560px] text-sm">
+                  <tbody>
+                    <StatementHeader label="Capacity" />
+                    <StatementRow label="Total Rooms" value={financialStatement.capacity} plain />
+                    <StatementRow label="Rooms Sold" value={financialStatement.roomsSold} plain />
+                    <StatementHeader label="Revenue" />
+                    <StatementRow label="Room Sales" value={financialStatement.revenue.rooms} />
+                    <StatementRow label="Kitchen" value={financialStatement.revenue.kitchen} />
+                    <StatementRow label="Bar" value={financialStatement.revenue.bar} />
+                    <StatementRow label="Laundry" value={financialStatement.revenue.laundry} />
+                    <StatementRow label="Conference" value={financialStatement.revenue.conference} />
+                    <StatementTotal label="Total Revenue" value={financialStatement.totalRevenue} />
+                    <StatementHeader label="Direct Cost / COGS" />
+                    <StatementRow label="Drinks" value={financialStatement.drinksCost} />
+                    <StatementRow label="LN & DN" value={financialStatement.kitchenCost} />
+                    <StatementTotal label="Total Direct Cost" value={financialStatement.directCosts} />
+                    <StatementTotal label="Gross Profit" value={financialStatement.grossProfit} positive={financialStatement.grossProfit >= 0} />
+                    <StatementPercent label="Gross Profit Margin" value={financialStatement.grossProfitMargin} />
+                    <StatementHeader label="Operating Expenses" />
+                    {financialStatement.operatingExpenses.map((row) => (
+                      <StatementRow key={row.label} label={row.label} value={row.value} />
+                    ))}
+                    <StatementTotal label="Total OPEX" value={financialStatement.totalOpex} />
+                    <StatementTotal label="Net Profit" value={financialStatement.netProfit} positive={financialStatement.netProfit >= 0} prominent />
+                    <StatementPercent label="Net Profit Margin" value={financialStatement.netProfitMargin} prominent />
+                  </tbody>
+                </table>
+              </div>
+              <p className="border-t bg-muted/30 px-5 py-4 text-[10px] font-bold text-muted-foreground md:px-8">
+                Room, kitchen, bar, laundry, and expense figures are calculated only from records saved for this month. Conference remains zero until a conference revenue module records sales.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {view === "analytics" && <>
 
       {range === "monthly" && (
         <Card className="rounded-lg border-none bg-white shadow-sm">
@@ -838,6 +1095,7 @@ export default function AnalyticsPage() {
           </div>
         </CardContent>
       </Card>
+      </>}
     </div>
   );
 }

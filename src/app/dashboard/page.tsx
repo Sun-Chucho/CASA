@@ -30,6 +30,7 @@ interface CashierTransaction {
   roomNumber?: string;
   total: number;
   status?: "completed" | "checked-out" | "credit";
+  createdAt?: number;
   checkOutDate?: string;
   checkOutTime?: string;
 }
@@ -44,11 +45,30 @@ interface POSPaymentRecord {
   createdAt?: number;
 }
 
+type OverviewPeriod = "today" | "month" | "all";
+
+function isInOverviewPeriod(createdAt: number | undefined, period: OverviewPeriod) {
+  if (period === "all") return true;
+  if (!createdAt || !Number.isFinite(createdAt)) return false;
+
+  const recordDate = new Date(createdAt);
+  const now = new Date();
+  if (period === "today") return recordDate.toDateString() === now.toDateString();
+  return recordDate.getFullYear() === now.getFullYear() && recordDate.getMonth() === now.getMonth();
+}
+
+const OVERVIEW_PERIOD_LABELS: Record<OverviewPeriod, string> = {
+  today: "Today",
+  month: "This Month",
+  all: "All Time",
+};
+
 export default function OverviewPage() {
   const [role, setRole] = useState<Role>("manager");
   const [shift, setShift] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   const [reportText, setReportText] = useState("");
+  const [period, setPeriod] = useState<OverviewPeriod>("today");
 
   const [bookingRevenue, setBookingRevenue] = useState(0);
   const [activeKitchen, setActiveKitchen] = useState(0);
@@ -63,25 +83,24 @@ export default function OverviewPage() {
   const [rooms, setRooms] = useState(ROOMS);
 
   useEffect(() => {
-    const collectPaymentMetrics = (records: POSPaymentRecord[]) => {
-      const today = new Date().toDateString();
-      const paid = records
+    const collectPaymentMetrics = (records: POSPaymentRecord[], selectedPeriod: OverviewPeriod) => {
+      const periodRecords = records.filter((record) => isInOverviewPeriod(record.createdAt, selectedPeriod));
+      const paid = periodRecords
         .filter((record) => record.status !== "credit")
         .reduce((sum, record) => sum + (record.total || 0), 0);
       const credit = records
         .filter((record) => record.status === "credit")
         .reduce((sum, record) => sum + (record.total || 0), 0);
-      const settledCount = records.filter((record) => {
-        if (record.status === "credit" || !record.createdAt) return false;
-        return new Date(record.createdAt).toDateString() === today;
-      }).length;
+      const settledCount = periodRecords.filter((record) => record.status !== "credit").length;
       return { paid, credit, settledCount };
     };
-    const collectRecordTotals = <T extends { total?: number; totalAmount?: number; status?: string }>(
+    const collectRecordTotals = <T extends { total?: number; totalAmount?: number; status?: string; createdAt?: number }>(
       records: T[],
       amountKey: "total" | "totalAmount",
+      selectedPeriod: OverviewPeriod,
     ) => {
       const paid = records
+        .filter((record) => isInOverviewPeriod(record.createdAt, selectedPeriod))
         .filter((record) => record.status !== "credit")
         .reduce((sum, record) => sum + (Number(record[amountKey]) || 0), 0);
       const credit = records
@@ -111,21 +130,25 @@ export default function OverviewPage() {
       if (savedRole) setRole(savedRole);
       if (savedShift) setShift(savedShift);
 
-      const bookingMetrics = collectRecordTotals(cashierSnapshot.transactions, "total");
-      const laundryMetrics = collectRecordTotals(laundry, "totalAmount");
+      const bookingMetrics = collectRecordTotals(cashierSnapshot.transactions, "total", period);
+      const laundryMetrics = collectRecordTotals(laundry, "totalAmount", period);
 
       setBookingRevenue(bookingMetrics.paid);
       setActiveKitchen(kitchenSnapshot.tickets.length);
       setActiveBarista(baristaSnapshot.tickets.length);
 
-      const kitchenMetrics = collectPaymentMetrics(kitchenSnapshot.payments);
-      const baristaMetrics = collectPaymentMetrics(baristaSnapshot.payments);
+      const kitchenMetrics = collectPaymentMetrics(kitchenSnapshot.payments, period);
+      const baristaMetrics = collectPaymentMetrics(baristaSnapshot.payments, period);
 
       setKitchenRevenue(kitchenMetrics.paid);
       setBaristaRevenue(baristaMetrics.paid);
       setFoodRevenue(kitchenMetrics.paid + baristaMetrics.paid);
       setLaundryRevenue(laundryMetrics.paid);
-      setExpensesTotal(expenses.reduce((sum, expense) => sum + (expense.amount || 0), 0));
+      setExpensesTotal(
+        expenses
+          .filter((expense) => isInOverviewPeriod(expense.createdAt, period))
+          .reduce((sum, expense) => sum + (expense.amount || 0), 0),
+      );
       setCreditExposure(bookingMetrics.credit + kitchenMetrics.credit + baristaMetrics.credit + laundryMetrics.credit);
       setSettledToday(kitchenMetrics.settledCount + baristaMetrics.settledCount);
       setMounted(true);
@@ -148,12 +171,13 @@ export default function OverviewPage() {
       unsubscribeExpenses();
       unsubscribeRooms();
     };
-  }, []);
+  }, [period]);
 
   const occupiedRooms = useMemo(() => rooms.filter((room) => room.status === "occupied").length, [rooms]);
   const recentRooms = useMemo(() => rooms.slice(0, 4), [rooms]);
   const isDirector = role === "director";
   const occupancyPct = Math.round((occupiedRooms / Math.max(rooms.length, 1)) * 100);
+  const periodLabel = OVERVIEW_PERIOD_LABELS[period];
   const totalRevenue = bookingRevenue + foodRevenue + laundryRevenue;
   const actualNetRevenue = totalRevenue - expensesTotal;
   const revPar = Math.round(totalRevenue / Math.max(rooms.length, 1));
@@ -171,27 +195,27 @@ export default function OverviewPage() {
 
   const stats = useMemo(
     () => [
-      { label: "Booking Revenue", value: `TSh ${bookingRevenue.toLocaleString()}`, icon: DollarSign, trend: "+12%", trendUp: true, color: "text-green-500" },
-      { label: "Room Occupancy", value: `${occupancyPct}%`, icon: BedDouble, trend: "+5%", trendUp: true, color: "text-blue-500" },
+      { label: "Booking Revenue", value: `TSh ${bookingRevenue.toLocaleString()}`, icon: DollarSign, trend: periodLabel, trendUp: true, showArrow: false, color: "text-green-500" },
+      { label: "Room Occupancy", value: `${occupancyPct}%`, icon: BedDouble, trend: `${occupiedRooms}/${rooms.length} occupied`, trendUp: true, showArrow: false, color: "text-blue-500" },
       { label: "Kitchen Queue", value: `${activeKitchen}`, icon: TrendingUp, trend: activeKitchen > 5 ? "High" : "Stable", trendUp: activeKitchen <= 5, color: "text-orange-500" },
       { label: "Barista Queue", value: `${activeBarista}`, icon: Users, trend: activeBarista > 5 ? "High" : "Stable", trendUp: activeBarista <= 5, color: "text-purple-500" },
     ],
-    [activeBarista, activeKitchen, bookingRevenue, occupancyPct],
+    [activeBarista, activeKitchen, bookingRevenue, occupancyPct, occupiedRooms, periodLabel, rooms.length],
   );
 
   const executiveStats = useMemo(
     () => [
-      { label: "Total Revenue", value: `TSh ${totalRevenue.toLocaleString()}`, note: "Rooms + F&B + laundry collections" },
-      { label: "Actual Net Revenue", value: `TSh ${actualNetRevenue.toLocaleString()}`, note: "All income minus all expenses" },
-      { label: "Total Expenses", value: `TSh ${expensesTotal.toLocaleString()}`, note: "Every saved expense record" },
+      { label: "Total Revenue", value: `TSh ${totalRevenue.toLocaleString()}`, note: `${periodLabel}: rooms + F&B + laundry` },
+      { label: "Actual Net Revenue", value: `TSh ${actualNetRevenue.toLocaleString()}`, note: `${periodLabel} income minus expenses` },
+      { label: "Total Expenses", value: `TSh ${expensesTotal.toLocaleString()}`, note: `${periodLabel} saved expense records` },
       { label: "F&B Revenue", value: `TSh ${foodRevenue.toLocaleString()}`, note: "Kitchen and Barista settlements" },
       { label: "Laundry Revenue", value: `TSh ${laundryRevenue.toLocaleString()}`, note: "Completed laundry collections" },
       { label: "Credit Exposure", value: `TSh ${creditExposure.toLocaleString()}`, note: "Outstanding unsettled balances" },
       { label: "RevPAR", value: `TSh ${revPar.toLocaleString()}`, note: "Revenue per available room" },
       { label: "Occupancy", value: `${occupancyPct}%`, note: `${occupiedRooms}/${rooms.length} occupied rooms` },
-      { label: "Settled Today", value: `${settledToday}`, note: "Completed POS settlements today" },
+      { label: "POS Settlements", value: `${settledToday}`, note: `Completed settlements for ${periodLabel.toLowerCase()}` },
     ],
-    [actualNetRevenue, creditExposure, expensesTotal, foodRevenue, laundryRevenue, occupancyPct, occupiedRooms, revPar, rooms.length, settledToday, totalRevenue],
+    [actualNetRevenue, creditExposure, expensesTotal, foodRevenue, laundryRevenue, occupancyPct, occupiedRooms, periodLabel, revPar, rooms.length, settledToday, totalRevenue],
   );
 
   const generateReport = () => {
@@ -221,7 +245,22 @@ export default function OverviewPage() {
             {isDirector ? "Read-only strategic dashboard for managing director" : `Active performance tracking for ${role}`}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <div className="flex rounded-lg border bg-white p-1 shadow-sm" aria-label="Overview period">
+            {(["today", "month", "all"] as OverviewPeriod[]).map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setPeriod(value)}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-[10px] font-black uppercase tracking-wider transition-colors",
+                  period === value ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
+                )}
+              >
+                {OVERVIEW_PERIOD_LABELS[value]}
+              </button>
+            ))}
+          </div>
           {shift && (
             <Badge variant="outline" className="bg-white border-primary text-primary px-3 py-1 font-bold uppercase tracking-tight">
               <Clock className="w-3 h-3 mr-2" />
@@ -284,7 +323,7 @@ export default function OverviewPage() {
                   <stat.icon className={cn("w-5 h-5", stat.color)} />
                 </div>
                 <div className={cn("flex items-center text-xs font-bold", stat.trendUp ? "text-green-500" : "text-destructive")}>
-                  {stat.trendUp ? <ArrowUpRight className="w-3 h-3 mr-1" /> : <ArrowDownRight className="w-3 h-3 mr-1" />}
+                  {stat.showArrow !== false && (stat.trendUp ? <ArrowUpRight className="w-3 h-3 mr-1" /> : <ArrowDownRight className="w-3 h-3 mr-1" />)}
                   {stat.trend}
                 </div>
               </div>
@@ -327,16 +366,16 @@ export default function OverviewPage() {
             <CardContent className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
               <div className="space-y-3">
                 <div className="rounded-lg border bg-[#f7faf6] p-4">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">All Income</p>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">{periodLabel} Income</p>
                   <p className="mt-2 text-2xl font-black">TSh {totalRevenue.toLocaleString()}</p>
                   <p className="mt-2 text-xs font-bold text-muted-foreground">
                     Booking {bookingRevenue.toLocaleString()} + Kitchen {kitchenRevenue.toLocaleString()} + Barista {baristaRevenue.toLocaleString()} + Laundry {laundryRevenue.toLocaleString()}
                   </p>
                 </div>
                 <div className="rounded-lg border bg-red-50 p-4">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-red-700">All Expenses</p>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-red-700">{periodLabel} Expenses</p>
                   <p className="mt-2 text-2xl font-black text-red-700">TSh {expensesTotal.toLocaleString()}</p>
-                  <p className="mt-2 text-xs font-bold text-red-700/80">Every saved expense record is deducted here.</p>
+                  <p className="mt-2 text-xs font-bold text-red-700/80">Saved expenses for {periodLabel.toLowerCase()} are deducted here.</p>
                 </div>
                 <div className={`rounded-lg border p-4 ${actualNetRevenue >= 0 ? "bg-green-50" : "bg-red-50"}`}>
                   <p className={`text-[10px] font-black uppercase tracking-widest ${actualNetRevenue >= 0 ? "text-green-700" : "text-red-700"}`}>Net Revenue</p>
@@ -344,7 +383,7 @@ export default function OverviewPage() {
                     TSh {actualNetRevenue.toLocaleString()}
                   </p>
                   <p className={`mt-2 text-xs font-bold ${actualNetRevenue >= 0 ? "text-green-700/80" : "text-red-700/80"}`}>
-                    Actual net = all income minus all expenses.
+                    Actual net = {periodLabel.toLowerCase()} income minus expenses.
                   </p>
                 </div>
               </div>

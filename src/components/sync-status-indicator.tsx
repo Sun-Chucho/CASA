@@ -11,18 +11,12 @@ export function SyncStatusIndicator() {
   const [connected, setConnected] = useState(true);
 
   useEffect(() => {
-    // Firebase's realtime socket can be unavailable while the app's server
-    // sync is still online. Never let that narrower signal incorrectly
-    // override the browser's confirmed network state.
-    const applyConnectionState = (syncConnected: boolean) => {
-      setConnected(window.navigator.onLine || syncConnected);
-    };
-    const onOnline = () => setConnected(true);
+    const applyConnectionState = (syncConnected: boolean) => setConnected(syncConnected);
+    const onOnline = () => setConnected(false);
     const onOffline = () => setConnected(false);
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
 
-    applyConnectionState(false);
     const unsubscribe = subscribeToConnectionStatus(applyConnectionState);
 
     return () => {
@@ -46,7 +40,7 @@ export function SyncStatusIndicator() {
       ) : (
         <WifiOff className="w-3 h-3" />
       )}
-      {connected ? "Synced" : "Offline"}
+      {connected ? "Synced" : "Not Synced"}
     </div>
   );
 }
