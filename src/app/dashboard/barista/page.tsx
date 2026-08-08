@@ -162,8 +162,6 @@ const BARISTA_CATEGORIES: Array<{ value: BaristaCategory; label: string }> = [
   { value: "snacks", label: "Snacks" },
 ];
 
-const ALCOHOL_CATEGORIES = new Set<BaristaCategory>(["beer", "wine", "spirits", "cider"]);
-
 function matchesSalesDateFilter(createdAt: number | undefined, filter: SalesDateFilter) {
   if (filter === "all") return true;
   if (!createdAt) return false;
@@ -377,6 +375,7 @@ export default function BaristaPage() {
   const [savingBaristaItemId, setSavingBaristaItemId] = useState("");
   const [savedBaristaItemId, setSavedBaristaItemId] = useState("");
   const [deletingBaristaItemId, setDeletingBaristaItemId] = useState("");
+  const [restockSearch, setRestockSearch] = useState("");
   const [directorTab, setDirectorTab] = useState<"inventory" | "finance" | "purchases" | "sales">("finance");
   const [directorSalesDateFilter, setDirectorSalesDateFilter] = useState<SalesDateFilter>("day");
   const [category, setCategory] = useState<BaristaCategory>("all");
@@ -715,11 +714,15 @@ export default function BaristaPage() {
     [baristaStoreItems, storedMenuItems],
   );
 
-  const alcoholMenuItems = useMemo(() => {
-    const search = pastSaleSearch.trim().toLowerCase();
+  const pastSaleItems = useMemo(() => {
+    const normalizedSearch = normalizeStockName(pastSaleSearch);
+    const searchTokens = normalizedSearch.split(" ").filter(Boolean);
     const catalog = new Map<string, BaristaMenuItem>();
     const addCandidate = (item: BaristaMenuItem) => {
-      const target = normalizeBaristaTarget(item.name);
+      // Historical selection must preserve exact products. The operational
+      // stock normalizer intentionally groups some same-size sodas and bottle
+      // variants, which made distinct past-sale items disappear from search.
+      const target = normalizeStockName(item.name);
       if (!target) return;
       const existing = catalog.get(target);
       if (!existing || (existing.price <= 0 && item.price > 0)) catalog.set(target, item);
@@ -754,7 +757,7 @@ export default function BaristaPage() {
     buildSeedMenuItems().forEach((item) => addCandidate({ ...item, id: `past-${item.id}` }));
     baristaPayments.forEach((payment) => {
       payment.lines?.forEach((line) => {
-        const target = normalizeBaristaTarget(line.name);
+        const target = normalizeStockName(line.name);
         if (catalog.has(target)) return;
         const inferredPrice = payment.lines?.length === 1 && line.qty > 0 ? payment.total / line.qty : 0;
         addCandidate({
@@ -768,9 +771,12 @@ export default function BaristaPage() {
     });
 
     return Array.from(catalog.values()).filter(
-      (item) =>
-        ALCOHOL_CATEGORIES.has(item.category) &&
-        (!search || `${item.name} ${item.category}`.toLowerCase().includes(search)),
+      (item) => {
+        if (!Number.isFinite(item.price) || item.price <= 0) return false;
+        if (searchTokens.length === 0) return true;
+        const haystack = normalizeStockName(`${item.name} ${item.category} ${BARISTA_CATEGORIES.find((entry) => entry.value === item.category)?.label ?? ""}`);
+        return searchTokens.every((token) => haystack.includes(token));
+      },
     ).sort((a, b) => a.name.localeCompare(b.name));
   }, [baristaPayments, baristaStoreItems, inventoryItems, menuItems, pastSaleSearch]);
 
@@ -978,6 +984,15 @@ export default function BaristaPage() {
       }),
     [baristaSalesByItem, baristaStoreItems, inventoryItems, menuItems],
   );
+  const filteredBaristaManagerPricingRows = useMemo(() => {
+    const tokens = normalizeStockName(restockSearch).split(" ").filter(Boolean);
+    if (tokens.length === 0) return baristaManagerPricingRows;
+    return baristaManagerPricingRows.filter((item) => {
+      const categoryLabel = BARISTA_CATEGORIES.find((entry) => entry.value === item.category)?.label ?? item.category;
+      const haystack = normalizeStockName(`${item.name} ${categoryLabel} ${item.unit}`);
+      return tokens.every((token) => haystack.includes(token));
+    });
+  }, [baristaManagerPricingRows, restockSearch]);
 
   const updateManagerPricingDraft = (
     item: BaristaManagerPricingRow,
@@ -2156,8 +2171,8 @@ export default function BaristaPage() {
           <Card className="border-none shadow-sm xl:col-span-2">
             <CardHeader className="space-y-4">
               <div>
-                <CardTitle className="text-xl font-black uppercase tracking-tight">Alcohol Sold</CardTitle>
-                <CardDescription>Select the products and quantities sold on the historical date.</CardDescription>
+                <CardTitle className="text-xl font-black uppercase tracking-tight">Barista Items Sold</CardTitle>
+                <CardDescription>Search all current and previous barista products, then select the quantities sold.</CardDescription>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-1">
@@ -2174,13 +2189,13 @@ export default function BaristaPage() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Search Alcohol</p>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Search Barista Items</p>
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       value={pastSaleSearch}
                       onChange={(event) => setPastSaleSearch(event.target.value)}
-                      placeholder="Beer, wine, whisky..."
+                      placeholder="Beer, wine, soda, coffee..."
                       className="h-11 pl-10"
                     />
                   </div>
@@ -2189,7 +2204,7 @@ export default function BaristaPage() {
             </CardHeader>
             <CardContent>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {alcoholMenuItems.map((item) => (
+                {pastSaleItems.map((item) => (
                   <button
                     key={item.id}
                     type="button"
@@ -2203,9 +2218,9 @@ export default function BaristaPage() {
                     <p className="mt-2 text-sm font-black text-primary">TSh {item.price.toLocaleString()}</p>
                   </button>
                 ))}
-                {alcoholMenuItems.length === 0 && (
+                {pastSaleItems.length === 0 && (
                   <p className="col-span-full py-10 text-center text-xs font-black uppercase tracking-widest text-muted-foreground">
-                    No matching alcohol items found
+                    No matching barista items found
                   </p>
                 )}
               </div>
@@ -2393,6 +2408,17 @@ export default function BaristaPage() {
               <CardDescription>
                 Enter newly received stock to add it to the current balance, adjust prices if needed, then press Save.
               </CardDescription>
+              {isBaristaRestock && (
+                <div className="relative max-w-md">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={restockSearch}
+                    onChange={(event) => setRestockSearch(event.target.value)}
+                    placeholder="Search item name or category..."
+                    className="h-11 pl-10"
+                  />
+                </div>
+              )}
             </CardHeader>
             <CardContent className="p-0">
               <Table>
@@ -2408,7 +2434,7 @@ export default function BaristaPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {baristaManagerPricingRows.map((item) => (
+                  {filteredBaristaManagerPricingRows.map((item) => (
                     <TableRow key={item.id}>
                       <TableCell className="font-bold">{item.name}</TableCell>
                       <TableCell className="font-bold">
@@ -2497,10 +2523,10 @@ export default function BaristaPage() {
                       </TableCell>
                     </TableRow>
                   ))}
-                  {baristaManagerPricingRows.length === 0 && (
+                  {filteredBaristaManagerPricingRows.length === 0 && (
                     <TableRow>
                       <TableCell colSpan={7} className="py-10 text-center font-black uppercase text-[10px] tracking-widest text-muted-foreground">
-                        No barista menu items yet
+                        {restockSearch.trim() ? "No matching barista items" : "No barista menu items yet"}
                       </TableCell>
                     </TableRow>
                   )}
