@@ -42,7 +42,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Kitchen Stock', href: '/dashboard/inventory/kitchen-stock', icon: Package, roles: ['manager', 'inventory'] },
   { label: 'Barista Stock', href: '/dashboard/inventory/barista-stock', icon: Package, roles: ['manager', 'inventory'] },
   { label: 'Inventory', href: '/dashboard/inventory', icon: Package, roles: ['inventory'] },
-  { label: 'Menu Create', href: '/dashboard/menu-create', icon: FileSpreadsheet, roles: ['manager'] },
+  { label: 'Menu Create', href: '/dashboard/menu-create', icon: FileSpreadsheet, roles: ['manager', 'kitchen'] },
   { label: 'Company Stock', href: '/dashboard/company-stock', icon: Building2, roles: ['manager', 'director', 'inventory'] },
   { label: 'F&B POS', href: '/dashboard/fnb-pos', icon: Utensils, roles: ['kitchen', 'barista'] },
   { label: 'Record Past Sales', href: '/dashboard/barista/past-sales', icon: ReceiptText, roles: ['barista'] },
@@ -65,7 +65,7 @@ const NAV_ITEMS: NavItem[] = [
 
 const ROLE_NAV_PRIORITY: Partial<Record<Role, string[]>> = {
   cashier: ['/dashboard/cashier', '/dashboard/laundry', '/dashboard/cash-requests', '/dashboard/website-bookings', '/dashboard/live-chat'],
-  kitchen: ['/dashboard/kitchen'],
+  kitchen: ['/dashboard/kitchen', '/dashboard/menu-create'],
   barista: ['/dashboard/barista', '/dashboard/barista/past-sales', '/dashboard/barista/restock'],
 };
 
@@ -86,6 +86,9 @@ export function SidebarNav({ role }: { role: Role }) {
       .filter(item => item.roles.includes(role))
       .filter((item) => !(role === "barista" && item.href === "/dashboard/live-chat"))
       .map((item) => {
+        if (role === "kitchen" && item.href === "/dashboard/menu-create") {
+          return { ...item, label: "Menu & Prices" };
+        }
         if (item.href !== "/dashboard/fnb-pos") return item;
         if (role === "kitchen") return { ...item, label: "Kitchen POS", href: "/dashboard/kitchen" };
         if (role === "barista") return { ...item, label: "Barista POS", href: "/dashboard/barista" };

@@ -17,6 +17,9 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useConfirmDialog } from "@/hooks/use-confirm-dialog";
+import { readStoredRole } from "@/app/lib/auth";
+import { readActiveSessionUsername } from "@/app/lib/login-profiles";
+import { Role } from "@/app/lib/mock-data";
 
 type BaristaCategory = "espresso" | "coffee" | "tea" | "cold" | "snacks";
 
@@ -78,10 +81,9 @@ export function MenuCreateView() {
   const isDirector = useIsDirector();
   const { confirm, dialog } = useConfirmDialog();
   const [tab, setTab] = useState<"kitchen" | "barista">("kitchen");
+  const [sessionRole, setSessionRole] = useState<Role | null>(null);
+  const [changedBy, setChangedBy] = useState("manager");
 
-  const [kitchenTickets, setKitchenTickets] = useState<QueueTicket[]>([]);
-  const [kitchenPayments, setKitchenPayments] = useState<PaymentRecord[]>([]);
-  const [kitchenSeq, setKitchenSeq] = useState(300);
   const [kitchenMenuItems, setKitchenMenuItems] = useState<KitchenMenuItem[]>([]);
   const [kitchenName, setKitchenName] = useState("");
   const [kitchenPrice, setKitchenPrice] = useState("");
@@ -91,9 +93,6 @@ export function MenuCreateView() {
   const [editingKitchenName, setEditingKitchenName] = useState("");
   const [editingKitchenPrice, setEditingKitchenPrice] = useState("");
 
-  const [baristaTickets, setBaristaTickets] = useState<QueueTicket[]>([]);
-  const [baristaPayments, setBaristaPayments] = useState<PaymentRecord[]>([]);
-  const [baristaSeq, setBaristaSeq] = useState(490);
   const [baristaMenuItems, setBaristaMenuItems] = useState<BaristaMenuItem[]>([]);
   const [baristaName, setBaristaName] = useState("");
   const [baristaPrice, setBaristaPrice] = useState("");
@@ -105,6 +104,10 @@ export function MenuCreateView() {
   const [auditTrail, setAuditTrail] = useState<MenuAuditEntry[]>([]);
 
   useEffect(() => {
+    const currentRole = readStoredRole();
+    setSessionRole(currentRole);
+    setChangedBy(readActiveSessionUsername(currentRole ?? "manager") || currentRole || "manager");
+
     const kitchenSnapshot = readPosState<QueueTicket, PaymentRecord, KitchenMenuItem>(
       STORAGE_KITCHEN_STATE,
       KITCHEN_LEGACY.tickets,
@@ -113,9 +116,6 @@ export function MenuCreateView() {
       KITCHEN_LEGACY.menu,
       KITCHEN_LEGACY.defaultSeq,
     );
-    setKitchenTickets(kitchenSnapshot.tickets);
-    setKitchenPayments(kitchenSnapshot.payments);
-    setKitchenSeq(kitchenSnapshot.ticketSeq);
     const nextKitchenMenuItems = mergeKitchenMenuItems(kitchenSnapshot.menuItems);
     setKitchenMenuItems(nextKitchenMenuItems);
     if (JSON.stringify(nextKitchenMenuItems) !== JSON.stringify(kitchenSnapshot.menuItems)) {
@@ -136,9 +136,6 @@ export function MenuCreateView() {
       BARISTA_LEGACY.menu,
       BARISTA_LEGACY.defaultSeq,
     );
-    setBaristaTickets(baristaSnapshot.tickets);
-    setBaristaPayments(baristaSnapshot.payments);
-    setBaristaSeq(baristaSnapshot.ticketSeq);
     setBaristaMenuItems(baristaSnapshot.menuItems);
     setAuditTrail(readJson<MenuAuditEntry[]>(STORAGE_MENU_AUDIT) ?? []);
 
@@ -151,6 +148,42 @@ export function MenuCreateView() {
     const nextAuditTrail = [entry, ...auditTrail].slice(0, 100);
     setAuditTrail(nextAuditTrail);
     writeJson(STORAGE_MENU_AUDIT, nextAuditTrail);
+  };
+
+  const persistKitchenMenu = (nextMenuItems: KitchenMenuItem[]) => {
+    const latestSnapshot = readPosState<QueueTicket, PaymentRecord, KitchenMenuItem>(
+      STORAGE_KITCHEN_STATE,
+      KITCHEN_LEGACY.tickets,
+      KITCHEN_LEGACY.seq,
+      KITCHEN_LEGACY.payments,
+      KITCHEN_LEGACY.menu,
+      KITCHEN_LEGACY.defaultSeq,
+    );
+    writePosState(
+      STORAGE_KITCHEN_STATE,
+      latestSnapshot.tickets,
+      latestSnapshot.ticketSeq,
+      latestSnapshot.payments,
+      nextMenuItems,
+    );
+  };
+
+  const persistBaristaMenu = (nextMenuItems: BaristaMenuItem[]) => {
+    const latestSnapshot = readPosState<QueueTicket, PaymentRecord, BaristaMenuItem>(
+      STORAGE_BARISTA_STATE,
+      BARISTA_LEGACY.tickets,
+      BARISTA_LEGACY.seq,
+      BARISTA_LEGACY.payments,
+      BARISTA_LEGACY.menu,
+      BARISTA_LEGACY.defaultSeq,
+    );
+    writePosState(
+      STORAGE_BARISTA_STATE,
+      latestSnapshot.tickets,
+      latestSnapshot.ticketSeq,
+      latestSnapshot.payments,
+      nextMenuItems,
+    );
   };
 
   const addKitchenMenuItem = async () => {
@@ -176,7 +209,7 @@ export function MenuCreateView() {
       ...kitchenMenuItems,
     ];
     setKitchenMenuItems(nextMenuItems);
-    writePosState(STORAGE_KITCHEN_STATE, kitchenTickets, kitchenSeq, kitchenPayments, nextMenuItems);
+    persistKitchenMenu(nextMenuItems);
     setKitchenName("");
     setKitchenPrice("");
     setKitchenPrepMinutes("15");
@@ -221,14 +254,14 @@ export function MenuCreateView() {
       entry.id === item.id ? { ...entry, name: nextName, price: nextPrice } : entry,
     );
     setKitchenMenuItems(nextMenuItems);
-    writePosState(STORAGE_KITCHEN_STATE, kitchenTickets, kitchenSeq, kitchenPayments, nextMenuItems);
+    persistKitchenMenu(nextMenuItems);
     saveAuditEntry({
       id: `audit-${Date.now()}`,
       menu: "kitchen",
       itemId: item.id,
       itemName: nextName,
       changedAt: Date.now(),
-      changedBy: "manager",
+      changedBy,
       changes,
     });
     cancelKitchenEdit();
@@ -257,7 +290,7 @@ export function MenuCreateView() {
       ...baristaMenuItems,
     ];
     setBaristaMenuItems(nextMenuItems);
-    writePosState(STORAGE_BARISTA_STATE, baristaTickets, baristaSeq, baristaPayments, nextMenuItems);
+    persistBaristaMenu(nextMenuItems);
     setBaristaName("");
     setBaristaPrice("");
     setBaristaPrepMinutes("10");
@@ -302,35 +335,40 @@ export function MenuCreateView() {
       entry.id === item.id ? { ...entry, name: nextName, price: nextPrice } : entry,
     );
     setBaristaMenuItems(nextMenuItems);
-    writePosState(STORAGE_BARISTA_STATE, baristaTickets, baristaSeq, baristaPayments, nextMenuItems);
+    persistBaristaMenu(nextMenuItems);
     saveAuditEntry({
       id: `audit-${Date.now()}`,
       menu: "barista",
       itemId: item.id,
       itemName: nextName,
       changedAt: Date.now(),
-      changedBy: "manager",
+      changedBy,
       changes,
     });
     cancelBaristaEdit();
   };
 
   const visibleAuditTrail = auditTrail.filter((entry) => entry.menu === tab);
+  const isKitchenSession = sessionRole === "kitchen";
 
   return (
     <div className="space-y-6">
       {dialog}
       <header>
-        <h1 className="text-3xl font-black tracking-tight uppercase">Menu Create</h1>
+        <h1 className="text-3xl font-black tracking-tight uppercase">{isKitchenSession ? "Menu & Prices" : "Menu Create"}</h1>
         <p className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
-          Create and manage kitchen and barista menu items from one place
+          {isKitchenSession
+            ? "Create dishes and update the Kitchen POS selling prices"
+            : "Create and manage kitchen and barista menu items from one place"}
         </p>
       </header>
 
       <Tabs value={tab} onValueChange={(value) => setTab(value as "kitchen" | "barista")}>
         <TabsList className="h-11">
           <TabsTrigger value="kitchen" className="font-black uppercase text-[10px] tracking-widest">Kitchen POS</TabsTrigger>
-          <TabsTrigger value="barista" className="font-black uppercase text-[10px] tracking-widest">Barista POS</TabsTrigger>
+          {!isKitchenSession && (
+            <TabsTrigger value="barista" className="font-black uppercase text-[10px] tracking-widest">Barista POS</TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="kitchen" className="space-y-6">
@@ -427,7 +465,7 @@ export function MenuCreateView() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="barista" className="space-y-6">
+        {!isKitchenSession && <TabsContent value="barista" className="space-y-6">
           <Card className="border-none shadow-sm">
             <CardHeader>
               <CardTitle className="text-xl font-black uppercase tracking-tight">Create Barista Menu Item</CardTitle>
@@ -521,7 +559,7 @@ export function MenuCreateView() {
               </Table>
             </CardContent>
           </Card>
-        </TabsContent>
+        </TabsContent>}
       </Tabs>
 
       <Card className="border-none shadow-sm">
