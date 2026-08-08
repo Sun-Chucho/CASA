@@ -668,7 +668,7 @@ export default function AnalyticsPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `md-report-${range}${range === "monthly" ? `-${selectedMonth}` : ""}.json`;
+    link.download = `management-report-${range}${range === "monthly" ? `-${selectedMonth}` : ""}.json`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -681,7 +681,7 @@ export default function AnalyticsPage() {
             <BarChart3 className="w-7 h-7 text-primary" />
           </div>
           <div>
-            <h1 className="text-2xl font-black tracking-tight uppercase md:text-3xl">MD Analytics &amp; Reports</h1>
+            <h1 className="text-2xl font-black tracking-tight uppercase md:text-3xl">Management Analytics &amp; Reports</h1>
             <p className="text-muted-foreground text-sm uppercase font-bold tracking-wider">Live performance and financial statements from recorded system data</p>
           </div>
         </div>
