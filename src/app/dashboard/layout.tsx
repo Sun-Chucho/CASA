@@ -1082,7 +1082,7 @@ export default function DashboardLayout({
     director: ['/dashboard', '/dashboard/rooms', '/dashboard/company-stock', '/dashboard/cashier', '/dashboard/laundry', '/dashboard/expenses', '/dashboard/finances', '/dashboard/payments', '/dashboard/kitchen', '/dashboard/barista', '/dashboard/staff', '/dashboard/analytics', '/dashboard/settings', '/dashboard/settings/sync', '/dashboard/settings/password'],
     inventory: ['/dashboard/inventory', '/dashboard/inventory/kitchen-stock', '/dashboard/inventory/barista-stock', '/dashboard/company-stock', '/dashboard/settings/password'],
     cashier: ['/dashboard/cashier', '/dashboard/laundry', '/dashboard/cash-requests', '/dashboard/website-bookings', '/dashboard/live-chat', '/dashboard/payments', '/dashboard/rooms', '/dashboard/settings/password'],
-    kitchen: ['/dashboard/fnb-pos', '/dashboard/kitchen', '/dashboard/menu-create', '/dashboard/cancelled', '/dashboard/payments', '/dashboard/settings/password'],
+    kitchen: ['/dashboard/fnb-pos', '/dashboard/kitchen', '/dashboard/kitchen/past-payments', '/dashboard/menu-create', '/dashboard/cancelled', '/dashboard/payments', '/dashboard/settings/password'],
     barista: ['/dashboard/fnb-pos', '/dashboard/barista', '/dashboard/barista/past-sales', '/dashboard/barista/restock', '/dashboard/payments', '/dashboard/cancelled', '/dashboard/settings/password'],
   };
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
 import { readStoredRole } from "@/app/lib/auth";
 import {
   KITCHEN_CATEGORY_LABELS,
@@ -71,6 +72,8 @@ interface KitchenPaymentRecord {
   total: number;
   status: KitchenPaymentStatus;
   method: KitchenPaymentMethod;
+  historical?: boolean;
+  recordedAt?: number;
 }
 
 interface PendingOrder {
@@ -109,6 +112,8 @@ function formatPaymentDate(createdAt: number | undefined) {
 }
 
 export default function KitchenPage() {
+  const pathname = usePathname();
+  const isKitchenPastPayments = pathname === "/dashboard/kitchen/past-payments";
   const isDirector = useIsDirector();
   const { confirm, dialog } = useConfirmDialog();
   const [role, setRole] = useState<Role | null>(null);
@@ -138,6 +143,11 @@ export default function KitchenPage() {
   const [pendingOrder, setPendingOrder] = useState<PendingOrder | null>(null);
   const [showSettlementPopup, setShowSettlementPopup] = useState(false);
   const [showPayNowPopup, setShowPayNowPopup] = useState(false);
+  const [pastPaymentDate, setPastPaymentDate] = useState("");
+  const [pastPaymentAmount, setPastPaymentAmount] = useState("");
+  const [pastPaymentMethod, setPastPaymentMethod] = useState<Exclude<KitchenPaymentMethod, "credit">>("cash");
+  const [pastPaymentFeedback, setPastPaymentFeedback] = useState("");
+  const [savingPastPayment, setSavingPastPayment] = useState(false);
 
   const roomSuggestions = useMemo(() => ROOMS.map((room) => room.number), []);
   const tableSuggestions = useMemo(
@@ -279,6 +289,10 @@ export default function KitchenPage() {
   );
   const recentSales = useMemo(
     () => [...kitchenPayments].sort((a, b) => b.createdAt - a.createdAt).slice(0, 8),
+    [kitchenPayments],
+  );
+  const recordedPastPayments = useMemo(
+    () => kitchenPayments.filter((payment) => payment.historical).sort((a, b) => b.createdAt - a.createdAt),
     [kitchenPayments],
   );
   const kitchenMenuPriceByItem = useMemo(() => {
@@ -581,6 +595,77 @@ export default function KitchenPage() {
     }
   };
 
+  const recordPastPayment = async () => {
+    const amount = Number(pastPaymentAmount);
+    const paymentTimestamp = new Date(`${pastPaymentDate}T12:00:00`).getTime();
+    const today = new Date();
+    const todayKey = new Date(today.getTime() - today.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+
+    if (!pastPaymentDate || pastPaymentDate > todayKey || !Number.isFinite(paymentTimestamp)) {
+      setPastPaymentFeedback("Choose a valid past or current date.");
+      return;
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setPastPaymentFeedback("Enter a valid payment amount greater than zero.");
+      return;
+    }
+
+    const approved = await confirm({
+      title: "Check Out Past Kitchen Payment",
+      description: `Record TSh ${amount.toLocaleString()} as a completed kitchen payment for ${pastPaymentDate}? Current stock will not be changed.`,
+      actionLabel: "Check Out",
+    });
+    if (!approved) return;
+
+    setSavingPastPayment(true);
+    setPastPaymentFeedback("");
+    try {
+      const activeKitchenKey = getActiveKitchenStateKey();
+      const snapshot = readPosState<KitchenTicket, KitchenPaymentRecord, KitchenMenuItem>(
+        activeKitchenKey,
+        STORAGE_TICKETS,
+        STORAGE_SEQ,
+        STORAGE_PAYMENTS,
+        STORAGE_MENU,
+        300,
+      );
+      const recordedAt = Date.now();
+      const nextSeq = snapshot.ticketSeq + 1;
+      const paymentRecord: KitchenPaymentRecord = {
+        id: `kp-history-${recordedAt}`,
+        ticketId: `historical-${recordedAt}`,
+        code: `K-H-${nextSeq}`,
+        createdAt: paymentTimestamp,
+        mode: "take-away",
+        destination: "Historical Kitchen Payment",
+        total: amount,
+        status: "completed",
+        method: pastPaymentMethod,
+        historical: true,
+        recordedAt,
+      };
+      const nextPayments = [paymentRecord, ...snapshot.payments];
+      const synced = await writePosState(
+        activeKitchenKey,
+        snapshot.tickets,
+        nextSeq,
+        nextPayments,
+        snapshot.menuItems,
+      );
+
+      setTicketSeq(nextSeq);
+      setKitchenPayments(nextPayments);
+      setPastPaymentAmount("");
+      setPastPaymentFeedback(
+        synced
+          ? `Payment ${paymentRecord.code} checked out and synchronized.`
+          : `Payment ${paymentRecord.code} was saved on this device and will synchronize when the connection is restored.`,
+      );
+    } finally {
+      setSavingPastPayment(false);
+    }
+  };
+
   const deliverTicket = async (id: string) => {
     if (isDirector) return;
     const approved = await confirm({
@@ -618,6 +703,122 @@ export default function KitchenPage() {
     setTickets(nextTickets);
     writePosState(getActiveKitchenStateKey(), nextTickets, ticketSeq, kitchenPayments, menuItems);
   };
+
+  if (isKitchenPastPayments) {
+    return (
+      <div className="space-y-6">
+        {dialog}
+        <header>
+          <h1 className="text-3xl font-black tracking-tight">Record Past Kitchen Payment</h1>
+          <p className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
+            Check out a historical kitchen payment without changing current stock
+          </p>
+        </header>
+
+        <Card className="border-amber-200 bg-amber-50/60 shadow-none">
+          <CardContent className="p-4 text-xs font-black uppercase tracking-widest text-amber-800">
+            Past payments are added to kitchen sales, finances, and reports. They do not create a live order or deduct inventory.
+          </CardContent>
+        </Card>
+
+        <Card className="max-w-2xl border-none shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-xl font-black uppercase tracking-tight">Payment Details</CardTitle>
+            <CardDescription>Enter the original payment date and amount, then check it out.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <label htmlFor="past-kitchen-payment-date" className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Payment Date</label>
+                <Input
+                  id="past-kitchen-payment-date"
+                  type="date"
+                  max={new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 10)}
+                  value={pastPaymentDate}
+                  onChange={(event) => {
+                    setPastPaymentDate(event.target.value);
+                    setPastPaymentFeedback("");
+                  }}
+                />
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="past-kitchen-payment-amount" className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Amount</label>
+                <Input
+                  id="past-kitchen-payment-amount"
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={pastPaymentAmount}
+                  onChange={(event) => {
+                    setPastPaymentAmount(event.target.value);
+                    setPastPaymentFeedback("");
+                  }}
+                  placeholder="0"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="past-kitchen-payment-method" className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Payment Method</label>
+              <select
+                id="past-kitchen-payment-method"
+                value={pastPaymentMethod}
+                onChange={(event) => setPastPaymentMethod(event.target.value as Exclude<KitchenPaymentMethod, "credit">)}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm sm:max-w-xs"
+              >
+                <option value="cash">Cash</option>
+                <option value="card">Card</option>
+                <option value="mobile">Mobile Money</option>
+              </select>
+            </div>
+            {pastPaymentFeedback && <p className="rounded-lg border bg-muted/20 p-3 text-sm font-bold">{pastPaymentFeedback}</p>}
+            <Button
+              onClick={() => void recordPastPayment()}
+              disabled={savingPastPayment || !pastPaymentDate || !pastPaymentAmount || Number(pastPaymentAmount) <= 0}
+              className="h-11 font-black uppercase tracking-widest"
+            >
+              {savingPastPayment ? "Checking Out..." : "Check Out Payment"}
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card className="border-none shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-xl font-black uppercase tracking-tight">Recorded Past Payments</CardTitle>
+            <CardDescription>{recordedPastPayments.length} historical kitchen payments</CardDescription>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader className="bg-muted/10">
+                <TableRow>
+                  <TableHead className="font-black uppercase text-[10px] tracking-widest">Date</TableHead>
+                  <TableHead className="font-black uppercase text-[10px] tracking-widest">Reference</TableHead>
+                  <TableHead className="font-black uppercase text-[10px] tracking-widest">Method</TableHead>
+                  <TableHead className="text-right font-black uppercase text-[10px] tracking-widest">Amount</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {recordedPastPayments.map((payment) => (
+                  <TableRow key={payment.id}>
+                    <TableCell className="font-bold">{new Date(payment.createdAt).toLocaleDateString()}</TableCell>
+                    <TableCell className="font-black">{payment.code}</TableCell>
+                    <TableCell className="font-black uppercase text-[10px] tracking-widest">{payment.method}</TableCell>
+                    <TableCell className="text-right font-black">TSh {payment.total.toLocaleString()}</TableCell>
+                  </TableRow>
+                ))}
+                {recordedPastPayments.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={4} className="py-10 text-center text-xs font-black uppercase tracking-widest text-muted-foreground">
+                      No past kitchen payments recorded yet
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   if (isManager) {
     return (
