@@ -107,7 +107,8 @@ export default function ExpensesPage() {
       payoutStatus: role === "manager" ? "approved" : undefined,
     };
 
-    const nextExpenses = [nextExpense, ...expenses];
+    const currentExpenses = readJson<ExpenseRecord[]>(STORAGE_EXPENSES) ?? expenses;
+    const nextExpenses = [nextExpense, ...currentExpenses];
     setExpenses(nextExpenses);
     writeJson(STORAGE_EXPENSES, nextExpenses);
     setTitle("");
@@ -140,9 +141,11 @@ export default function ExpensesPage() {
     const nextTitle = editTitle.trim();
     if (!nextTitle || !Number.isFinite(parsedAmount) || parsedAmount <= 0 || !Number.isFinite(parsedDate)) return;
 
-    const nextExpenses = expenses.map((expense) =>
+    const currentExpenses = readJson<ExpenseRecord[]>(STORAGE_EXPENSES) ?? expenses;
+    const updatedAt = Date.now();
+    const nextExpenses = currentExpenses.map((expense) =>
       expense.id === editingExpense.id
-        ? { ...expense, title: nextTitle, notes: editNotes.trim() || undefined, amount: parsedAmount, createdAt: parsedDate }
+        ? { ...expense, title: nextTitle, notes: editNotes.trim() || undefined, amount: parsedAmount, createdAt: parsedDate, updatedAt }
         : expense,
     );
     setExpenses(nextExpenses);
@@ -153,8 +156,10 @@ export default function ExpensesPage() {
   const moveExpense = () => {
     if (isDirector) return;
     if (!movingExpense || moveTarget === movingExpense.department) return;
-    const nextExpenses = expenses.map((expense) =>
-      expense.id === movingExpense.id ? { ...expense, department: moveTarget } : expense,
+    const currentExpenses = readJson<ExpenseRecord[]>(STORAGE_EXPENSES) ?? expenses;
+    const updatedAt = Date.now();
+    const nextExpenses = currentExpenses.map((expense) =>
+      expense.id === movingExpense.id ? { ...expense, department: moveTarget, updatedAt } : expense,
     );
     setExpenses(nextExpenses);
     writeJson(STORAGE_EXPENSES, nextExpenses);

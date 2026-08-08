@@ -134,5 +134,5 @@ export function writePosState<TTicket, TPayment, TMenu>(
   payments: TPayment[],
   menuItems: TMenu[],
 ) {
-  writeJson(storageKey, { tickets, ticketSeq, payments, menuItems });
+  return writeJson(storageKey, { tickets, ticketSeq, payments, menuItems });
 }

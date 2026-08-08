@@ -616,12 +616,22 @@ function getRecordRevision(record: unknown) {
     updatedAt?: unknown;
     changedAt?: unknown;
     lastExtendedAt?: unknown;
+    deliveredAt?: unknown;
+    paidOutAt?: unknown;
+    recordedAt?: unknown;
+    cancelledAt?: unknown;
+    closedAt?: unknown;
     createdAt?: unknown;
   };
   const revision = Number(
     candidate.updatedAt ??
     candidate.changedAt ??
     candidate.lastExtendedAt ??
+    candidate.deliveredAt ??
+    candidate.paidOutAt ??
+    candidate.recordedAt ??
+    candidate.cancelledAt ??
+    (typeof candidate.closedAt === "string" ? Date.parse(candidate.closedAt) : candidate.closedAt) ??
     candidate.createdAt ??
     0,
   );
@@ -1028,7 +1038,8 @@ function readSnapshotValue<T>(key: string, rawValue: T | null, onChange: (value:
 export async function syncStorageValueToFirebase<T>(key: string, value: T) {
   if (typeof window === "undefined") return false;
   const sanitizedValue: unknown = sanitizeForStorage(sanitizeSyncedValue(key, value));
-  _pendingLocalWrites[key] = { value: sanitizedValue, createdAt: Date.now() };
+  const pendingWrite = { value: sanitizedValue, createdAt: Date.now() };
+  _pendingLocalWrites[key] = pendingWrite;
   markPendingSync(key);
 
   // Write straight to Firebase during normal operation. Routing every growing
@@ -1049,10 +1060,15 @@ export async function syncStorageValueToFirebase<T>(key: string, value: T) {
       `Firebase transaction timed out for ${key}`,
     );
     const committedValue = sanitizeForStorage(sanitizeSyncedValue(key, transaction.snapshot.val()));
-    setLocalCache(key, JSON.stringify(committedValue));
-    delete _pendingLocalWrites[key];
-    clearPendingSync(key);
-    dispatchStorageUpdated(key);
+    // A second save for the same key may have started while this transaction
+    // was in flight. Never let the older completion replace that newer local
+    // snapshot or clear its retry marker.
+    if (_pendingLocalWrites[key] === pendingWrite) {
+      setLocalCache(key, JSON.stringify(committedValue));
+      delete _pendingLocalWrites[key];
+      clearPendingSync(key);
+      dispatchStorageUpdated(key);
+    }
     markSyncHealthy(key);
     return true;
   } catch (firebaseError) {
@@ -1067,10 +1083,12 @@ export async function syncStorageValueToFirebase<T>(key: string, value: T) {
 
   try {
     await writeServerSyncedStorageValue(key, sanitizedValue);
-    setLocalCache(key, JSON.stringify(sanitizedValue));
-    delete _pendingLocalWrites[key];
-    clearPendingSync(key);
-    dispatchStorageUpdated(key);
+    if (_pendingLocalWrites[key] === pendingWrite) {
+      setLocalCache(key, JSON.stringify(sanitizedValue));
+      delete _pendingLocalWrites[key];
+      clearPendingSync(key);
+      dispatchStorageUpdated(key);
+    }
     markSyncHealthy(key);
     return true;
   } catch (serverError) {

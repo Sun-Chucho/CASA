@@ -61,13 +61,15 @@ export default function CashRequestsPage() {
 
   const markPaidOut = (requestId: string) => {
     const paidOutAt = Date.now();
-    const nextExpenses = expenses.map((expense) =>
+    const currentExpenses = readExpenseSnapshot();
+    const nextExpenses = currentExpenses.map((expense) =>
       expense.id === requestId
         ? {
             ...expense,
             payoutStatus: "paid-out" as const,
             paidOutAt,
             paidOutBy: role,
+            updatedAt: paidOutAt,
           }
         : expense,
     );

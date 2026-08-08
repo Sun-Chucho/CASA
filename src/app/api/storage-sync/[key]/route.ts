@@ -70,12 +70,22 @@ function getRecordRevision(record: unknown) {
     updatedAt?: unknown;
     changedAt?: unknown;
     lastExtendedAt?: unknown;
+    deliveredAt?: unknown;
+    paidOutAt?: unknown;
+    recordedAt?: unknown;
+    cancelledAt?: unknown;
+    closedAt?: unknown;
     createdAt?: unknown;
   };
   const revision = Number(
     candidate.updatedAt ??
     candidate.changedAt ??
     candidate.lastExtendedAt ??
+    candidate.deliveredAt ??
+    candidate.paidOutAt ??
+    candidate.recordedAt ??
+    candidate.cancelledAt ??
+    (typeof candidate.closedAt === "string" ? Date.parse(candidate.closedAt) : candidate.closedAt) ??
     candidate.createdAt ??
     0,
   );
