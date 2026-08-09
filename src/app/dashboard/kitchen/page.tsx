@@ -144,7 +144,8 @@ export default function KitchenPage() {
   const [showSettlementPopup, setShowSettlementPopup] = useState(false);
   const [showPayNowPopup, setShowPayNowPopup] = useState(false);
   const [pastPaymentDate, setPastPaymentDate] = useState("");
-  const [pastPaymentAmount, setPastPaymentAmount] = useState("");
+  const [pastPaymentSearch, setPastPaymentSearch] = useState("");
+  const [pastPaymentCart, setPastPaymentCart] = useState<CartLine[]>([]);
   const [pastPaymentMethod, setPastPaymentMethod] = useState<Exclude<KitchenPaymentMethod, "credit">>("cash");
   const [pastPaymentFeedback, setPastPaymentFeedback] = useState("");
   const [savingPastPayment, setSavingPastPayment] = useState(false);
@@ -294,6 +295,16 @@ export default function KitchenPage() {
   const recordedPastPayments = useMemo(
     () => kitchenPayments.filter((payment) => payment.historical).sort((a, b) => b.createdAt - a.createdAt),
     [kitchenPayments],
+  );
+  const pastPaymentMenu = useMemo(() => {
+    const search = pastPaymentSearch.trim().toLowerCase();
+    return menuItems.filter((item) =>
+      item.price > 0 && (!search || `${item.name} ${KITCHEN_CATEGORY_LABELS[item.category]}`.toLowerCase().includes(search)),
+    );
+  }, [menuItems, pastPaymentSearch]);
+  const pastPaymentTotal = useMemo(
+    () => pastPaymentCart.reduce((sum, line) => sum + line.item.price * line.qty, 0),
+    [pastPaymentCart],
   );
   const kitchenMenuPriceByItem = useMemo(() => {
     const priceMap = new Map<string, number>();
@@ -595,8 +606,24 @@ export default function KitchenPage() {
     }
   };
 
+  const addToPastPayment = (item: KitchenMenuItem) => {
+    setPastPaymentFeedback("");
+    setPastPaymentCart((current) => {
+      const existing = current.find((line) => line.item.id === item.id);
+      return existing
+        ? current.map((line) => line.item.id === item.id ? { ...line, qty: line.qty + 1 } : line)
+        : [...current, { item, qty: 1 }];
+    });
+  };
+
+  const changePastPaymentQuantity = (itemId: string, change: number) => {
+    setPastPaymentFeedback("");
+    setPastPaymentCart((current) => current
+      .map((line) => line.item.id === itemId ? { ...line, qty: Math.max(0, line.qty + change) } : line)
+      .filter((line) => line.qty > 0));
+  };
+
   const recordPastPayment = async () => {
-    const amount = Number(pastPaymentAmount);
     const paymentTimestamp = new Date(`${pastPaymentDate}T12:00:00`).getTime();
     const today = new Date();
     const todayKey = new Date(today.getTime() - today.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
@@ -605,15 +632,15 @@ export default function KitchenPage() {
       setPastPaymentFeedback("Choose a valid past or current date.");
       return;
     }
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setPastPaymentFeedback("Enter a valid payment amount greater than zero.");
+    if (pastPaymentCart.length === 0 || pastPaymentTotal <= 0) {
+      setPastPaymentFeedback("Select at least one menu item sold.");
       return;
     }
 
     const approved = await confirm({
-      title: "Check Out Past Kitchen Payment",
-      description: `Record TSh ${amount.toLocaleString()} as a completed kitchen payment for ${pastPaymentDate}? Current stock will not be changed.`,
-      actionLabel: "Check Out",
+      title: "Record Past Kitchen Sale",
+      description: `Record TSh ${pastPaymentTotal.toLocaleString()} in kitchen sales for ${pastPaymentDate}? Current stock will not be changed.`,
+      actionLabel: "Record Sale",
     });
     if (!approved) return;
 
@@ -638,9 +665,10 @@ export default function KitchenPage() {
         createdAt: paymentTimestamp,
         mode: "take-away",
         destination: "Historical Kitchen Payment",
-        total: amount,
+        total: pastPaymentTotal,
         status: "completed",
         method: pastPaymentMethod,
+        lines: pastPaymentCart.map((line) => ({ name: line.item.name, qty: line.qty })),
         historical: true,
         recordedAt,
       };
@@ -655,11 +683,11 @@ export default function KitchenPage() {
 
       setTicketSeq(nextSeq);
       setKitchenPayments(nextPayments);
-      setPastPaymentAmount("");
+      setPastPaymentCart([]);
       setPastPaymentFeedback(
         synced
-          ? `Payment ${paymentRecord.code} checked out and synchronized.`
-          : `Payment ${paymentRecord.code} was saved on this device and will synchronize when the connection is restored.`,
+          ? `Sale ${paymentRecord.code} recorded and synchronized.`
+          : `Sale ${paymentRecord.code} was saved on this device and will synchronize when the connection is restored.`,
       );
     } finally {
       setSavingPastPayment(false);
@@ -709,27 +737,28 @@ export default function KitchenPage() {
       <div className="space-y-6">
         {dialog}
         <header>
-          <h1 className="text-3xl font-black tracking-tight">Record Past Kitchen Payment</h1>
+          <h1 className="text-3xl font-black tracking-tight">Record Past Kitchen Sales</h1>
           <p className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
-            Check out a historical kitchen payment without changing current stock
+            Select menu items sold and backdate the sale without changing current stock
           </p>
         </header>
 
         <Card className="border-amber-200 bg-amber-50/60 shadow-none">
           <CardContent className="p-4 text-xs font-black uppercase tracking-widest text-amber-800">
-            Past payments are added to kitchen sales, finances, and reports. They do not create a live order or deduct inventory.
+            Past sales are added to kitchen sales, finances, and reports. They do not create a live order or deduct inventory.
           </CardContent>
         </Card>
 
-        <Card className="max-w-2xl border-none shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-xl font-black uppercase tracking-tight">Payment Details</CardTitle>
-            <CardDescription>Enter the original payment date and amount, then check it out.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-6 xl:grid-cols-3">
+          <Card className="border-none shadow-sm xl:col-span-2">
+            <CardHeader className="space-y-4">
+              <div>
+                <CardTitle className="text-xl font-black uppercase tracking-tight">Kitchen Menu Items Sold</CardTitle>
+                <CardDescription>Select each menu item and quantity from the sale.</CardDescription>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <label htmlFor="past-kitchen-payment-date" className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Payment Date</label>
+                <label htmlFor="past-kitchen-payment-date" className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Sales Date</label>
                 <Input
                   id="past-kitchen-payment-date"
                   type="date"
@@ -742,21 +771,75 @@ export default function KitchenPage() {
                 />
               </div>
               <div className="space-y-2">
-                <label htmlFor="past-kitchen-payment-amount" className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Amount</label>
-                <Input
-                  id="past-kitchen-payment-amount"
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={pastPaymentAmount}
-                  onChange={(event) => {
-                    setPastPaymentAmount(event.target.value);
-                    setPastPaymentFeedback("");
-                  }}
-                  placeholder="0"
-                />
+                <label htmlFor="past-kitchen-menu-search" className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Search Menu</label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="past-kitchen-menu-search"
+                    value={pastPaymentSearch}
+                    onChange={(event) => setPastPaymentSearch(event.target.value)}
+                    placeholder="Search food or category..."
+                    className="pl-10"
+                  />
+                </div>
               </div>
             </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {pastPaymentMenu.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => addToPastPayment(item)}
+                    className="rounded-xl border bg-white p-4 text-left transition hover:border-primary hover:shadow-sm"
+                  >
+                    <Badge variant="outline" className="text-[9px] font-black uppercase tracking-widest">
+                      {KITCHEN_CATEGORY_LABELS[item.category]}
+                    </Badge>
+                    <p className="mt-3 font-black">{item.name}</p>
+                    <p className="mt-2 text-sm font-black text-primary">TSh {item.price.toLocaleString()}</p>
+                  </button>
+                ))}
+                {pastPaymentMenu.length === 0 && (
+                  <p className="col-span-full py-10 text-center text-xs font-black uppercase tracking-widest text-muted-foreground">
+                    No matching kitchen menu items found
+                  </p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="h-fit border-none shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-xl font-black uppercase tracking-tight">Past Sale</CardTitle>
+              <CardDescription>{pastPaymentDate || "Choose a sales date"}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <div className="space-y-3">
+                {pastPaymentCart.map((line) => (
+                  <div key={line.item.id} className="rounded-xl border p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-black">{line.item.name}</p>
+                        <p className="text-xs font-bold text-muted-foreground">TSh {(line.item.price * line.qty).toLocaleString()}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button type="button" size="sm" variant="outline" onClick={() => changePastPaymentQuantity(line.item.id, -1)} className="h-8 w-8 p-0">
+                          <Minus className="h-3 w-3" />
+                        </Button>
+                        <span className="min-w-6 text-center font-black">{line.qty}</span>
+                        <Button type="button" size="sm" variant="outline" onClick={() => changePastPaymentQuantity(line.item.id, 1)} className="h-8 w-8 p-0">
+                          <Plus className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {pastPaymentCart.length === 0 && (
+                  <p className="py-6 text-center text-xs font-black uppercase tracking-widest text-muted-foreground">No items selected</p>
+                )}
+              </div>
             <div className="space-y-2">
               <label htmlFor="past-kitchen-payment-method" className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Payment Method</label>
               <select
@@ -770,21 +853,26 @@ export default function KitchenPage() {
                 <option value="mobile">Mobile Money</option>
               </select>
             </div>
+            <div className="flex justify-between border-t pt-4 text-lg font-black">
+              <span>Total</span>
+              <span className="text-primary">TSh {pastPaymentTotal.toLocaleString()}</span>
+            </div>
             {pastPaymentFeedback && <p className="rounded-lg border bg-muted/20 p-3 text-sm font-bold">{pastPaymentFeedback}</p>}
             <Button
               onClick={() => void recordPastPayment()}
-              disabled={savingPastPayment || !pastPaymentDate || !pastPaymentAmount || Number(pastPaymentAmount) <= 0}
-              className="h-11 font-black uppercase tracking-widest"
+              disabled={savingPastPayment || !pastPaymentDate || pastPaymentCart.length === 0 || pastPaymentTotal <= 0}
+              className="h-11 w-full font-black uppercase tracking-widest"
             >
-              {savingPastPayment ? "Checking Out..." : "Check Out Payment"}
+              {savingPastPayment ? "Recording..." : "Record Past Sale"}
             </Button>
           </CardContent>
-        </Card>
+          </Card>
+        </div>
 
         <Card className="border-none shadow-sm">
           <CardHeader>
-            <CardTitle className="text-xl font-black uppercase tracking-tight">Recorded Past Payments</CardTitle>
-            <CardDescription>{recordedPastPayments.length} historical kitchen payments</CardDescription>
+            <CardTitle className="text-xl font-black uppercase tracking-tight">Recorded Past Sales</CardTitle>
+            <CardDescription>{recordedPastPayments.length} historical kitchen sales</CardDescription>
           </CardHeader>
           <CardContent className="p-0">
             <Table>
@@ -792,6 +880,7 @@ export default function KitchenPage() {
                 <TableRow>
                   <TableHead className="font-black uppercase text-[10px] tracking-widest">Date</TableHead>
                   <TableHead className="font-black uppercase text-[10px] tracking-widest">Reference</TableHead>
+                  <TableHead className="font-black uppercase text-[10px] tracking-widest">Items</TableHead>
                   <TableHead className="font-black uppercase text-[10px] tracking-widest">Method</TableHead>
                   <TableHead className="text-right font-black uppercase text-[10px] tracking-widest">Amount</TableHead>
                 </TableRow>
@@ -801,14 +890,15 @@ export default function KitchenPage() {
                   <TableRow key={payment.id}>
                     <TableCell className="font-bold">{new Date(payment.createdAt).toLocaleDateString()}</TableCell>
                     <TableCell className="font-black">{payment.code}</TableCell>
+                    <TableCell className="font-bold text-sm">{payment.lines?.map((line) => `${line.name} x${line.qty}`).join(" | ") || "Unitemized sale"}</TableCell>
                     <TableCell className="font-black uppercase text-[10px] tracking-widest">{payment.method}</TableCell>
                     <TableCell className="text-right font-black">TSh {payment.total.toLocaleString()}</TableCell>
                   </TableRow>
                 ))}
                 {recordedPastPayments.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={4} className="py-10 text-center text-xs font-black uppercase tracking-widest text-muted-foreground">
-                      No past kitchen payments recorded yet
+                    <TableCell colSpan={5} className="py-10 text-center text-xs font-black uppercase tracking-widest text-muted-foreground">
+                      No past kitchen sales recorded yet
                     </TableCell>
                   </TableRow>
                 )}
