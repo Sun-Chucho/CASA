@@ -383,7 +383,7 @@ export default function BaristaPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [pastSaleDate, setPastSaleDate] = useState(getLocalDateInputValue);
   const [pastSaleSearch, setPastSaleSearch] = useState("");
-  const [pastSaleMethod, setPastSaleMethod] = useState<Exclude<BaristaPaymentMethod, "credit">>("cash");
+  const [pastSaleMethod, setPastSaleMethod] = useState<BaristaPaymentMethod>("cash");
   const [pastSaleCart, setPastSaleCart] = useState<CartLine[]>([]);
   const [pastSaleFeedback, setPastSaleFeedback] = useState<string | null>(null);
   const [savingPastSale, setSavingPastSale] = useState(false);
@@ -1620,7 +1620,7 @@ export default function BaristaPage() {
         mode: "take-away",
         destination: "Historical Bar Sale",
         total: pastSaleTotal,
-        status: "completed",
+        status: pastSaleMethod === "credit" ? "credit" : "completed",
         method: pastSaleMethod,
         lines: pastSaleCart.map((line) => ({ name: line.item.name, qty: line.qty })),
         historical: true,
@@ -2264,12 +2264,13 @@ export default function BaristaPage() {
                 <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Payment Method</p>
                 <select
                   value={pastSaleMethod}
-                  onChange={(event) => setPastSaleMethod(event.target.value as Exclude<BaristaPaymentMethod, "credit">)}
+                  onChange={(event) => setPastSaleMethod(event.target.value as BaristaPaymentMethod)}
                   className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm font-bold"
                 >
                   <option value="cash">Cash</option>
                   <option value="card">Card</option>
                   <option value="mobile">Mobile Money</option>
+                  <option value="credit">Credit</option>
                 </select>
               </div>
 

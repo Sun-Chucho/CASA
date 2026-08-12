@@ -1,3 +1,5 @@
+import { normalizeExpenseRecords } from "@/app/lib/expenses";
+
 export const CASA_DATA_START_MS = Date.parse("2026-07-27T00:00:00+03:00");
 
 const CASA_ROOM_PRICES: Record<string, number> = {
@@ -154,6 +156,10 @@ export function sanitizeCasaHistory<T>(key: string, value: T): T {
       tickets: filterHistoryArray(snapshot.tickets),
       payments: filterHistoryArray(snapshot.payments),
     } as T;
+  }
+
+  if (key === "orange-hotel-expenses") {
+    return normalizeExpenseRecords(filterHistoryArray(value)) as T;
   }
 
   if (FILTERED_HISTORY_ARRAY_KEYS.has(key)) {

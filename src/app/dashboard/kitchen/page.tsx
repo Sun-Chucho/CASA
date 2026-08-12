@@ -146,7 +146,7 @@ export default function KitchenPage() {
   const [pastPaymentDate, setPastPaymentDate] = useState("");
   const [pastPaymentSearch, setPastPaymentSearch] = useState("");
   const [pastPaymentCart, setPastPaymentCart] = useState<CartLine[]>([]);
-  const [pastPaymentMethod, setPastPaymentMethod] = useState<Exclude<KitchenPaymentMethod, "credit">>("cash");
+  const [pastPaymentMethod, setPastPaymentMethod] = useState<KitchenPaymentMethod>("cash");
   const [pastPaymentFeedback, setPastPaymentFeedback] = useState("");
   const [savingPastPayment, setSavingPastPayment] = useState(false);
 
@@ -666,7 +666,7 @@ export default function KitchenPage() {
         mode: "take-away",
         destination: "Historical Kitchen Payment",
         total: pastPaymentTotal,
-        status: "completed",
+        status: pastPaymentMethod === "credit" ? "credit" : "completed",
         method: pastPaymentMethod,
         lines: pastPaymentCart.map((line) => ({ name: line.item.name, qty: line.qty })),
         historical: true,
@@ -845,12 +845,13 @@ export default function KitchenPage() {
               <select
                 id="past-kitchen-payment-method"
                 value={pastPaymentMethod}
-                onChange={(event) => setPastPaymentMethod(event.target.value as Exclude<KitchenPaymentMethod, "credit">)}
+                onChange={(event) => setPastPaymentMethod(event.target.value as KitchenPaymentMethod)}
                 className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm sm:max-w-xs"
               >
                 <option value="cash">Cash</option>
                 <option value="card">Card</option>
                 <option value="mobile">Mobile Money</option>
+                <option value="credit">Credit</option>
               </select>
             </div>
             <div className="flex justify-between border-t pt-4 text-lg font-black">

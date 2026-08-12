@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { readStoredRole } from "@/app/lib/auth";
-import { LaundryPaymentMethod, LaundryPaymentStatus, LaundryRecord, STORAGE_LAUNDRY_RECORDS } from "@/app/lib/laundry";
+import { getLaundryBusinessTimestamp, LaundryPaymentMethod, LaundryPaymentStatus, LaundryRecord, STORAGE_LAUNDRY_RECORDS } from "@/app/lib/laundry";
 import { Role } from "@/app/lib/mock-data";
 import { readJson, writeJson } from "@/app/lib/storage";
 import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
@@ -28,12 +28,14 @@ function formatDate(value: number) {
 }
 
 function todayText() {
-  return new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const offset = now.getTimezoneOffset() * 60_000;
+  return new Date(now.getTime() - offset).toISOString().slice(0, 10);
 }
 
 function formatBookingDate(record: LaundryRecord) {
   if (record.bookingDate) return record.bookingDate;
-  const timestamp = Number(record.createdAt);
+  const timestamp = getLaundryBusinessTimestamp(record);
   if (!Number.isFinite(timestamp) || timestamp <= 0) return "-";
   const date = new Date(timestamp);
   return Number.isNaN(date.getTime()) ? "-" : date.toISOString().slice(0, 10);
@@ -61,8 +63,9 @@ function normalizeLaundryRecords(value: unknown): LaundryRecord[] {
         totalAmount: Number.isFinite(Number(record.totalAmount)) ? Number(record.totalAmount) : 0,
         status,
         paymentMethod,
-        createdAt: Number.isFinite(createdAt) && createdAt > 0 ? createdAt : Date.now(),
+        createdAt: Number.isFinite(createdAt) && createdAt > 0 ? createdAt : 0,
         bookingDate: typeof record.bookingDate === "string" ? record.bookingDate : undefined,
+        recordedAt: Number.isFinite(Number(record.recordedAt)) ? Number(record.recordedAt) : undefined,
         createdBy: typeof record.createdBy === "string" ? record.createdBy : undefined,
       };
     });
@@ -104,15 +107,20 @@ export default function LaundryPage() {
     const parsedAmount = Number(totalAmount);
     if (!clientName.trim() || Number.isNaN(parsedItems) || parsedItems <= 0 || Number.isNaN(parsedAmount) || parsedAmount <= 0) return;
 
+    const recordedAt = Date.now();
+    const businessTimestamp = new Date(`${bookingDate}T12:00:00`).getTime();
+    if (!bookingDate || !Number.isFinite(businessTimestamp)) return;
+
     const nextRecord: LaundryRecord = {
-      id: `laundry-${Date.now()}`,
+      id: `laundry-${recordedAt}`,
       clientName: clientName.trim(),
       itemCount: parsedItems,
       totalAmount: parsedAmount,
       status,
       paymentMethod: status === "credit" ? "credit" : paymentMethod,
-      createdAt: Date.now(),
+      createdAt: businessTimestamp,
       bookingDate,
+      recordedAt,
       createdBy: role,
     };
     const nextRecords = [nextRecord, ...records];
@@ -247,7 +255,7 @@ export default function LaundryPage() {
               {filteredRecords.map((record) => (
                 <TableRow key={record.id}>
                   <TableCell className="font-bold">{formatBookingDate(record)}</TableCell>
-                  <TableCell className="font-bold">{formatDate(record.createdAt)}</TableCell>
+                  <TableCell className="font-bold">{formatDate(record.recordedAt ?? record.createdAt)}</TableCell>
                   <TableCell className="font-bold">{record.clientName}</TableCell>
                   <TableCell className="font-bold">{record.itemCount}</TableCell>
                   <TableCell className="font-black uppercase text-[10px] tracking-widest">{record.paymentMethod}</TableCell>

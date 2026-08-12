@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ExpenseRecord, STORAGE_EXPENSES, getExpenseDepartmentLabel } from "@/app/lib/expenses";
-import { LaundryRecord, STORAGE_LAUNDRY_RECORDS } from "@/app/lib/laundry";
+import { ExpenseRecord, STORAGE_EXPENSES, getExpenseDepartmentLabel, normalizeExpenseRecords } from "@/app/lib/expenses";
+import { getLaundryBusinessTimestamp, LaundryRecord, STORAGE_LAUNDRY_RECORDS } from "@/app/lib/laundry";
 import { getActiveBaristaStateKey, getActiveKitchenStateKey, readCashierState, readJson, readPosState } from "@/app/lib/storage";
 import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -61,7 +61,7 @@ export default function FinancesPage() {
       setKitchenPayments(kitchenSnapshot.payments);
       setBaristaPayments(baristaSnapshot.payments);
       setLaundryRecords(readJson<LaundryRecord[]>(STORAGE_LAUNDRY_RECORDS) ?? []);
-      setExpenses(readJson<ExpenseRecord[]>(STORAGE_EXPENSES) ?? []);
+      setExpenses(normalizeExpenseRecords(readJson<ExpenseRecord[]>(STORAGE_EXPENSES)));
     };
 
     refreshFinances();
@@ -87,7 +87,7 @@ export default function FinancesPage() {
     const datedBookings = bookings.filter((item) => matchesSelectedDate(item.createdAt, selectedDate));
     const datedKitchenPayments = kitchenPayments.filter((item) => matchesSelectedDate(item.createdAt, selectedDate));
     const datedBaristaPayments = baristaPayments.filter((item) => matchesSelectedDate(item.createdAt, selectedDate));
-    const datedLaundryRecords = laundryRecords.filter((item) => matchesSelectedDate(item.createdAt, selectedDate));
+    const datedLaundryRecords = laundryRecords.filter((item) => matchesSelectedDate(getLaundryBusinessTimestamp(item), selectedDate));
     const datedExpenses = expenses.filter((item) => matchesSelectedDate(item.createdAt, selectedDate));
     const bookingRevenue = datedBookings.filter((item) => item.status !== "credit").reduce((sum, item) => sum + asNumber(item.total), 0);
     const bookingCredit = datedBookings.filter((item) => item.status === "credit").reduce((sum, item) => sum + asNumber(item.total), 0);

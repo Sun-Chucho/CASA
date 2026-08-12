@@ -11,7 +11,7 @@ import {
   StockSalesRow,
 } from "@/app/lib/fnb-control";
 import { getActiveBaristaStateKey, getActiveKitchenStateKey, readCashierState, readJson, readPosState } from "@/app/lib/storage";
-import { subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
+import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
 import {
   Area,
   AreaChart,
@@ -37,8 +37,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { EXPENSE_DEPARTMENTS, ExpenseRecord, getExpenseAmountTypeLabel, STORAGE_EXPENSES } from "@/app/lib/expenses";
-import { LaundryRecord, STORAGE_LAUNDRY_RECORDS } from "@/app/lib/laundry";
+import { EXPENSE_DEPARTMENTS, ExpenseRecord, getExpenseAmountTypeLabel, normalizeExpenseRecords, STORAGE_EXPENSES } from "@/app/lib/expenses";
+import { getLaundryBusinessTimestamp, LaundryRecord, STORAGE_LAUNDRY_RECORDS } from "@/app/lib/laundry";
 import { ROOMS } from "@/app/lib/mock-data";
 
 type ReportRange = "daily" | "weekly" | "monthly" | "all-time";
@@ -244,10 +244,21 @@ export default function AnalyticsPage() {
       setRecipeRows(readJson<RecipeCostRow[]>(STORAGE_RECIPE_COST) ?? []);
       setStockSalesRows(readJson<StockSalesRow[]>(STORAGE_STOCK_SALES) ?? []);
       setLaundryRecords(readJson<LaundryRecord[]>(STORAGE_LAUNDRY_RECORDS) ?? []);
-      setExpenses(readJson<ExpenseRecord[]>(STORAGE_EXPENSES) ?? []);
+      setExpenses(normalizeExpenseRecords(readJson<ExpenseRecord[]>(STORAGE_EXPENSES)));
     };
 
     applyAnalyticsSnapshot();
+
+    void Promise.all([
+      hydrateStorageKeyFromFirebase("orange-hotel-cashier-state"),
+      hydrateStorageKeyFromFirebase(activeKitchenKey),
+      hydrateStorageKeyFromFirebase(activeBaristaKey),
+      hydrateStorageKeyFromFirebase(STORAGE_BEVERAGE_COST),
+      hydrateStorageKeyFromFirebase(STORAGE_RECIPE_COST),
+      hydrateStorageKeyFromFirebase(STORAGE_STOCK_SALES),
+      hydrateStorageKeyFromFirebase(STORAGE_LAUNDRY_RECORDS),
+      hydrateStorageKeyFromFirebase(STORAGE_EXPENSES),
+    ]).finally(applyAnalyticsSnapshot);
 
     const unsubscribers = [
       subscribeToSyncedStorageKey("orange-hotel-cashier-state", applyAnalyticsSnapshot),
@@ -284,8 +295,9 @@ export default function AnalyticsPage() {
     });
 
     laundryRecords.forEach((record) => {
-      if (record.status === "credit" || !record.createdAt || !record.totalAmount) return;
-      events.push({ date: toDayKey(record.createdAt), timestamp: record.createdAt, source: "laundry", total: record.totalAmount });
+      const businessTimestamp = getLaundryBusinessTimestamp(record);
+      if (record.status === "credit" || !businessTimestamp || !record.totalAmount) return;
+      events.push({ date: toDayKey(businessTimestamp), timestamp: businessTimestamp, source: "laundry", total: record.totalAmount });
     });
 
     expenses.forEach((expense) => {
@@ -433,8 +445,9 @@ export default function AnalyticsPage() {
       }
     });
     laundryRecords.forEach((record) => {
-      if (record.status === "credit" || !record.createdAt || !record.totalAmount) return;
-      if (previousRows.includes(toDayKey(record.createdAt))) {
+      const businessTimestamp = getLaundryBusinessTimestamp(record);
+      if (record.status === "credit" || !businessTimestamp || !record.totalAmount) return;
+      if (previousRows.includes(toDayKey(businessTimestamp))) {
         previousTotal += record.totalAmount;
       }
     });

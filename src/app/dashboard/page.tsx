@@ -6,8 +6,8 @@ import { cn } from "@/lib/utils";
 import { readStoredRole } from "@/app/lib/auth";
 import { Role, ROOMS } from "@/app/lib/mock-data";
 import { getActiveBaristaStateKey, getActiveKitchenStateKey, readCashierState, readJson, readPosState } from "@/app/lib/storage";
-import { LaundryRecord, STORAGE_LAUNDRY_RECORDS } from "@/app/lib/laundry";
-import { ExpenseRecord, STORAGE_EXPENSES } from "@/app/lib/expenses";
+import { getLaundryBusinessTimestamp, LaundryRecord, STORAGE_LAUNDRY_RECORDS } from "@/app/lib/laundry";
+import { ExpenseRecord, normalizeExpenseRecords, STORAGE_EXPENSES } from "@/app/lib/expenses";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,7 @@ import {
   Package,
 } from "lucide-react";
 import { deriveRoomsStateFromBookings, readRoomsState } from "@/app/lib/rooms-storage";
-import { subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
+import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 interface CashierTransaction {
@@ -119,7 +119,7 @@ export default function OverviewPage() {
       const kitchenSnapshot = readPosState<QueueTicket, POSPaymentRecord, unknown>(activeKitchenKey, "orange-hotel-kitchen-tickets", "orange-hotel-kitchen-seq", "orange-hotel-kitchen-payments", "orange-hotel-kitchen-menu", 300);
       const baristaSnapshot = readPosState<QueueTicket, POSPaymentRecord, unknown>(activeBaristaKey, "orange-hotel-barista-orders", "orange-hotel-barista-seq", "orange-hotel-barista-payments", "orange-hotel-barista-menu", 490);
       const laundry = readJson<LaundryRecord[]>(STORAGE_LAUNDRY_RECORDS) ?? [];
-      const expenses = readJson<ExpenseRecord[]>(STORAGE_EXPENSES) ?? [];
+      const expenses = normalizeExpenseRecords(readJson<ExpenseRecord[]>(STORAGE_EXPENSES));
       setRooms(
         deriveRoomsStateFromBookings(
           cashierSnapshot.transactions.filter((tx): tx is CashierTransaction & { roomNumber: string } => Boolean(tx.roomNumber)),
@@ -131,7 +131,11 @@ export default function OverviewPage() {
       if (savedShift) setShift(savedShift);
 
       const bookingMetrics = collectRecordTotals(cashierSnapshot.transactions, "total", period);
-      const laundryMetrics = collectRecordTotals(laundry, "totalAmount", period);
+      const laundryMetrics = collectRecordTotals(
+        laundry.map((record) => ({ ...record, createdAt: getLaundryBusinessTimestamp(record) })),
+        "totalAmount",
+        period,
+      );
 
       setBookingRevenue(bookingMetrics.paid);
       setActiveKitchen(kitchenSnapshot.tickets.length);
@@ -155,6 +159,15 @@ export default function OverviewPage() {
     };
 
     refreshOverview();
+
+    void Promise.all([
+      hydrateStorageKeyFromFirebase("orange-hotel-cashier-state"),
+      hydrateStorageKeyFromFirebase(activeKitchenKey),
+      hydrateStorageKeyFromFirebase(activeBaristaKey),
+      hydrateStorageKeyFromFirebase(STORAGE_LAUNDRY_RECORDS),
+      hydrateStorageKeyFromFirebase(STORAGE_EXPENSES),
+      hydrateStorageKeyFromFirebase("orange-hotel-rooms-state"),
+    ]).finally(refreshOverview);
 
     const unsubscribeCashier = subscribeToSyncedStorageKey("orange-hotel-cashier-state", refreshOverview);
     const unsubscribeKitchen = subscribeToSyncedStorageKey(activeKitchenKey, refreshOverview);

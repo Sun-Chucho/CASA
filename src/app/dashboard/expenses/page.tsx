@@ -10,11 +10,12 @@ import {
   ExpenseRecord,
   getExpenseAmountTypeLabel,
   getExpenseDepartmentLabel,
+  normalizeExpenseRecords,
   STORAGE_EXPENSES,
 } from "@/app/lib/expenses";
 import { Role } from "@/app/lib/mock-data";
 import { readJson, writeJson } from "@/app/lib/storage";
-import { subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
+import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -63,11 +64,11 @@ export default function ExpensesPage() {
     if (storedRole) setRole(storedRole);
 
     const refreshExpenses = () => {
-      const saved = readJson<ExpenseRecord[]>(STORAGE_EXPENSES);
-      setExpenses(Array.isArray(saved) ? saved : []);
+      setExpenses(normalizeExpenseRecords(readJson<ExpenseRecord[]>(STORAGE_EXPENSES)));
     };
 
     refreshExpenses();
+    void hydrateStorageKeyFromFirebase(STORAGE_EXPENSES).finally(refreshExpenses);
     return subscribeToSyncedStorageKey(STORAGE_EXPENSES, refreshExpenses);
   }, []);
 
@@ -107,7 +108,7 @@ export default function ExpensesPage() {
       payoutStatus: role === "manager" ? "approved" : undefined,
     };
 
-    const currentExpenses = readJson<ExpenseRecord[]>(STORAGE_EXPENSES) ?? expenses;
+    const currentExpenses = normalizeExpenseRecords(readJson<ExpenseRecord[]>(STORAGE_EXPENSES) ?? expenses);
     const nextExpenses = [nextExpense, ...currentExpenses];
     setExpenses(nextExpenses);
     writeJson(STORAGE_EXPENSES, nextExpenses);
@@ -141,7 +142,7 @@ export default function ExpensesPage() {
     const nextTitle = editTitle.trim();
     if (!nextTitle || !Number.isFinite(parsedAmount) || parsedAmount <= 0 || !Number.isFinite(parsedDate)) return;
 
-    const currentExpenses = readJson<ExpenseRecord[]>(STORAGE_EXPENSES) ?? expenses;
+    const currentExpenses = normalizeExpenseRecords(readJson<ExpenseRecord[]>(STORAGE_EXPENSES) ?? expenses);
     const updatedAt = Date.now();
     const nextExpenses = currentExpenses.map((expense) =>
       expense.id === editingExpense.id
@@ -156,7 +157,7 @@ export default function ExpensesPage() {
   const moveExpense = () => {
     if (isDirector) return;
     if (!movingExpense || moveTarget === movingExpense.department) return;
-    const currentExpenses = readJson<ExpenseRecord[]>(STORAGE_EXPENSES) ?? expenses;
+    const currentExpenses = normalizeExpenseRecords(readJson<ExpenseRecord[]>(STORAGE_EXPENSES) ?? expenses);
     const updatedAt = Date.now();
     const nextExpenses = currentExpenses.map((expense) =>
       expense.id === movingExpense.id ? { ...expense, department: moveTarget, updatedAt } : expense,
