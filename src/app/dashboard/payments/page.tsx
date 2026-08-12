@@ -58,6 +58,7 @@ interface KitchenPaymentRecord {
   createdAt: number;
   mode: "restaurant" | "room-service" | "take-away";
   destination: string;
+  roomNumber?: string;
   total: number;
   status: KitchenPaymentStatus;
   method: KitchenPaymentMethod;
@@ -70,6 +71,7 @@ interface BaristaPaymentRecord {
   createdAt: number;
   mode: "restaurant" | "room-service" | "take-away";
   destination: string;
+  roomNumber?: string;
   total: number;
   status: BaristaPaymentStatus;
   method: BaristaPaymentMethod;
@@ -82,6 +84,7 @@ interface PaymentRow {
   ref: string;
   payer: string;
   context: string;
+  roomNumber: string;
   dateLabel: string;
   dateDetail?: string;
   method: string;
@@ -168,6 +171,13 @@ function getBookingPaymentLabel(tx: BookingRecord) {
 function formatPaymentItems(lines: Array<{ name: string; qty: number }> | undefined) {
   if (!Array.isArray(lines) || lines.length === 0) return "";
   return lines.map((line) => `${line.name} x${line.qty}`).join(" | ");
+}
+
+function getPosRoomNumber(payment: { mode: string; destination: string; roomNumber?: string }) {
+  if (typeof payment.roomNumber === "string" && payment.roomNumber.trim()) return payment.roomNumber.trim();
+  if (payment.mode !== "room-service") return "-";
+  const legacyRoomMatch = payment.destination.trim().match(/^room\s+(.+)$/i);
+  return legacyRoomMatch?.[1]?.trim() || "-";
 }
 
 export default function PaymentsPage() {
@@ -267,6 +277,7 @@ export default function PaymentsPage() {
         ref: tx.receiptNo,
         payer: tx.guestName,
         context: `Room ${tx.roomNumber}`,
+        roomNumber: tx.roomNumber || "-",
         dateLabel: `${formatDate(tx.checkInDate)} - ${formatDate(tx.checkOutDate)}`,
         dateDetail: `${tx.nights} night${tx.nights === 1 ? "" : "s"}`,
         method: getBookingPaymentLabel(tx),
@@ -285,6 +296,7 @@ export default function PaymentsPage() {
         ref: tx.code,
         payer: "Kitchen Order",
         context: tx.destination,
+        roomNumber: getPosRoomNumber(tx),
         dateLabel: formatDate(new Date(tx.createdAt).toISOString()),
         method: tx.method,
         amount: asNumber(tx.total),
@@ -302,6 +314,7 @@ export default function PaymentsPage() {
         ref: tx.code,
         payer: "Barista Order",
         context: formatPaymentItems(tx.lines) || tx.destination,
+        roomNumber: getPosRoomNumber(tx),
         dateLabel: formatDate(new Date(tx.createdAt).toISOString()),
         method: tx.method,
         amount: asNumber(tx.total),
@@ -551,6 +564,10 @@ export default function PaymentsPage() {
                     <p className="mt-1 font-bold">{tx.context}</p>
                   </div>
                   <div>
+                    <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Room Number</p>
+                    <p className="mt-1 font-black">{tx.roomNumber}</p>
+                  </div>
+                  <div>
                     <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
                       {paymentsTab === "reception" ? "Dates" : "Created"}
                     </p>
@@ -620,6 +637,7 @@ export default function PaymentsPage() {
                 <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Reference</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Payer</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Context</TableHead>
+                <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Room Number</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">
                   {paymentsTab === "reception" ? "Dates" : "Created"}
                 </TableHead>
@@ -640,6 +658,7 @@ export default function PaymentsPage() {
                     </p>
                   </TableCell>
                   <TableCell className="font-bold">{tx.context}</TableCell>
+                  <TableCell className="font-black">{tx.roomNumber}</TableCell>
                   <TableCell className="font-bold">
                     <p>{tx.dateLabel}</p>
                     {tx.dateDetail && (
@@ -690,7 +709,7 @@ export default function PaymentsPage() {
 
               {rows.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} className="py-12 text-center">
+                  <TableCell colSpan={9} className="py-12 text-center">
                     <div className="opacity-40">
                       <Receipt className="w-10 h-10 mx-auto mb-2" />
                       <p className="font-black uppercase tracking-widest text-xs">No payments found</p>

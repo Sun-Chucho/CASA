@@ -102,6 +102,7 @@ interface BaristaTicket {
   createdAt: number;
   mode: ServiceMode;
   destination: string;
+  roomNumber?: string;
   lines: BaristaOrderLine[];
   total: number;
   status?: "active" | "delivered";
@@ -116,6 +117,7 @@ interface BaristaPaymentRecord {
   createdAt: number;
   mode: ServiceMode;
   destination: string;
+  roomNumber?: string;
   total: number;
   status: BaristaPaymentStatus;
   method: BaristaPaymentMethod;
@@ -132,6 +134,7 @@ interface CancelledBaristaTicket extends BaristaTicket {
 interface PendingOrder {
   mode: ServiceMode;
   destination: string;
+  roomNumber?: string;
   lines: BaristaOrderLine[];
   total: number;
 }
@@ -1684,6 +1687,7 @@ export default function BaristaPage() {
       setPendingOrder({
         mode: serviceMode,
         destination,
+        roomNumber: serviceMode === "room-service" ? roomNumber.trim() : undefined,
         lines: cart.map((line) => ({ name: line.item.name, qty: line.qty })),
         total: subtotal,
       });
@@ -1714,6 +1718,7 @@ export default function BaristaPage() {
       createdAt,
       mode: pendingOrder.mode,
       destination: pendingOrder.destination,
+      roomNumber: pendingOrder.roomNumber,
       lines: pendingOrder.lines,
       total: pendingOrder.total,
     };
@@ -1725,6 +1730,7 @@ export default function BaristaPage() {
       createdAt,
       mode: pendingOrder.mode,
       destination: pendingOrder.destination,
+      roomNumber: pendingOrder.roomNumber,
       total: pendingOrder.total,
       status,
       method,
