@@ -219,7 +219,7 @@ export default function LaundryPage() {
               <Input value={clientName} onChange={(event) => setClientName(event.target.value)} placeholder="Client name" />
             </div>
             <div className="space-y-1">
-              <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Booking Date</Label>
+              <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Date Laundry Was Done</Label>
               <Input type="date" value={bookingDate} onChange={(event) => setBookingDate(event.target.value)} />
             </div>
             <div className="space-y-1">
@@ -278,7 +278,7 @@ export default function LaundryPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="font-black uppercase text-[10px] tracking-widest">Booking Date</TableHead>
+                <TableHead className="font-black uppercase text-[10px] tracking-widest">Laundry Date</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Payment Date</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Client</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Items</TableHead>

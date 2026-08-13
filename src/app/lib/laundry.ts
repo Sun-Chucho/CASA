@@ -28,14 +28,15 @@ function getDateTimestamp(value: string | undefined) {
 }
 
 export function getLaundryBusinessTimestamp(
-  record: Pick<LaundryRecord, "paymentDate" | "paidAt" | "recordedAt" | "createdAt" | "status">,
+  record: Pick<LaundryRecord, "bookingDate" | "recordedAt" | "createdAt">,
 ) {
-  const paymentDateTimestamp = getDateTimestamp(record.paymentDate);
-  if (paymentDateTimestamp) return paymentDateTimestamp;
-  if (record.status === "completed") {
-    const paidAt = Number(record.paidAt ?? record.recordedAt);
-    if (Number.isFinite(paidAt) && paidAt > 0) return paidAt;
-  }
+  const laundryDateTimestamp = getDateTimestamp(record.bookingDate);
+  if (laundryDateTimestamp) return laundryDateTimestamp;
+
+  // Older records stored the date the laundry was done directly in createdAt.
   const createdAt = Number(record.createdAt);
-  return Number.isFinite(createdAt) ? createdAt : 0;
+  if (Number.isFinite(createdAt) && createdAt > 0) return createdAt;
+
+  const recordedAt = Number(record.recordedAt);
+  return Number.isFinite(recordedAt) && recordedAt > 0 ? recordedAt : 0;
 }
