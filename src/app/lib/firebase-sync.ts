@@ -402,9 +402,13 @@ function mirrorCanonicalStateToLegacyLocal(key: string, value: unknown) {
 
   if (key === "orange-hotel-kitchen-state") {
     const snapshot = sanitizeSyncedValue(key, value) as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[] };
+    const existingLegacyPayments = readParsedLocalValue<unknown[]>("orange-hotel-kitchen-payments") ?? [];
     setLocalCache("orange-hotel-kitchen-tickets", JSON.stringify(Array.isArray(snapshot.tickets) ? snapshot.tickets : []));
     setLocalCache("orange-hotel-kitchen-seq", String(Number.isFinite(snapshot.ticketSeq) ? snapshot.ticketSeq : 300));
-    setLocalCache("orange-hotel-kitchen-payments", JSON.stringify(Array.isArray(snapshot.payments) ? snapshot.payments : []));
+    setLocalCache(
+      "orange-hotel-kitchen-payments",
+      JSON.stringify(mergeRecordsById(Array.isArray(snapshot.payments) ? snapshot.payments : [], existingLegacyPayments)),
+    );
     setLocalCache("orange-hotel-kitchen-menu", JSON.stringify(Array.isArray(snapshot.menuItems) ? snapshot.menuItems : []));
     localStorage.removeItem("orange-hotel-demo-seed-version");
     return;

@@ -26,7 +26,7 @@ import {
   STORAGE_KITCHEN_DAILY_STOCK_HISTORY,
   STORAGE_KITCHEN_PURCHASE_HISTORY,
 } from "@/app/lib/kitchen-session-storage";
-import { readJson, STORAGE_BARISTA_STATE, STORAGE_KITCHEN_STATE, writeJson } from "@/app/lib/storage";
+import { readJson, readPosState, STORAGE_BARISTA_STATE, STORAGE_KITCHEN_STATE, writeJson } from "@/app/lib/storage";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -346,7 +346,14 @@ export function InventoryControlView({
     const applyInventorySnapshot = () => {
       const inv = readJson<InventoryItem[]>(STORAGE_INVENTORY_ITEMS) ?? [];
       const store = readJson<Array<MainStoreItem & { lane?: StoreLane }>>(STORAGE_MAIN_STORE_ITEMS) ?? [];
-      const kitchenState = readJson<PosStateSnapshot>(STORAGE_KITCHEN_STATE);
+      const kitchenState = readPosState<unknown, PosPaymentRecord, { name: string; price: number }>(
+        STORAGE_KITCHEN_STATE,
+        "orange-hotel-kitchen-tickets",
+        "orange-hotel-kitchen-seq",
+        "orange-hotel-kitchen-payments",
+        "orange-hotel-kitchen-menu",
+        300,
+      );
       const baristaState = readJson<PosStateSnapshot>(STORAGE_BARISTA_STATE);
       const normalizedStore: MainStoreItem[] = store.map((item) => ({
         ...item,
@@ -372,10 +379,13 @@ export function InventoryControlView({
       hydrateStorageKeyFromFirebase(STORAGE_KITCHEN_PURCHASE_HISTORY),
       hydrateStorageKeyFromFirebase(STORAGE_KITCHEN_DAILY_STOCK_HISTORY),
       hydrateStorageKeyFromFirebase(STORAGE_BARISTA_PURCHASE_HISTORY),
-    ]).finally(applyInventorySnapshot);
+    ])
+      .then(() => hydrateStorageKeyFromFirebase("orange-hotel-kitchen-payments"))
+      .finally(applyInventorySnapshot);
     const unsubscribeInventory = subscribeToSyncedStorageKey(STORAGE_INVENTORY_ITEMS, applyInventorySnapshot);
     const unsubscribeStore = subscribeToSyncedStorageKey(STORAGE_MAIN_STORE_ITEMS, applyInventorySnapshot);
     const unsubscribeKitchen = subscribeToSyncedStorageKey(STORAGE_KITCHEN_STATE, applyInventorySnapshot);
+    const unsubscribeLegacyKitchenPayments = subscribeToSyncedStorageKey("orange-hotel-kitchen-payments", applyInventorySnapshot);
     const unsubscribeBarista = subscribeToSyncedStorageKey(STORAGE_BARISTA_STATE, applyInventorySnapshot);
     const unsubscribeKitchenPurchase = subscribeToSyncedStorageKey(STORAGE_KITCHEN_PURCHASE_HISTORY, applyInventorySnapshot);
     const unsubscribeKitchenDaily = subscribeToSyncedStorageKey(STORAGE_KITCHEN_DAILY_STOCK_HISTORY, applyInventorySnapshot);
@@ -385,6 +395,7 @@ export function InventoryControlView({
       unsubscribeInventory();
       unsubscribeStore();
       unsubscribeKitchen();
+      unsubscribeLegacyKitchenPayments();
       unsubscribeBarista();
       unsubscribeKitchenPurchase();
       unsubscribeKitchenDaily();

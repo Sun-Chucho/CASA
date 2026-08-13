@@ -12,14 +12,29 @@ export interface LaundryRecord {
   paymentMethod: LaundryPaymentMethod;
   createdAt: number;
   bookingDate?: string;
+  paymentDate?: string;
+  paidAt?: number;
   recordedAt?: number;
+  updatedAt?: number;
   createdBy?: string;
 }
 
-export function getLaundryBusinessTimestamp(record: Pick<LaundryRecord, "bookingDate" | "createdAt">) {
-  if (record.bookingDate && /^\d{4}-\d{2}-\d{2}$/.test(record.bookingDate)) {
-    const timestamp = new Date(`${record.bookingDate}T12:00:00`).getTime();
+function getDateTimestamp(value: string | undefined) {
+  if (value && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const timestamp = new Date(`${value}T12:00:00`).getTime();
     if (Number.isFinite(timestamp)) return timestamp;
+  }
+  return 0;
+}
+
+export function getLaundryBusinessTimestamp(
+  record: Pick<LaundryRecord, "paymentDate" | "paidAt" | "recordedAt" | "createdAt" | "status">,
+) {
+  const paymentDateTimestamp = getDateTimestamp(record.paymentDate);
+  if (paymentDateTimestamp) return paymentDateTimestamp;
+  if (record.status === "completed") {
+    const paidAt = Number(record.paidAt ?? record.recordedAt);
+    if (Number.isFinite(paidAt) && paidAt > 0) return paidAt;
   }
   const createdAt = Number(record.createdAt);
   return Number.isFinite(createdAt) ? createdAt : 0;

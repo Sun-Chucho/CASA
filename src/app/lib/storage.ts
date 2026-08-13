@@ -95,6 +95,24 @@ export function writeCashierState<TTransaction>(transactions: TTransaction[], re
   return writeJson(getActiveCashierStateKey(), { transactions, receiptSeq });
 }
 
+function mergeStoredRecords<T>(primary: T[], legacy: T[]): T[] {
+  const merged = new Map<string, T>();
+  const recordsWithoutId: T[] = [];
+
+  for (const record of [...legacy, ...primary]) {
+    if (typeof record === "object" && record !== null) {
+      const id = (record as { id?: unknown }).id;
+      if (typeof id === "string" && id.trim()) {
+        merged.set(id, record);
+        continue;
+      }
+    }
+    recordsWithoutId.push(record);
+  }
+
+  return [...merged.values(), ...recordsWithoutId];
+}
+
 export function readPosState<TTicket, TPayment, TMenu>(
   storageKey: string,
   legacyTicketsKey: string,
@@ -104,26 +122,26 @@ export function readPosState<TTicket, TPayment, TMenu>(
   defaultSeq: number,
 ): PosState<TTicket, TPayment, TMenu> {
   const snapshot = readJson<PosState<TTicket, TPayment, TMenu>>(storageKey);
+  const legacyTickets = readJson<TTicket[]>(legacyTicketsKey) ?? [];
+  const legacyPayments = readJson<TPayment[]>(legacyPaymentsKey) ?? [];
+  const legacyMenuItems = readJson<TMenu[]>(legacyMenuKey) ?? [];
   if (snapshot) {
     return {
-      tickets: Array.isArray(snapshot.tickets) ? snapshot.tickets : [],
+      tickets: mergeStoredRecords(Array.isArray(snapshot.tickets) ? snapshot.tickets : [], legacyTickets),
       ticketSeq: Number.isFinite(snapshot.ticketSeq) ? snapshot.ticketSeq : defaultSeq,
-      payments: Array.isArray(snapshot.payments) ? snapshot.payments : [],
-      menuItems: Array.isArray(snapshot.menuItems) ? snapshot.menuItems : [],
+      payments: mergeStoredRecords(Array.isArray(snapshot.payments) ? snapshot.payments : [], legacyPayments),
+      menuItems: mergeStoredRecords(Array.isArray(snapshot.menuItems) ? snapshot.menuItems : [], legacyMenuItems),
     };
   }
 
-  const tickets = readJson<TTicket[]>(legacyTicketsKey) ?? [];
-  const payments = readJson<TPayment[]>(legacyPaymentsKey) ?? [];
-  const menuItems = readJson<TMenu[]>(legacyMenuKey) ?? [];
   const legacySeqRaw = typeof window === "undefined" ? null : localStorage.getItem(getUnifiedLocalKey(legacySeqKey));
   const parsedSeq = Number(legacySeqRaw);
 
   return {
-    tickets: Array.isArray(tickets) ? tickets : [],
+    tickets: Array.isArray(legacyTickets) ? legacyTickets : [],
     ticketSeq: Number.isFinite(parsedSeq) && parsedSeq > 0 ? parsedSeq : defaultSeq,
-    payments: Array.isArray(payments) ? payments : [],
-    menuItems: Array.isArray(menuItems) ? menuItems : [],
+    payments: Array.isArray(legacyPayments) ? legacyPayments : [],
+    menuItems: Array.isArray(legacyMenuItems) ? legacyMenuItems : [],
   };
 }
 

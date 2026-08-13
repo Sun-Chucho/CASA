@@ -258,11 +258,14 @@ export default function AnalyticsPage() {
       hydrateStorageKeyFromFirebase(STORAGE_STOCK_SALES),
       hydrateStorageKeyFromFirebase(STORAGE_LAUNDRY_RECORDS),
       hydrateStorageKeyFromFirebase(STORAGE_EXPENSES),
-    ]).finally(applyAnalyticsSnapshot);
+    ])
+      .then(() => hydrateStorageKeyFromFirebase("orange-hotel-kitchen-payments"))
+      .finally(applyAnalyticsSnapshot);
 
     const unsubscribers = [
       subscribeToSyncedStorageKey("orange-hotel-cashier-state", applyAnalyticsSnapshot),
       subscribeToSyncedStorageKey(activeKitchenKey, applyAnalyticsSnapshot),
+      subscribeToSyncedStorageKey("orange-hotel-kitchen-payments", applyAnalyticsSnapshot),
       subscribeToSyncedStorageKey(activeBaristaKey, applyAnalyticsSnapshot),
       subscribeToSyncedStorageKey(STORAGE_BEVERAGE_COST, applyAnalyticsSnapshot),
       subscribeToSyncedStorageKey(STORAGE_RECIPE_COST, applyAnalyticsSnapshot),

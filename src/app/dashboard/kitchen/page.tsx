@@ -170,6 +170,7 @@ export default function KitchenPage() {
 
     const applyKitchenSnapshot = () => {
       if (cancelled) return;
+      const canonicalSnapshot = readJson<{ payments?: KitchenPaymentRecord[] }>(activeKitchenKey);
       const snapshot = readPosState<KitchenTicket, KitchenPaymentRecord, KitchenMenuItem>(
         activeKitchenKey,
         STORAGE_TICKETS,
@@ -184,17 +185,26 @@ export default function KitchenPage() {
       const nextMenuItems = mergeKitchenMenuItems(snapshot.menuItems);
       setMenuItems(nextMenuItems);
       setPosHydrated(true);
-      if (JSON.stringify(nextMenuItems) !== JSON.stringify(snapshot.menuItems)) {
+      const canonicalPayments = Array.isArray(canonicalSnapshot?.payments) ? canonicalSnapshot.payments : [];
+      if (
+        JSON.stringify(nextMenuItems) !== JSON.stringify(snapshot.menuItems) ||
+        JSON.stringify(canonicalPayments) !== JSON.stringify(snapshot.payments)
+      ) {
         writePosState(activeKitchenKey, snapshot.tickets, snapshot.ticketSeq, snapshot.payments, nextMenuItems);
       }
     };
 
-    void hydrateStorageKeyFromFirebase(activeKitchenKey).finally(applyKitchenSnapshot);
+    applyKitchenSnapshot();
+    void hydrateStorageKeyFromFirebase(activeKitchenKey)
+      .then(() => hydrateStorageKeyFromFirebase("orange-hotel-kitchen-payments"))
+      .finally(applyKitchenSnapshot);
     const unsubscribeKitchen = subscribeToSyncedStorageKey(activeKitchenKey, applyKitchenSnapshot);
+    const unsubscribeLegacyPayments = subscribeToSyncedStorageKey("orange-hotel-kitchen-payments", applyKitchenSnapshot);
 
     return () => {
       cancelled = true;
       unsubscribeKitchen();
+      unsubscribeLegacyPayments();
     };
   }, []);
 

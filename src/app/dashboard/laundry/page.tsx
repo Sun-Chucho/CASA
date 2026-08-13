@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { readStoredRole } from "@/app/lib/auth";
-import { getLaundryBusinessTimestamp, LaundryPaymentMethod, LaundryPaymentStatus, LaundryRecord, STORAGE_LAUNDRY_RECORDS } from "@/app/lib/laundry";
+import { LaundryPaymentMethod, LaundryPaymentStatus, LaundryRecord, STORAGE_LAUNDRY_RECORDS } from "@/app/lib/laundry";
 import { Role } from "@/app/lib/mock-data";
 import { readJson, writeJson } from "@/app/lib/storage";
 import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Shirt, Save } from "lucide-react";
@@ -20,25 +21,31 @@ function formatMoney(value: number) {
   return `TSh ${Math.round(Number.isFinite(amount) ? amount : 0).toLocaleString()}`;
 }
 
-function formatDate(value: number) {
-  const timestamp = Number(value);
-  if (!Number.isFinite(timestamp) || timestamp <= 0) return "-";
-  const date = new Date(timestamp);
-  return Number.isNaN(date.getTime()) ? "-" : date.toLocaleString();
-}
-
 function todayText() {
   const now = new Date();
   const offset = now.getTimezoneOffset() * 60_000;
   return new Date(now.getTime() - offset).toISOString().slice(0, 10);
 }
 
+function toDateText(value: number | undefined) {
+  const timestamp = Number(value);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return "";
+  const date = new Date(timestamp);
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 10);
+}
+
 function formatBookingDate(record: LaundryRecord) {
   if (record.bookingDate) return record.bookingDate;
-  const timestamp = getLaundryBusinessTimestamp(record);
+  const timestamp = record.createdAt;
   if (!Number.isFinite(timestamp) || timestamp <= 0) return "-";
   const date = new Date(timestamp);
   return Number.isNaN(date.getTime()) ? "-" : date.toISOString().slice(0, 10);
+}
+
+function formatPaymentDate(record: LaundryRecord) {
+  if (record.status === "credit") return "Not paid";
+  return record.paymentDate || toDateText(record.paidAt ?? record.recordedAt ?? record.createdAt) || "-";
 }
 
 function normalizeLaundryRecords(value: unknown): LaundryRecord[] {
@@ -65,7 +72,10 @@ function normalizeLaundryRecords(value: unknown): LaundryRecord[] {
         paymentMethod,
         createdAt: Number.isFinite(createdAt) && createdAt > 0 ? createdAt : 0,
         bookingDate: typeof record.bookingDate === "string" ? record.bookingDate : undefined,
+        paymentDate: typeof record.paymentDate === "string" ? record.paymentDate : undefined,
+        paidAt: Number.isFinite(Number(record.paidAt)) ? Number(record.paidAt) : undefined,
         recordedAt: Number.isFinite(Number(record.recordedAt)) ? Number(record.recordedAt) : undefined,
+        updatedAt: Number.isFinite(Number(record.updatedAt)) ? Number(record.updatedAt) : undefined,
         createdBy: typeof record.createdBy === "string" ? record.createdBy : undefined,
       };
     });
@@ -77,10 +87,14 @@ export default function LaundryPage() {
   const [tab, setTab] = useState<LaundryPaymentStatus>("completed");
   const [clientName, setClientName] = useState("");
   const [bookingDate, setBookingDate] = useState(todayText());
+  const [paymentDate, setPaymentDate] = useState(todayText());
   const [itemCount, setItemCount] = useState("");
   const [totalAmount, setTotalAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<LaundryPaymentMethod>("cash");
   const [status, setStatus] = useState<LaundryPaymentStatus>("completed");
+  const [creditToPay, setCreditToPay] = useState<string | null>(null);
+  const [creditPaymentDate, setCreditPaymentDate] = useState(todayText());
+  const [creditPaymentMethod, setCreditPaymentMethod] = useState<Exclude<LaundryPaymentMethod, "credit">>("cash");
 
   useEffect(() => {
     setRole(readStoredRole() ?? "cashier");
@@ -110,6 +124,7 @@ export default function LaundryPage() {
     const recordedAt = Date.now();
     const businessTimestamp = new Date(`${bookingDate}T12:00:00`).getTime();
     if (!bookingDate || !Number.isFinite(businessTimestamp)) return;
+    if (status === "completed" && !paymentDate) return;
 
     const nextRecord: LaundryRecord = {
       id: `laundry-${recordedAt}`,
@@ -120,6 +135,8 @@ export default function LaundryPage() {
       paymentMethod: status === "credit" ? "credit" : paymentMethod,
       createdAt: businessTimestamp,
       bookingDate,
+      paymentDate: status === "completed" ? paymentDate : undefined,
+      paidAt: status === "completed" ? recordedAt : undefined,
       recordedAt,
       createdBy: role,
     };
@@ -128,6 +145,7 @@ export default function LaundryPage() {
     writeJson(STORAGE_LAUNDRY_RECORDS, nextRecords);
     setClientName("");
     setBookingDate(todayText());
+    setPaymentDate(todayText());
     setItemCount("");
     setTotalAmount("");
     setPaymentMethod("cash");
@@ -135,12 +153,26 @@ export default function LaundryPage() {
     setTab(nextRecord.status);
   };
 
-  const payCredit = (id: string) => {
+  const payCredit = () => {
+    if (!creditToPay || !creditPaymentDate) return;
+    const updatedAt = Date.now();
     const nextRecords = records.map((record) =>
-      record.id === id ? { ...record, status: "completed" as LaundryPaymentStatus, paymentMethod: "cash" as LaundryPaymentMethod } : record
+      record.id === creditToPay
+        ? {
+            ...record,
+            status: "completed" as LaundryPaymentStatus,
+            paymentMethod: creditPaymentMethod,
+            paymentDate: creditPaymentDate,
+            paidAt: updatedAt,
+            updatedAt,
+          }
+        : record
     );
     setRecords(nextRecords);
     writeJson(STORAGE_LAUNDRY_RECORDS, nextRecords);
+    setCreditToPay(null);
+    setCreditPaymentDate(todayText());
+    setCreditPaymentMethod("cash");
   };
 
   return (
@@ -189,6 +221,10 @@ export default function LaundryPage() {
             <div className="space-y-1">
               <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Booking Date</Label>
               <Input type="date" value={bookingDate} onChange={(event) => setBookingDate(event.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Payment Date</Label>
+              <Input type="date" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} disabled={status === "credit"} />
             </div>
             <div className="space-y-1">
               <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Number of Items</Label>
@@ -243,7 +279,7 @@ export default function LaundryPage() {
             <TableHeader>
               <TableRow>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Booking Date</TableHead>
-                <TableHead className="font-black uppercase text-[10px] tracking-widest">Recorded</TableHead>
+                <TableHead className="font-black uppercase text-[10px] tracking-widest">Payment Date</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Client</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Items</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Method</TableHead>
@@ -255,14 +291,14 @@ export default function LaundryPage() {
               {filteredRecords.map((record) => (
                 <TableRow key={record.id}>
                   <TableCell className="font-bold">{formatBookingDate(record)}</TableCell>
-                  <TableCell className="font-bold">{formatDate(record.recordedAt ?? record.createdAt)}</TableCell>
+                  <TableCell className="font-bold">{formatPaymentDate(record)}</TableCell>
                   <TableCell className="font-bold">{record.clientName}</TableCell>
                   <TableCell className="font-bold">{record.itemCount}</TableCell>
                   <TableCell className="font-black uppercase text-[10px] tracking-widest">{record.paymentMethod}</TableCell>
                   <TableCell className="text-right font-black">{formatMoney(record.totalAmount)}</TableCell>
                   <TableCell className="text-right">
                     {record.status === "credit" && !isReadOnly && (
-                      <Button size="sm" onClick={() => payCredit(record.id)} className="font-black uppercase tracking-widest text-[10px]">
+                      <Button size="sm" onClick={() => setCreditToPay(record.id)} className="font-black uppercase tracking-widest text-[10px]">
                         Pay
                       </Button>
                     )}
@@ -280,6 +316,33 @@ export default function LaundryPage() {
           </Table>
         </CardContent>
       </Card>
+
+      <Dialog open={creditToPay !== null} onOpenChange={(open) => !open && setCreditToPay(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Complete Laundry Payment</DialogTitle>
+            <DialogDescription>Choose the actual payment date and method for this credit record.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label>Payment Date</Label>
+              <Input type="date" value={creditPaymentDate} onChange={(event) => setCreditPaymentDate(event.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label>Payment Method</Label>
+              <select className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={creditPaymentMethod} onChange={(event) => setCreditPaymentMethod(event.target.value as Exclude<LaundryPaymentMethod, "credit">)}>
+                <option value="cash">Cash</option>
+                <option value="card">Card</option>
+                <option value="mobile-money">Mobile Money</option>
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreditToPay(null)}>Cancel</Button>
+            <Button onClick={payCredit}>Save Payment</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
