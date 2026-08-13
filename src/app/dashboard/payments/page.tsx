@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Receipt } from "lucide-react";
 import { useIsDirector } from "@/hooks/use-is-director";
-import { subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
+import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
 
 type PaymentsTab = "reception" | "kitchen" | "barista";
 type PaymentDateFilter = "all" | "date";
@@ -257,6 +257,12 @@ export default function PaymentsPage() {
     };
 
     refreshPayments();
+
+    void Promise.all([
+      hydrateStorageKeyFromFirebase("orange-hotel-cashier-state"),
+      hydrateStorageKeyFromFirebase(activeKitchenKey),
+      hydrateStorageKeyFromFirebase(activeBaristaKey),
+    ]).finally(refreshPayments);
 
     const unsubscribeCashier = subscribeToSyncedStorageKey("orange-hotel-cashier-state", refreshPayments);
     const unsubscribeKitchen = subscribeToSyncedStorageKey(activeKitchenKey, refreshPayments);

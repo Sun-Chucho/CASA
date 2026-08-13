@@ -196,6 +196,12 @@ function formatPaymentDate(createdAt: number | undefined) {
   return Number.isFinite(date.getTime()) ? date.toLocaleString() : "-";
 }
 
+function getBaristaPaymentRoomNumber(payment: Pick<BaristaPaymentRecord, "mode" | "destination" | "roomNumber">) {
+  if (typeof payment.roomNumber === "string" && payment.roomNumber.trim()) return payment.roomNumber.trim();
+  if (payment.mode !== "room-service") return "-";
+  return payment.destination.trim().match(/^room\s+(.+)$/i)?.[1]?.trim() || "-";
+}
+
 const normalizeCategory = (value: string, itemName = ""): Exclude<BaristaCategory, "all"> => {
   const normalizedValue = value.trim().toLowerCase();
   const normalizedName = itemName.trim().toLowerCase();
@@ -1298,6 +1304,7 @@ export default function BaristaPage() {
               itemName: "Unitemized sale",
               quantity: 1,
               destination: payment.destination,
+              roomNumber: getBaristaPaymentRoomNumber(payment),
               method: payment.method,
               status: payment.status,
               amount: payment.total,
@@ -1320,6 +1327,7 @@ export default function BaristaPage() {
             itemName: line.name,
             quantity: line.qty,
             destination: payment.destination,
+            roomNumber: getBaristaPaymentRoomNumber(payment),
             method: payment.method,
             status: payment.status,
             amount,
@@ -1445,6 +1453,7 @@ export default function BaristaPage() {
                 <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Item Sold</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Qty</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Destination</TableHead>
+                <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Room Number</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Method</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Status</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Amount</TableHead>
@@ -1458,6 +1467,7 @@ export default function BaristaPage() {
                   <TableCell className="font-bold">{row.itemName}</TableCell>
                   <TableCell className="font-bold">{row.quantity}</TableCell>
                   <TableCell className="font-bold">{row.destination}</TableCell>
+                  <TableCell className="font-black">{row.roomNumber}</TableCell>
                   <TableCell className="font-black uppercase text-[10px] tracking-widest">{row.method}</TableCell>
                   <TableCell className="font-black uppercase text-[10px] tracking-widest">{row.status}</TableCell>
                   <TableCell className="font-bold">TSh {row.amount.toLocaleString()}</TableCell>
@@ -1465,7 +1475,7 @@ export default function BaristaPage() {
               ))}
               {directorSalesRows.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} className="py-10 text-center font-black uppercase text-[10px] tracking-widest text-muted-foreground">
+                  <TableCell colSpan={9} className="py-10 text-center font-black uppercase text-[10px] tracking-widest text-muted-foreground">
                     No sales found for this filter
                   </TableCell>
                 </TableRow>

@@ -35,7 +35,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Download, Eye, Pencil, Plus, Search, Trash2, XCircle } from "lucide-react";
 import { useIsDirector } from "@/hooks/use-is-director";
 import { useConfirmDialog } from "@/hooks/use-confirm-dialog";
-import { subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
+import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
 import { KitchenSessionManager } from "@/components/dashboard/kitchen-session-manager";
 
 export type InventoryTab =
@@ -58,6 +58,7 @@ interface PosPaymentRecord {
   createdAt?: number;
   mode?: string;
   destination?: string;
+  roomNumber?: string;
   status?: "completed" | "credit";
   method?: string;
   total: number;
@@ -190,6 +191,12 @@ function normalizePaymentLine(line: { name: string; qty: number }) {
 
 function getPaymentLines(payment: PosPaymentRecord) {
   return Array.isArray(payment.lines) ? payment.lines.map(normalizePaymentLine) : [];
+}
+
+function getPaymentRoomNumber(payment: PosPaymentRecord) {
+  if (typeof payment.roomNumber === "string" && payment.roomNumber.trim()) return payment.roomNumber.trim();
+  if (payment.mode !== "room-service" || typeof payment.destination !== "string") return "-";
+  return payment.destination.trim().match(/^room\s+(.+)$/i)?.[1]?.trim() || "-";
 }
 
 function formatPaymentDate(createdAt: number | undefined) {
@@ -357,6 +364,15 @@ export function InventoryControlView({
     };
 
     applyInventorySnapshot();
+    void Promise.all([
+      hydrateStorageKeyFromFirebase(STORAGE_INVENTORY_ITEMS),
+      hydrateStorageKeyFromFirebase(STORAGE_MAIN_STORE_ITEMS),
+      hydrateStorageKeyFromFirebase(STORAGE_KITCHEN_STATE),
+      hydrateStorageKeyFromFirebase(STORAGE_BARISTA_STATE),
+      hydrateStorageKeyFromFirebase(STORAGE_KITCHEN_PURCHASE_HISTORY),
+      hydrateStorageKeyFromFirebase(STORAGE_KITCHEN_DAILY_STOCK_HISTORY),
+      hydrateStorageKeyFromFirebase(STORAGE_BARISTA_PURCHASE_HISTORY),
+    ]).finally(applyInventorySnapshot);
     const unsubscribeInventory = subscribeToSyncedStorageKey(STORAGE_INVENTORY_ITEMS, applyInventorySnapshot);
     const unsubscribeStore = subscribeToSyncedStorageKey(STORAGE_MAIN_STORE_ITEMS, applyInventorySnapshot);
     const unsubscribeKitchen = subscribeToSyncedStorageKey(STORAGE_KITCHEN_STATE, applyInventorySnapshot);
@@ -432,6 +448,7 @@ export function InventoryControlView({
               itemName: "Unitemized sale",
               quantity: 1,
               destination: payment.destination ?? payment.mode ?? "-",
+              roomNumber: getPaymentRoomNumber(payment),
               method: payment.method ?? "-",
               status: payment.status ?? "completed",
               amount: getNumber(payment.total),
@@ -454,6 +471,7 @@ export function InventoryControlView({
             itemName: line.name,
             quantity: line.qty,
             destination: payment.destination ?? payment.mode ?? "-",
+            roomNumber: getPaymentRoomNumber(payment),
             method: payment.method ?? "-",
             status: payment.status ?? "completed",
             amount,
@@ -595,6 +613,7 @@ export function InventoryControlView({
               itemName: "Unitemized sale",
               quantity: 1,
               destination: payment.destination ?? payment.mode ?? "-",
+              roomNumber: getPaymentRoomNumber(payment),
               method: payment.method ?? "-",
               status: payment.status ?? "completed",
               amount: getNumber(payment.total),
@@ -617,6 +636,7 @@ export function InventoryControlView({
             itemName: line.name,
             quantity: line.qty,
             destination: payment.destination ?? payment.mode ?? "-",
+            roomNumber: getPaymentRoomNumber(payment),
             method: payment.method ?? "-",
             status: payment.status ?? "completed",
             amount,
@@ -1336,6 +1356,7 @@ export function InventoryControlView({
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Item Sold</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Qty</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Destination</TableHead>
+                <TableHead className="font-black uppercase text-[10px] tracking-widest">Room Number</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Method</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Status</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Amount</TableHead>
@@ -1349,6 +1370,7 @@ export function InventoryControlView({
                   <TableCell className="font-bold">{row.itemName}</TableCell>
                   <TableCell className="font-bold">{row.quantity}</TableCell>
                   <TableCell className="font-bold">{row.destination}</TableCell>
+                  <TableCell className="font-black">{row.roomNumber}</TableCell>
                   <TableCell className="font-black uppercase text-[10px] tracking-widest">{row.method}</TableCell>
                   <TableCell className="font-black uppercase text-[10px] tracking-widest">{row.status}</TableCell>
                   <TableCell className="font-bold">TSh {row.amount.toLocaleString()}</TableCell>
@@ -1356,7 +1378,7 @@ export function InventoryControlView({
               ))}
               {baristaSalesRows.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} className="py-10 text-center font-black uppercase text-[10px] tracking-widest text-muted-foreground">
+                  <TableCell colSpan={9} className="py-10 text-center font-black uppercase text-[10px] tracking-widest text-muted-foreground">
                     No sales found for this filter
                   </TableCell>
                 </TableRow>
@@ -1425,6 +1447,7 @@ export function InventoryControlView({
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Item Sold</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Qty</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Destination</TableHead>
+                <TableHead className="font-black uppercase text-[10px] tracking-widest">Room Number</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Method</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Status</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Amount</TableHead>
@@ -1438,6 +1461,7 @@ export function InventoryControlView({
                   <TableCell className="font-bold">{row.itemName}</TableCell>
                   <TableCell className="font-bold">{row.quantity}</TableCell>
                   <TableCell className="font-bold">{row.destination}</TableCell>
+                  <TableCell className="font-black">{row.roomNumber}</TableCell>
                   <TableCell className="font-black uppercase text-[10px] tracking-widest">{row.method}</TableCell>
                   <TableCell className="font-black uppercase text-[10px] tracking-widest">{row.status}</TableCell>
                   <TableCell className="font-bold">TSh {row.amount.toLocaleString()}</TableCell>
@@ -1445,7 +1469,7 @@ export function InventoryControlView({
               ))}
               {kitchenSalesRows.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} className="py-10 text-center font-black uppercase text-[10px] tracking-widest text-muted-foreground">
+                  <TableCell colSpan={9} className="py-10 text-center font-black uppercase text-[10px] tracking-widest text-muted-foreground">
                     No kitchen sales found for this filter
                   </TableCell>
                 </TableRow>
