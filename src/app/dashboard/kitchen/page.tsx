@@ -76,6 +76,7 @@ interface KitchenPaymentRecord {
   method: KitchenPaymentMethod;
   historical?: boolean;
   recordedAt?: number;
+  paymentMethodEditedAt?: number;
 }
 
 interface PendingOrder {
@@ -152,6 +153,8 @@ export default function KitchenPage() {
   const [pastPaymentMethod, setPastPaymentMethod] = useState<KitchenPaymentMethod>("cash");
   const [pastPaymentFeedback, setPastPaymentFeedback] = useState("");
   const [savingPastPayment, setSavingPastPayment] = useState(false);
+  const [updatingPastPaymentId, setUpdatingPastPaymentId] = useState<string | null>(null);
+  const [pastPaymentUpdateFeedback, setPastPaymentUpdateFeedback] = useState("");
 
   const roomSuggestions = useMemo(() => ROOMS.map((room) => room.number), []);
   const tableSuggestions = useMemo(
@@ -710,6 +713,53 @@ export default function KitchenPage() {
     }
   };
 
+  const updatePastPaymentMethod = async (paymentId: string, method: KitchenPaymentMethod) => {
+    const currentPayment = kitchenPayments.find((payment) => payment.id === paymentId && payment.historical);
+    if (!currentPayment || currentPayment.method === method) return;
+
+    setUpdatingPastPaymentId(paymentId);
+    setPastPaymentUpdateFeedback("");
+    try {
+      const activeKitchenKey = getActiveKitchenStateKey();
+      const snapshot = readPosState<KitchenTicket, KitchenPaymentRecord, KitchenMenuItem>(
+        activeKitchenKey,
+        STORAGE_TICKETS,
+        STORAGE_SEQ,
+        STORAGE_PAYMENTS,
+        STORAGE_MENU,
+        300,
+      );
+      const paymentMethodEditedAt = Date.now();
+      const nextPayments = snapshot.payments.map((payment) =>
+        payment.id === paymentId && payment.historical
+          ? {
+              ...payment,
+              method,
+              status: method === "credit" ? "credit" as const : "completed" as const,
+              paymentMethodEditedAt,
+            }
+          : payment,
+      );
+
+      setKitchenPayments(nextPayments);
+      const synced = await writePosState(
+        activeKitchenKey,
+        snapshot.tickets,
+        snapshot.ticketSeq,
+        nextPayments,
+        snapshot.menuItems,
+      );
+      const methodLabel = method === "mobile" ? "Mobile Money" : method.charAt(0).toUpperCase() + method.slice(1);
+      setPastPaymentUpdateFeedback(
+        synced
+          ? `${currentPayment.code} updated to ${methodLabel}. Finances and reports now reflect the change.`
+          : `${currentPayment.code} was updated to ${methodLabel} on this device and will synchronize when the connection is restored.`,
+      );
+    } finally {
+      setUpdatingPastPaymentId(null);
+    }
+  };
+
   const deliverTicket = async (id: string) => {
     if (isDirector) return;
     const approved = await confirm({
@@ -890,6 +940,9 @@ export default function KitchenPage() {
           <CardHeader>
             <CardTitle className="text-xl font-black uppercase tracking-tight">Recorded Past Sales</CardTitle>
             <CardDescription>{recordedPastPayments.length} historical kitchen sales</CardDescription>
+            {pastPaymentUpdateFeedback && (
+              <p className="rounded-lg border bg-muted/20 p-3 text-sm font-bold">{pastPaymentUpdateFeedback}</p>
+            )}
           </CardHeader>
           <CardContent className="p-0">
             <Table>
@@ -908,7 +961,20 @@ export default function KitchenPage() {
                     <TableCell className="font-bold">{new Date(payment.createdAt).toLocaleDateString()}</TableCell>
                     <TableCell className="font-black">{payment.code}</TableCell>
                     <TableCell className="font-bold text-sm">{payment.lines?.map((line) => `${line.name} x${line.qty}`).join(" | ") || "Unitemized sale"}</TableCell>
-                    <TableCell className="font-black uppercase text-[10px] tracking-widest">{payment.method}</TableCell>
+                    <TableCell>
+                      <select
+                        aria-label={`Payment method for ${payment.code}`}
+                        value={payment.method}
+                        disabled={updatingPastPaymentId === payment.id}
+                        onChange={(event) => void updatePastPaymentMethod(payment.id, event.target.value as KitchenPaymentMethod)}
+                        className="h-9 min-w-32 rounded-md border border-input bg-background px-2 py-1 text-xs font-black uppercase tracking-wider disabled:cursor-wait disabled:opacity-60"
+                      >
+                        <option value="cash">Cash</option>
+                        <option value="card">Card</option>
+                        <option value="mobile">Mobile Money</option>
+                        <option value="credit">Credit</option>
+                      </select>
+                    </TableCell>
                     <TableCell className="text-right font-black">TSh {payment.total.toLocaleString()}</TableCell>
                   </TableRow>
                 ))}
