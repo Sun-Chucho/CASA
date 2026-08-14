@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ExpenseRecord, STORAGE_EXPENSES, getExpenseDepartmentLabel, normalizeExpenseRecords } from "@/app/lib/expenses";
-import { getLaundryPaymentTimestamp, getLaundryServiceTimestamp, LaundryRecord, STORAGE_LAUNDRY_RECORDS } from "@/app/lib/laundry";
+import { getLaundryBusinessTimestamp, LaundryRecord, STORAGE_LAUNDRY_RECORDS } from "@/app/lib/laundry";
 import { getActiveBaristaStateKey, getActiveKitchenStateKey, readCashierState, readJson, readPosState } from "@/app/lib/storage";
 import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -87,11 +87,8 @@ export default function FinancesPage() {
     const datedBookings = bookings.filter((item) => matchesSelectedDate(item.createdAt, selectedDate));
     const datedKitchenPayments = kitchenPayments.filter((item) => matchesSelectedDate(item.createdAt, selectedDate));
     const datedBaristaPayments = baristaPayments.filter((item) => matchesSelectedDate(item.createdAt, selectedDate));
-    const datedLaundryPayments = laundryRecords.filter(
-      (item) => item.status !== "credit" && matchesSelectedDate(getLaundryPaymentTimestamp(item), selectedDate),
-    );
-    const datedLaundryCredits = laundryRecords.filter(
-      (item) => item.status === "credit" && matchesSelectedDate(getLaundryServiceTimestamp(item), selectedDate),
+    const datedLaundryRecords = laundryRecords.filter((item) =>
+      matchesSelectedDate(getLaundryBusinessTimestamp(item), selectedDate),
     );
     const datedExpenses = expenses.filter((item) => matchesSelectedDate(item.createdAt, selectedDate));
     const bookingRevenue = datedBookings.filter((item) => item.status !== "credit").reduce((sum, item) => sum + asNumber(item.total), 0);
@@ -100,8 +97,8 @@ export default function FinancesPage() {
     const kitchenCredit = datedKitchenPayments.filter((item) => item.status === "credit").reduce((sum, item) => sum + asNumber(item.total), 0);
     const baristaRevenue = datedBaristaPayments.filter((item) => item.status !== "credit").reduce((sum, item) => sum + asNumber(item.total), 0);
     const baristaCredit = datedBaristaPayments.filter((item) => item.status === "credit").reduce((sum, item) => sum + asNumber(item.total), 0);
-    const laundryRevenue = datedLaundryPayments.reduce((sum, item) => sum + asNumber(item.totalAmount), 0);
-    const laundryCredit = datedLaundryCredits.reduce((sum, item) => sum + asNumber(item.totalAmount), 0);
+    const laundryRevenue = datedLaundryRecords.filter((item) => item.status !== "credit").reduce((sum, item) => sum + asNumber(item.totalAmount), 0);
+    const laundryCredit = datedLaundryRecords.filter((item) => item.status === "credit").reduce((sum, item) => sum + asNumber(item.totalAmount), 0);
     const expenseTotal = datedExpenses.reduce((sum, item) => sum + asNumber(item.amount), 0);
     const incomeTotal = bookingRevenue + kitchenRevenue + baristaRevenue + laundryRevenue;
     const creditTotal = bookingCredit + kitchenCredit + baristaCredit + laundryCredit;

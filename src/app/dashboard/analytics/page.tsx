@@ -38,7 +38,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EXPENSE_DEPARTMENTS, ExpenseRecord, getExpenseAmountTypeLabel, normalizeExpenseRecords, STORAGE_EXPENSES } from "@/app/lib/expenses";
-import { getLaundryPaymentTimestamp, LaundryRecord, STORAGE_LAUNDRY_RECORDS } from "@/app/lib/laundry";
+import { getLaundryBusinessTimestamp, LaundryRecord, STORAGE_LAUNDRY_RECORDS } from "@/app/lib/laundry";
 import { ROOMS } from "@/app/lib/mock-data";
 
 type ReportRange = "daily" | "weekly" | "monthly" | "all-time";
@@ -298,7 +298,7 @@ export default function AnalyticsPage() {
     });
 
     laundryRecords.forEach((record) => {
-      const businessTimestamp = getLaundryPaymentTimestamp(record);
+      const businessTimestamp = getLaundryBusinessTimestamp(record);
       if (record.status === "credit" || !businessTimestamp || !record.totalAmount) return;
       events.push({ date: toDayKey(businessTimestamp), timestamp: businessTimestamp, source: "laundry", total: record.totalAmount });
     });
@@ -448,7 +448,7 @@ export default function AnalyticsPage() {
       }
     });
     laundryRecords.forEach((record) => {
-      const businessTimestamp = getLaundryPaymentTimestamp(record);
+      const businessTimestamp = getLaundryBusinessTimestamp(record);
       if (record.status === "credit" || !businessTimestamp || !record.totalAmount) return;
       if (previousRows.includes(toDayKey(businessTimestamp))) {
         previousTotal += record.totalAmount;

@@ -69,7 +69,8 @@ export function getLaundryPaymentTimestamp(
 }
 
 export function getLaundryBusinessTimestamp(record: LaundryRecord) {
-  return record.status === "credit"
-    ? getLaundryServiceTimestamp(record)
-    : getLaundryPaymentTimestamp(record);
+  // Laundry reports are recognized on the booking/service date. Payment Date
+  // remains separate settlement metadata and must not move revenue between
+  // reporting periods.
+  return getLaundryServiceTimestamp(record);
 }
