@@ -149,6 +149,8 @@ function escapeCsvCell(value: string | number) {
 
 function getOperatingExpenseLabel(expense: ExpenseRecord) {
   const title = expense.title.toLowerCase();
+  if (expense.department === "kitchen") return "Kitchen";
+  if (expense.department === "barista") return "Barista";
   if (expense.department === "staff-salary-allowance" || /salary|allowance|wage|payroll/.test(title)) return "Salary & Allowances";
   if (/internet|wi-?fi|dstv|television|\btv\b/.test(title)) return "TV / Internet";
   if (/electric|power|luku/.test(title)) return "Electricity";
@@ -573,24 +575,15 @@ export default function AnalyticsPage() {
     };
     const totalRevenue = revenue.rooms + revenue.kitchen + revenue.bar + revenue.laundry + revenue.conference;
 
-    // Kitchen and barista purchases are direct costs; the remaining saved expenses are OPEX.
-    const drinksCost = monthExpenses
-      .filter((expense) => expense.department === "barista")
-      .reduce((sum, expense) => sum + expense.amount, 0);
-    const kitchenCost = monthExpenses
-      .filter((expense) => expense.department === "kitchen")
-      .reduce((sum, expense) => sum + expense.amount, 0);
-    const directCosts = drinksCost + kitchenCost;
-    const grossProfit = totalRevenue - directCosts;
-
     const operatingTotals = new Map<string, number>();
     monthExpenses
-      .filter((expense) => expense.department !== "barista" && expense.department !== "kitchen")
       .forEach((expense) => {
         const label = getOperatingExpenseLabel(expense);
         operatingTotals.set(label, (operatingTotals.get(label) ?? 0) + expense.amount);
       });
     const preferredLabels = [
+      "Kitchen",
+      "Barista",
       "Salary & Allowances",
       "TV / Internet",
       "Electricity",
@@ -604,7 +597,7 @@ export default function AnalyticsPage() {
     ];
     const operatingExpenses = preferredLabels.map((label) => ({ label, value: operatingTotals.get(label) ?? 0 }));
     const totalOpex = operatingExpenses.reduce((sum, row) => sum + row.value, 0);
-    const netProfit = grossProfit - totalOpex;
+    const netProfit = totalRevenue - totalOpex;
     const roomsSold = reportBookings.length;
 
     return {
@@ -613,11 +606,6 @@ export default function AnalyticsPage() {
       roomsSold,
       revenue,
       totalRevenue,
-      drinksCost,
-      kitchenCost,
-      directCosts,
-      grossProfit,
-      grossProfitMargin: totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0,
       operatingExpenses,
       totalOpex,
       netProfit,
@@ -641,13 +629,6 @@ export default function AnalyticsPage() {
       ["Laundry", financialStatement.revenue.laundry],
       ["Conference", financialStatement.revenue.conference],
       ["TOTAL REVENUE", financialStatement.totalRevenue],
-      ["", ""],
-      ["DIRECT COST / COGS", ""],
-      ["Drinks", financialStatement.drinksCost],
-      ["LN & DN", financialStatement.kitchenCost],
-      ["TOTAL DIRECT COST", financialStatement.directCosts],
-      ["GROSS PROFIT", financialStatement.grossProfit],
-      ["GROSS PROFIT MARGIN", `${financialStatement.grossProfitMargin.toFixed(1)}%`],
       ["", ""],
       ["OPERATING EXPENSES", ""],
       ...financialStatement.operatingExpenses.map((row): [string, number] => [row.label, row.value]),
@@ -774,12 +755,6 @@ export default function AnalyticsPage() {
                     <StatementRow label="Laundry" value={financialStatement.revenue.laundry} />
                     <StatementRow label="Conference" value={financialStatement.revenue.conference} />
                     <StatementTotal label="Total Revenue" value={financialStatement.totalRevenue} />
-                    <StatementHeader label="Direct Cost / COGS" />
-                    <StatementRow label="Drinks" value={financialStatement.drinksCost} />
-                    <StatementRow label="LN & DN" value={financialStatement.kitchenCost} />
-                    <StatementTotal label="Total Direct Cost" value={financialStatement.directCosts} />
-                    <StatementTotal label="Gross Profit" value={financialStatement.grossProfit} positive={financialStatement.grossProfit >= 0} />
-                    <StatementPercent label="Gross Profit Margin" value={financialStatement.grossProfitMargin} />
                     <StatementHeader label="Operating Expenses" />
                     {financialStatement.operatingExpenses.map((row) => (
                       <StatementRow key={row.label} label={row.label} value={row.value} />
