@@ -153,6 +153,8 @@ export default function KitchenPage() {
   const [pastPaymentMethod, setPastPaymentMethod] = useState<KitchenPaymentMethod>("cash");
   const [pastPaymentFeedback, setPastPaymentFeedback] = useState("");
   const [savingPastPayment, setSavingPastPayment] = useState(false);
+  const [editingPastPaymentId, setEditingPastPaymentId] = useState<string | null>(null);
+  const [pastPaymentMethodDraft, setPastPaymentMethodDraft] = useState<KitchenPaymentMethod>("cash");
   const [updatingPastPaymentId, setUpdatingPastPaymentId] = useState<string | null>(null);
   const [pastPaymentUpdateFeedback, setPastPaymentUpdateFeedback] = useState("");
 
@@ -715,7 +717,11 @@ export default function KitchenPage() {
 
   const updatePastPaymentMethod = async (paymentId: string, method: KitchenPaymentMethod) => {
     const currentPayment = kitchenPayments.find((payment) => payment.id === paymentId && payment.historical);
-    if (!currentPayment || currentPayment.method === method) return;
+    if (!currentPayment) return;
+    if (currentPayment.method === method) {
+      setEditingPastPaymentId(null);
+      return;
+    }
 
     setUpdatingPastPaymentId(paymentId);
     setPastPaymentUpdateFeedback("");
@@ -755,6 +761,7 @@ export default function KitchenPage() {
           ? `${currentPayment.code} updated to ${methodLabel}. Finances and reports now reflect the change.`
           : `${currentPayment.code} was updated to ${methodLabel} on this device and will synchronize when the connection is restored.`,
       );
+      setEditingPastPaymentId(null);
     } finally {
       setUpdatingPastPaymentId(null);
     }
@@ -953,6 +960,7 @@ export default function KitchenPage() {
                   <TableHead className="font-black uppercase text-[10px] tracking-widest">Items</TableHead>
                   <TableHead className="font-black uppercase text-[10px] tracking-widest">Method</TableHead>
                   <TableHead className="text-right font-black uppercase text-[10px] tracking-widest">Amount</TableHead>
+                  <TableHead className="text-right font-black uppercase text-[10px] tracking-widest">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -962,25 +970,70 @@ export default function KitchenPage() {
                     <TableCell className="font-black">{payment.code}</TableCell>
                     <TableCell className="font-bold text-sm">{payment.lines?.map((line) => `${line.name} x${line.qty}`).join(" | ") || "Unitemized sale"}</TableCell>
                     <TableCell>
-                      <select
-                        aria-label={`Payment method for ${payment.code}`}
-                        value={payment.method}
-                        disabled={updatingPastPaymentId === payment.id}
-                        onChange={(event) => void updatePastPaymentMethod(payment.id, event.target.value as KitchenPaymentMethod)}
-                        className="h-9 min-w-32 rounded-md border border-input bg-background px-2 py-1 text-xs font-black uppercase tracking-wider disabled:cursor-wait disabled:opacity-60"
-                      >
-                        <option value="cash">Cash</option>
-                        <option value="card">Card</option>
-                        <option value="mobile">Mobile Money</option>
-                        <option value="credit">Credit</option>
-                      </select>
+                      {editingPastPaymentId === payment.id ? (
+                        <select
+                          aria-label={`Payment method for ${payment.code}`}
+                          value={pastPaymentMethodDraft}
+                          disabled={updatingPastPaymentId === payment.id}
+                          onChange={(event) => setPastPaymentMethodDraft(event.target.value as KitchenPaymentMethod)}
+                          className="h-9 min-w-32 rounded-md border border-input bg-background px-2 py-1 text-xs font-black uppercase tracking-wider disabled:cursor-wait disabled:opacity-60"
+                        >
+                          <option value="cash">Cash</option>
+                          <option value="card">Card</option>
+                          <option value="mobile">Mobile Money</option>
+                          <option value="credit">Credit</option>
+                        </select>
+                      ) : (
+                        <span className="font-black uppercase text-[10px] tracking-widest">
+                          {payment.method === "mobile" ? "Mobile Money" : payment.method}
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right font-black">TSh {payment.total.toLocaleString()}</TableCell>
+                    <TableCell className="text-right">
+                      {editingPastPaymentId === payment.id ? (
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={updatingPastPaymentId === payment.id}
+                            onClick={() => void updatePastPaymentMethod(payment.id, pastPaymentMethodDraft)}
+                            className="font-black uppercase text-[10px] tracking-widest"
+                          >
+                            {updatingPastPaymentId === payment.id ? "Saving..." : "Save"}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={updatingPastPaymentId === payment.id}
+                            onClick={() => setEditingPastPaymentId(null)}
+                            className="font-black uppercase text-[10px] tracking-widest"
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setEditingPastPaymentId(payment.id);
+                            setPastPaymentMethodDraft(payment.method);
+                            setPastPaymentUpdateFeedback("");
+                          }}
+                          className="font-black uppercase text-[10px] tracking-widest"
+                        >
+                          Edit
+                        </Button>
+                      )}
+                    </TableCell>
                   </TableRow>
                 ))}
                 {recordedPastPayments.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={5} className="py-10 text-center text-xs font-black uppercase tracking-widest text-muted-foreground">
+                    <TableCell colSpan={6} className="py-10 text-center text-xs font-black uppercase tracking-widest text-muted-foreground">
                       No past kitchen sales recorded yet
                     </TableCell>
                   </TableRow>
