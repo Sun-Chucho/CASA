@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { readStoredRole } from "@/app/lib/auth";
-import { LaundryPaymentMethod, LaundryPaymentStatus, LaundryRecord, STORAGE_LAUNDRY_RECORDS } from "@/app/lib/laundry";
+import { getLaundryDateTimestamp, LaundryPaymentMethod, LaundryPaymentStatus, LaundryRecord, STORAGE_LAUNDRY_RECORDS } from "@/app/lib/laundry";
 import { Role } from "@/app/lib/mock-data";
 import { readJson, writeJson } from "@/app/lib/storage";
 import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
@@ -122,9 +122,9 @@ export default function LaundryPage() {
     if (!clientName.trim() || Number.isNaN(parsedItems) || parsedItems <= 0 || Number.isNaN(parsedAmount) || parsedAmount <= 0) return;
 
     const recordedAt = Date.now();
-    const businessTimestamp = new Date(`${bookingDate}T12:00:00`).getTime();
-    if (!bookingDate || !Number.isFinite(businessTimestamp)) return;
-    if (status === "completed" && !paymentDate) return;
+    const serviceTimestamp = getLaundryDateTimestamp(bookingDate);
+    const paymentTimestamp = status === "completed" ? getLaundryDateTimestamp(paymentDate) : 0;
+    if (!serviceTimestamp || (status === "completed" && !paymentTimestamp)) return;
 
     const nextRecord: LaundryRecord = {
       id: `laundry-${recordedAt}`,
@@ -133,10 +133,10 @@ export default function LaundryPage() {
       totalAmount: parsedAmount,
       status,
       paymentMethod: status === "credit" ? "credit" : paymentMethod,
-      createdAt: businessTimestamp,
+      createdAt: serviceTimestamp,
       bookingDate,
       paymentDate: status === "completed" ? paymentDate : undefined,
-      paidAt: status === "completed" ? recordedAt : undefined,
+      paidAt: status === "completed" ? paymentTimestamp : undefined,
       recordedAt,
       createdBy: role,
     };
@@ -154,7 +154,9 @@ export default function LaundryPage() {
   };
 
   const payCredit = () => {
-    if (!creditToPay || !creditPaymentDate) return;
+    if (!creditToPay) return;
+    const paymentTimestamp = getLaundryDateTimestamp(creditPaymentDate);
+    if (!paymentTimestamp) return;
     const updatedAt = Date.now();
     const nextRecords = records.map((record) =>
       record.id === creditToPay
@@ -163,7 +165,7 @@ export default function LaundryPage() {
             status: "completed" as LaundryPaymentStatus,
             paymentMethod: creditPaymentMethod,
             paymentDate: creditPaymentDate,
-            paidAt: updatedAt,
+            paidAt: paymentTimestamp,
             updatedAt,
           }
         : record
@@ -220,11 +222,11 @@ export default function LaundryPage() {
             </div>
             <div className="space-y-1">
               <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Date Laundry Was Done</Label>
-              <Input type="date" value={bookingDate} onChange={(event) => setBookingDate(event.target.value)} />
+              <Input type="date" value={bookingDate} onChange={(event) => setBookingDate(event.target.value)} required />
             </div>
             <div className="space-y-1">
               <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Payment Date</Label>
-              <Input type="date" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} disabled={status === "credit"} />
+              <Input type="date" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} disabled={status === "credit"} required={status === "completed"} />
             </div>
             <div className="space-y-1">
               <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Number of Items</Label>
@@ -326,7 +328,7 @@ export default function LaundryPage() {
           <div className="grid gap-4 py-2 sm:grid-cols-2">
             <div className="space-y-1">
               <Label>Payment Date</Label>
-              <Input type="date" value={creditPaymentDate} onChange={(event) => setCreditPaymentDate(event.target.value)} />
+              <Input type="date" value={creditPaymentDate} onChange={(event) => setCreditPaymentDate(event.target.value)} required />
             </div>
             <div className="space-y-1">
               <Label>Payment Method</Label>
