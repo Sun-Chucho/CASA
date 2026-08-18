@@ -101,7 +101,10 @@ function getNumber(value: unknown) {
 function toDayKey(createdAt: number | undefined) {
   const saleDate = new Date(getNumber(createdAt));
   if (!Number.isFinite(saleDate.getTime())) return "";
-  return saleDate.toISOString().slice(0, 10);
+  // Sales reports follow the motel's/browser's local calendar day. UTC ISO
+  // dates made sales shortly after midnight appear under the previous date.
+  const offsetMs = saleDate.getTimezoneOffset() * 60_000;
+  return new Date(saleDate.getTime() - offsetMs).toISOString().slice(0, 10);
 }
 
 function matchesSalesDateFilter(createdAt: number | undefined, filter: SalesDateFilter, selectedDate: string) {

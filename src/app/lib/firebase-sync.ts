@@ -402,12 +402,11 @@ function mirrorCanonicalStateToLegacyLocal(key: string, value: unknown) {
 
   if (key === "orange-hotel-kitchen-state") {
     const snapshot = sanitizeSyncedValue(key, value) as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[] };
-    const existingLegacyPayments = readParsedLocalValue<unknown[]>("orange-hotel-kitchen-payments") ?? [];
     setLocalCache("orange-hotel-kitchen-tickets", JSON.stringify(Array.isArray(snapshot.tickets) ? snapshot.tickets : []));
     setLocalCache("orange-hotel-kitchen-seq", String(Number.isFinite(snapshot.ticketSeq) ? snapshot.ticketSeq : 300));
     setLocalCache(
       "orange-hotel-kitchen-payments",
-      JSON.stringify(mergeRecordsById(Array.isArray(snapshot.payments) ? snapshot.payments : [], existingLegacyPayments)),
+      JSON.stringify(Array.isArray(snapshot.payments) ? snapshot.payments : []),
     );
     setLocalCache("orange-hotel-kitchen-menu", JSON.stringify(Array.isArray(snapshot.menuItems) ? snapshot.menuItems : []));
     localStorage.removeItem("orange-hotel-demo-seed-version");
@@ -1022,6 +1021,11 @@ function mergeRemoteValueForLocalApply(key: string, remoteValue: unknown) {
   const localValue = getLocalSyncedValue(key);
   if (!hasUsableSyncedValue(key, localValue)) return applyLocalBookingOccupancy(key, remoteValue);
   if (!hasUsableSyncedValue(key, remoteValue)) return applyLocalBookingOccupancy(key, localValue);
+  // A durable pending marker means this browser has a local change that has not
+  // yet been acknowledged. Otherwise Firebase is canonical. Always unioning a
+  // browser's cache with Firebase made removed POS records reappear forever and
+  // then spread those stale records to every other browser.
+  if (!hasPendingSyncMarker(key)) return applyLocalBookingOccupancy(key, remoteValue);
   return applyLocalBookingOccupancy(key, mergeRemoteValueWithLocalOnlyRecords(key, localValue, remoteValue));
 }
 
@@ -1200,10 +1204,10 @@ async function hydrateStorageKeyFromFirebaseInternal(key: string) {
   }
 }
 
-export function hydrateStorageKeyFromFirebase(key: string): Promise<void> {
+export function hydrateStorageKeyFromFirebase(key: string, force = false): Promise<void> {
   const existing = _hydrationInFlight.get(key);
   if (existing) return existing;
-  if ((_lastHydratedAt[key] ?? 0) > Date.now() - HYDRATION_DEDUP_WINDOW_MS) {
+  if (!force && (_lastHydratedAt[key] ?? 0) > Date.now() - HYDRATION_DEDUP_WINDOW_MS) {
     return Promise.resolve();
   }
 
@@ -1253,6 +1257,12 @@ export function subscribeToSyncedStorageKey<T>(key: string, onChange: (value: T 
   let firebaseUnsubscribe: () => void = () => {};
   let isDisposed = false;
   let pollTimer: number | null = null;
+  let pendingReconcileTimer: number | null = null;
+
+  const reconcileDurablePendingWrite = () => {
+    if (isDisposed || !window.navigator.onLine || !hasPendingSyncMarker(key) || _pendingLocalWrites[key]) return;
+    void hydrateStorageKeyFromFirebase(key, true);
+  };
 
   const stopFallbackPolling = () => {
     if (pollTimer !== null) {
@@ -1294,12 +1304,25 @@ export function subscribeToSyncedStorageKey<T>(key: string, onChange: (value: T 
 
   const resumeFallbackPolling = () => {
     if (document.visibilityState === "visible" && window.navigator.onLine) {
+      reconcileDurablePendingWrite();
       void pollServerSnapshot();
     }
   };
 
   window.addEventListener("online", resumeFallbackPolling);
   document.addEventListener("visibilitychange", resumeFallbackPolling);
+
+  // Every subscriber must reconcile durable offline writes. Previously only a
+  // few pages explicitly hydrated, so a marker left by a failed write could
+  // cause this realtime listener to ignore cloud changes indefinitely.
+  if (hasPendingSyncMarker(key) && !_pendingLocalWrites[key]) {
+    reconcileDurablePendingWrite();
+    // A browser reload loses the in-memory retry queue, but the complete local
+    // POS snapshot and durable marker remain. Keep retrying until Firebase
+    // acknowledges that snapshot instead of abandoning it after one transient
+    // authentication or network failure.
+    pendingReconcileTimer = window.setInterval(reconcileDurablePendingWrite, 30000);
+  }
 
   void ensureFirebaseAuthReady()
     .then(() => {
@@ -1357,6 +1380,7 @@ export function subscribeToSyncedStorageKey<T>(key: string, onChange: (value: T 
     document.removeEventListener("visibilitychange", resumeFallbackPolling);
     firebaseUnsubscribe();
     stopFallbackPolling();
+    if (pendingReconcileTimer !== null) window.clearInterval(pendingReconcileTimer);
   };
 }
 

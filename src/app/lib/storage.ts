@@ -95,24 +95,6 @@ export function writeCashierState<TTransaction>(transactions: TTransaction[], re
   return writeJson(getActiveCashierStateKey(), { transactions, receiptSeq });
 }
 
-function mergeStoredRecords<T>(primary: T[], legacy: T[]): T[] {
-  const merged = new Map<string, T>();
-  const recordsWithoutId: T[] = [];
-
-  for (const record of [...legacy, ...primary]) {
-    if (typeof record === "object" && record !== null) {
-      const id = (record as { id?: unknown }).id;
-      if (typeof id === "string" && id.trim()) {
-        merged.set(id, record);
-        continue;
-      }
-    }
-    recordsWithoutId.push(record);
-  }
-
-  return [...merged.values(), ...recordsWithoutId];
-}
-
 export function readPosState<TTicket, TPayment, TMenu>(
   storageKey: string,
   legacyTicketsKey: string,
@@ -126,11 +108,14 @@ export function readPosState<TTicket, TPayment, TMenu>(
   const legacyPayments = readJson<TPayment[]>(legacyPaymentsKey) ?? [];
   const legacyMenuItems = readJson<TMenu[]>(legacyMenuKey) ?? [];
   if (snapshot) {
+    // Once the canonical POS snapshot exists it is the source of truth. Merging
+    // the old per-field browser cache on every read resurrected deleted/cleaned
+    // tickets and payments, so one stale browser could publish them again.
     return {
-      tickets: mergeStoredRecords(Array.isArray(snapshot.tickets) ? snapshot.tickets : [], legacyTickets),
+      tickets: Array.isArray(snapshot.tickets) ? snapshot.tickets : [],
       ticketSeq: Number.isFinite(snapshot.ticketSeq) ? snapshot.ticketSeq : defaultSeq,
-      payments: mergeStoredRecords(Array.isArray(snapshot.payments) ? snapshot.payments : [], legacyPayments),
-      menuItems: mergeStoredRecords(Array.isArray(snapshot.menuItems) ? snapshot.menuItems : [], legacyMenuItems),
+      payments: Array.isArray(snapshot.payments) ? snapshot.payments : [],
+      menuItems: Array.isArray(snapshot.menuItems) ? snapshot.menuItems : [],
     };
   }
 

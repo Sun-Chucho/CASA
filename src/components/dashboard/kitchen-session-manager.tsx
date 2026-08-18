@@ -121,10 +121,15 @@ function formatDateTime(value: string) {
   return new Date(value).toLocaleString();
 }
 
+function getLocalDateInputValue(value: Date = new Date()) {
+  const offsetMs = value.getTimezoneOffset() * 60_000;
+  return new Date(value.getTime() - offsetMs).toISOString().slice(0, 10);
+}
+
 function getDateInputValue(value: string) {
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return new Date().toISOString().slice(0, 10);
-  return parsed.toISOString().slice(0, 10);
+  if (Number.isNaN(parsed.getTime())) return getLocalDateInputValue();
+  return getLocalDateInputValue(parsed);
 }
 
 function getTimeInputValue(value: string) {
@@ -134,7 +139,7 @@ function getTimeInputValue(value: string) {
 }
 
 function combineDateAndTime(dateValue: string, timeValue: string) {
-  const safeDate = dateValue || new Date().toISOString().slice(0, 10);
+  const safeDate = dateValue || getLocalDateInputValue();
   const safeTime = timeValue || "23:59";
   const combined = new Date(`${safeDate}T${safeTime}:00`);
   if (Number.isNaN(combined.getTime())) {
@@ -267,7 +272,7 @@ export function KitchenSessionManager({
   const [closeTarget, setCloseTarget] = useState<CloseTarget>(null);
   const [historyPreview, setHistoryPreview] = useState<HistoryPreviewState>(null);
   const [closeNotes, setCloseNotes] = useState(DEFAULT_SIGNOFF);
-  const [closeDate, setCloseDate] = useState(new Date().toISOString().slice(0, 10));
+  const [closeDate, setCloseDate] = useState(() => getLocalDateInputValue());
   const [closeTime, setCloseTime] = useState(new Date().toTimeString().slice(0, 5));
   const [purchaseSearch, setPurchaseSearch] = useState("");
   const purchaseCopy = getWorkflowCopy("purchase", department);
