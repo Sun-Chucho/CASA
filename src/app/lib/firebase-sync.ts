@@ -1305,6 +1305,10 @@ export function subscribeToSyncedStorageKey<T>(key: string, onChange: (value: T 
   const resumeFallbackPolling = () => {
     if (document.visibilityState === "visible" && window.navigator.onLine) {
       reconcileDurablePendingWrite();
+      // Mobile browsers can suspend the realtime socket in the background.
+      // Force one canonical read on resume so Payments never keeps an older
+      // snapshot until another database event happens to arrive.
+      void hydrateStorageKeyFromFirebase(key, true);
       void pollServerSnapshot();
     }
   };

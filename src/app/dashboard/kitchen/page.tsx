@@ -77,6 +77,7 @@ interface KitchenPaymentRecord {
   historical?: boolean;
   recordedAt?: number;
   paymentMethodEditedAt?: number;
+  updatedAt?: number;
 }
 
 interface PendingOrder {
@@ -746,6 +747,7 @@ export default function KitchenPage() {
               method,
               status: method === "credit" ? "credit" as const : "completed" as const,
               paymentMethodEditedAt,
+              updatedAt: paymentMethodEditedAt,
             }
           : payment,
       );

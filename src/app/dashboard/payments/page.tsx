@@ -49,6 +49,7 @@ interface BookingRecord {
   status: TransactionStatus;
   paymentBreakdown?: BookingPaymentBreakdownItem[];
   paymentMethodEditedAt?: number;
+  updatedAt?: number;
 }
 
 interface KitchenPaymentRecord {
@@ -62,6 +63,8 @@ interface KitchenPaymentRecord {
   total: number;
   status: KitchenPaymentStatus;
   method: KitchenPaymentMethod;
+  paymentMethodEditedAt?: number;
+  updatedAt?: number;
 }
 
 interface BaristaPaymentRecord {
@@ -76,6 +79,8 @@ interface BaristaPaymentRecord {
   status: BaristaPaymentStatus;
   method: BaristaPaymentMethod;
   lines?: Array<{ name: string; qty: number }>;
+  paymentMethodEditedAt?: number;
+  updatedAt?: number;
 }
 
 interface PaymentRow {
@@ -90,6 +95,7 @@ interface PaymentRow {
   method: string;
   amount: number;
   createdAt: number;
+  updatedAt?: number;
   status: "completed" | "credit";
 }
 
@@ -129,7 +135,19 @@ function asNumber(value: unknown) {
 function toDayKey(value: number) {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return "";
-  return date.toISOString().slice(0, 10);
+  const offsetMs = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 10);
+}
+
+function getPaymentRevision(createdAt: number, updatedAt?: number) {
+  const revision = asNumber(updatedAt);
+  return revision > createdAt ? revision : createdAt;
+}
+
+function getUpdatedPaymentDetail(createdAt: number, updatedAt?: number) {
+  const revision = asNumber(updatedAt);
+  if (revision <= createdAt) return undefined;
+  return `Updated ${new Date(revision).toLocaleString()}`;
 }
 
 function daysBetween(start: string, end: string) {
@@ -192,6 +210,8 @@ export default function PaymentsPage() {
 
   const [selectedCredit, setSelectedCredit] = useState<{ source: "booking" | "kitchen" | "barista"; id: string } | null>(null);
   const [showMethodPopup, setShowMethodPopup] = useState(false);
+  const [savingCreditPayment, setSavingCreditPayment] = useState(false);
+  const [creditPaymentFeedback, setCreditPaymentFeedback] = useState<string | null>(null);
   const [editingBookingId, setEditingBookingId] = useState<string | null>(null);
   const [payerNameDraft, setPayerNameDraft] = useState("");
   const [roomNumberDraft, setRoomNumberDraft] = useState("");
@@ -285,10 +305,14 @@ export default function PaymentsPage() {
         context: `Room ${tx.roomNumber}`,
         roomNumber: tx.roomNumber || "-",
         dateLabel: `${formatDate(tx.checkInDate)} - ${formatDate(tx.checkOutDate)}`,
-        dateDetail: `${tx.nights} night${tx.nights === 1 ? "" : "s"}`,
+        dateDetail: [
+          `${tx.nights} night${tx.nights === 1 ? "" : "s"}`,
+          getUpdatedPaymentDetail(tx.createdAt, tx.updatedAt ?? tx.paymentMethodEditedAt),
+        ].filter(Boolean).join(" • "),
         method: getBookingPaymentLabel(tx),
         amount: asNumber(tx.total),
         createdAt: asNumber(tx.createdAt),
+        updatedAt: asNumber(tx.updatedAt ?? tx.paymentMethodEditedAt) || undefined,
         status: tx.status === "credit" ? "credit" : "completed",
       })),
     [bookingTransactions],
@@ -304,9 +328,11 @@ export default function PaymentsPage() {
         context: tx.destination,
         roomNumber: getPosRoomNumber(tx),
         dateLabel: formatDate(new Date(tx.createdAt).toISOString()),
+        dateDetail: getUpdatedPaymentDetail(tx.createdAt, tx.updatedAt ?? tx.paymentMethodEditedAt),
         method: tx.method,
         amount: asNumber(tx.total),
         createdAt: asNumber(tx.createdAt),
+        updatedAt: asNumber(tx.updatedAt ?? tx.paymentMethodEditedAt) || undefined,
         status: tx.status,
       })),
     [kitchenPayments],
@@ -322,9 +348,11 @@ export default function PaymentsPage() {
         context: formatPaymentItems(tx.lines) || tx.destination,
         roomNumber: getPosRoomNumber(tx),
         dateLabel: formatDate(new Date(tx.createdAt).toISOString()),
+        dateDetail: getUpdatedPaymentDetail(tx.createdAt, tx.updatedAt ?? tx.paymentMethodEditedAt),
         method: tx.method,
         amount: asNumber(tx.total),
         createdAt: asNumber(tx.createdAt),
+        updatedAt: asNumber(tx.updatedAt ?? tx.paymentMethodEditedAt) || undefined,
         status: tx.status,
       })),
     [baristaPayments],
@@ -347,6 +375,7 @@ export default function PaymentsPage() {
 
   const openPaidFlow = (row: PaymentRow) => {
     if (isDirector) return;
+    setCreditPaymentFeedback(null);
     setSelectedCredit({ source: row.source, id: row.id });
     setShowMethodPopup(true);
   };
@@ -382,6 +411,7 @@ export default function PaymentsPage() {
     if (!nextName || !nextRoomNumber || nextNights < 1) return;
 
     const snapshot = readCashierState<BookingRecord>(STORAGE_BOOKING_TX, "orange-hotel-cashier-seq", 84920);
+    const updatedAt = Date.now();
     const nextTransactions = snapshot.transactions.map((tx) =>
       tx.id === editingBookingId
         ? {
@@ -401,7 +431,8 @@ export default function PaymentsPage() {
                   ? "checked-out" as const
                   : "completed" as const,
             paymentBreakdown: undefined,
-            paymentMethodEditedAt: Date.now(),
+            paymentMethodEditedAt: updatedAt,
+            updatedAt,
           }
         : tx,
     );
@@ -420,8 +451,13 @@ export default function PaymentsPage() {
     }
   };
 
-  const applyPaidMethod = (method: "cash" | "card" | "mobile") => {
-    if (!selectedCredit) return;
+  const applyPaidMethod = async (method: "cash" | "card" | "mobile") => {
+    if (!selectedCredit || savingCreditPayment) return;
+
+    const updatedAt = Date.now();
+    let synced = false;
+    setSavingCreditPayment(true);
+    setCreditPaymentFeedback(null);
 
     if (selectedCredit.source === "booking") {
       const mappedMethod: PaymentMethod = method === "mobile" ? "mobile-money" : method;
@@ -432,29 +468,40 @@ export default function PaymentsPage() {
               ...tx,
               status: tx.status === "checked-out" ? "checked-out" as const : "completed" as const,
               payment: mappedMethod,
+              paymentMethodEditedAt: updatedAt,
+              updatedAt,
             }
           : tx,
       );
       setBookingTransactions(nextTransactions);
-      writeCashierState(nextTransactions, snapshot.receiptSeq);
+      synced = (await writeCashierState(nextTransactions, snapshot.receiptSeq)) === true;
     } else if (selectedCredit.source === "kitchen") {
       const activeKitchenKey = getActiveKitchenStateKey();
       const kitchenSnapshot = readPosState<unknown, KitchenPaymentRecord, unknown>(activeKitchenKey, "orange-hotel-kitchen-tickets", "orange-hotel-kitchen-seq", STORAGE_KITCHEN_PAYMENTS, "orange-hotel-kitchen-menu", 300);
       const nextPayments = kitchenSnapshot.payments.map((tx) =>
-        tx.id === selectedCredit.id ? { ...tx, status: "completed" as const, method } : tx,
+        tx.id === selectedCredit.id
+          ? { ...tx, status: "completed" as const, method, paymentMethodEditedAt: updatedAt, updatedAt }
+          : tx,
       );
       setKitchenPayments(nextPayments);
-      writePosState(activeKitchenKey, kitchenSnapshot.tickets, kitchenSnapshot.ticketSeq, nextPayments, kitchenSnapshot.menuItems);
+      synced = (await writePosState(activeKitchenKey, kitchenSnapshot.tickets, kitchenSnapshot.ticketSeq, nextPayments, kitchenSnapshot.menuItems)) === true;
     } else {
       const activeBaristaKey = getActiveBaristaStateKey();
       const baristaSnapshot = readPosState<unknown, BaristaPaymentRecord, unknown>(activeBaristaKey, "orange-hotel-barista-orders", "orange-hotel-barista-seq", STORAGE_BARISTA_PAYMENTS, "orange-hotel-barista-menu", 490);
       const nextPayments = baristaSnapshot.payments.map((tx) =>
-        tx.id === selectedCredit.id ? { ...tx, status: "completed" as const, method } : tx,
+        tx.id === selectedCredit.id
+          ? { ...tx, status: "completed" as const, method, paymentMethodEditedAt: updatedAt, updatedAt }
+          : tx,
       );
       setBaristaPayments(nextPayments);
-      writePosState(activeBaristaKey, baristaSnapshot.tickets, baristaSnapshot.ticketSeq, nextPayments, baristaSnapshot.menuItems);
+      synced = (await writePosState(activeBaristaKey, baristaSnapshot.tickets, baristaSnapshot.ticketSeq, nextPayments, baristaSnapshot.menuItems)) === true;
     }
 
+    setSavingCreditPayment(false);
+    if (!synced) {
+      setCreditPaymentFeedback("Saved on this device. Cloud synchronization will retry automatically when the connection is restored.");
+      return;
+    }
     setShowMethodPopup(false);
     setSelectedCredit(null);
   };
@@ -462,7 +509,7 @@ export default function PaymentsPage() {
   const rows = useMemo(() => {
     return activePaymentRows
       .filter((row) => matchesPaymentDateFilter(row.createdAt, paymentDateFilter, selectedPaymentDate))
-      .sort((a, b) => b.createdAt - a.createdAt);
+      .sort((a, b) => getPaymentRevision(b.createdAt, b.updatedAt) - getPaymentRevision(a.createdAt, a.updatedAt));
   }, [activePaymentRows, paymentDateFilter, selectedPaymentDate]);
 
   const canViewAllTabs = role === "manager" || role === "director";
@@ -594,7 +641,7 @@ export default function PaymentsPage() {
 
                 <div className="mt-3 flex items-center justify-between gap-2 border-t pt-3">
                   <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                    {formatAgo(tx.createdAt)}
+                    {formatAgo(getPaymentRevision(tx.createdAt, tx.updatedAt))}
                   </p>
                   {!isDirector && tx.source === "booking" ? (
                     <div className="flex gap-2">
@@ -660,7 +707,7 @@ export default function PaymentsPage() {
                   <TableCell className="font-bold">
                     <p>{tx.payer}</p>
                     <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground mt-1">
-                      {formatAgo(tx.createdAt)}
+                      {formatAgo(getPaymentRevision(tx.createdAt, tx.updatedAt))}
                     </p>
                   </TableCell>
                   <TableCell className="font-bold">{tx.context}</TableCell>
@@ -737,15 +784,20 @@ export default function PaymentsPage() {
               <CardDescription>Choose how this credit was paid</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <Button onClick={() => applyPaidMethod("cash")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
-                Cash
+              <Button disabled={savingCreditPayment} onClick={() => void applyPaidMethod("cash")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
+                {savingCreditPayment ? "Saving..." : "Cash"}
               </Button>
-              <Button onClick={() => applyPaidMethod("card")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
+              <Button disabled={savingCreditPayment} onClick={() => void applyPaidMethod("card")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
                 Card
               </Button>
-              <Button onClick={() => applyPaidMethod("mobile")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
+              <Button disabled={savingCreditPayment} onClick={() => void applyPaidMethod("mobile")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
                 Mobile
               </Button>
+              {creditPaymentFeedback && (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs font-bold text-amber-800">
+                  {creditPaymentFeedback}
+                </p>
+              )}
               <Button
                 variant="outline"
                 onClick={() => {
