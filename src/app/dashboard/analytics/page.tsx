@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { format } from "date-fns";
+import type { DateRange } from "react-day-picker";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   BeverageCostRow,
@@ -36,12 +38,14 @@ import {
   Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Calendar as DatePickerCalendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EXPENSE_DEPARTMENTS, ExpenseRecord, getExpenseAmountTypeLabel, normalizeExpenseRecords, STORAGE_EXPENSES } from "@/app/lib/expenses";
 import { getLaundryBusinessTimestamp, LaundryRecord, STORAGE_LAUNDRY_RECORDS } from "@/app/lib/laundry";
 import { ROOMS } from "@/app/lib/mock-data";
 
-type ReportRange = "daily" | "weekly" | "monthly" | "all-time";
+type ReportRange = "daily" | "weekly" | "monthly" | "custom" | "all-time";
 type AnalyticsView = "analytics" | "reports";
 
 type BookingTransaction = {
@@ -142,6 +146,35 @@ function calculateGrowth(current: number, previous: number) {
   return `${rounded >= 0 ? "+" : ""}${rounded}%`;
 }
 
+function createDateRangeDayKeys(dateRange: DateRange | undefined) {
+  if (!dateRange?.from) return createRecentDayKeys(1);
+
+  const from = new Date(dateRange.from);
+  const to = new Date(dateRange.to ?? dateRange.from);
+  from.setHours(0, 0, 0, 0);
+  to.setHours(0, 0, 0, 0);
+
+  const start = from <= to ? from : to;
+  const end = from <= to ? to : from;
+  const keys: string[] = [];
+  const cursor = new Date(start);
+
+  while (cursor <= end) {
+    keys.push(toDayKey(cursor.getTime()));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return keys;
+}
+
+function formatSelectedDateRange(dateRange: DateRange | undefined) {
+  if (!dateRange?.from) return "Choose date or range";
+  if (!dateRange.to || toDayKey(dateRange.from.getTime()) === toDayKey(dateRange.to.getTime())) {
+    return format(dateRange.from, "MMM d, yyyy");
+  }
+  return `${format(dateRange.from, "MMM d, yyyy")} - ${format(dateRange.to, "MMM d, yyyy")}`;
+}
+
 function escapeCsvCell(value: string | number) {
   const text = String(value);
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
@@ -203,6 +236,17 @@ export default function AnalyticsPage() {
   const [view, setView] = useState<AnalyticsView>("analytics");
   const [range, setRange] = useState<ReportRange>("daily");
   const [selectedMonth, setSelectedMonth] = useState<string>("");
+  const [selectedDateRange, setSelectedDateRange] = useState<DateRange>(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return { from: today, to: today };
+  });
+  const [pendingDateRange, setPendingDateRange] = useState<DateRange>(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return { from: today, to: today };
+  });
+  const [isDateFilterOpen, setIsDateFilterOpen] = useState(false);
   const [bookings, setBookings] = useState<BookingTransaction[]>([]);
   const [kitchenPayments, setKitchenPayments] = useState<PosPaymentRecord[]>([]);
   const [baristaPayments, setBaristaPayments] = useState<PosPaymentRecord[]>([]);
@@ -329,8 +373,9 @@ export default function AnalyticsPage() {
     if (range === "daily") return "Today";
     if (range === "weekly") return "Last 7 Days";
     if (range === "monthly") return formatMonthLabel(selectedMonth || availableMonths[0] || toMonthKey(Date.now()));
+    if (range === "custom") return formatSelectedDateRange(selectedDateRange);
     return "All Time";
-  }, [availableMonths, range, selectedMonth]);
+  }, [availableMonths, range, selectedDateRange, selectedMonth]);
 
   const history = useMemo<RevenueHistoryRow[]>(() => {
     const keys =
@@ -340,7 +385,9 @@ export default function AnalyticsPage() {
           ? createRecentDayKeys(7)
           : range === "monthly"
             ? createMonthDayKeys(selectedMonth || availableMonths[0] || toMonthKey(Date.now()))
-            : availableMonths.slice().reverse();
+            : range === "custom"
+              ? createDateRangeDayKeys(selectedDateRange)
+              : availableMonths.slice().reverse();
 
     const rows = new Map<string, RevenueHistoryRow>(
       keys.map((key) => [
@@ -373,7 +420,7 @@ export default function AnalyticsPage() {
     });
 
     return keys.map((key) => rows.get(key)!);
-  }, [availableMonths, businessEvents, range, selectedMonth]);
+  }, [availableMonths, businessEvents, range, selectedDateRange, selectedMonth]);
 
   const totals = useMemo(() => {
     const totalRevenue = history.reduce((sum, day) => sum + day.totalRevenue, 0);
@@ -559,24 +606,29 @@ export default function AnalyticsPage() {
   }, [beverageRows, recipeRows, stockSalesRows]);
 
   const financialStatement = useMemo(() => {
-    const month = selectedMonth || availableMonths[0] || toMonthKey(Date.now());
-    const monthEvents = businessEvents.filter((event) => toMonthKey(event.timestamp) === month);
-    const monthExpenses = expenses.filter((expense) => toMonthKey(expense.createdAt) === month);
+    const reportEvents = businessEvents.filter((event) => {
+      const key = range === "all-time" ? toMonthKey(event.timestamp) : event.date;
+      return activePeriodKeys.has(key);
+    });
     const reportBookings = bookings.filter(
-      (booking) => booking.status !== "credit" && Boolean(booking.createdAt) && toMonthKey(booking.createdAt!) === month,
+      (booking) => {
+        if (booking.status === "credit" || !booking.createdAt) return false;
+        const key = range === "all-time" ? toMonthKey(booking.createdAt) : toDayKey(booking.createdAt);
+        return activePeriodKeys.has(key);
+      },
     );
 
     const revenue = {
-      rooms: monthEvents.filter((event) => event.source === "rooms").reduce((sum, event) => sum + event.total, 0),
-      kitchen: monthEvents.filter((event) => event.source === "kitchen").reduce((sum, event) => sum + event.total, 0),
-      bar: monthEvents.filter((event) => event.source === "barista").reduce((sum, event) => sum + event.total, 0),
-      laundry: monthEvents.filter((event) => event.source === "laundry").reduce((sum, event) => sum + event.total, 0),
+      rooms: reportEvents.filter((event) => event.source === "rooms").reduce((sum, event) => sum + event.total, 0),
+      kitchen: reportEvents.filter((event) => event.source === "kitchen").reduce((sum, event) => sum + event.total, 0),
+      bar: reportEvents.filter((event) => event.source === "barista").reduce((sum, event) => sum + event.total, 0),
+      laundry: reportEvents.filter((event) => event.source === "laundry").reduce((sum, event) => sum + event.total, 0),
       conference: 0,
     };
     const totalRevenue = revenue.rooms + revenue.kitchen + revenue.bar + revenue.laundry + revenue.conference;
 
     const operatingTotals = new Map<string, number>();
-    monthExpenses
+    periodExpenses
       .forEach((expense) => {
         const label = getOperatingExpenseLabel(expense);
         operatingTotals.set(label, (operatingTotals.get(label) ?? 0) + expense.amount);
@@ -601,7 +653,6 @@ export default function AnalyticsPage() {
     const roomsSold = reportBookings.length;
 
     return {
-      month,
       capacity: ROOMS.length,
       roomsSold,
       revenue,
@@ -611,11 +662,11 @@ export default function AnalyticsPage() {
       netProfit,
       netProfitMargin: totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0,
     };
-  }, [availableMonths, bookings, businessEvents, expenses, selectedMonth]);
+  }, [activePeriodKeys, bookings, businessEvents, periodExpenses, range]);
 
   const exportFinancialStatement = () => {
     const rows: Array<[string, string | number]> = [
-      ["CASSA MOTEL FINANCIAL STATEMENT", formatMonthLabel(financialStatement.month)],
+      ["CASSA MOTEL FINANCIAL STATEMENT", activeReportLabel],
       ["Generated", new Date().toLocaleString()],
       ["", ""],
       ["CAPACITY", ""],
@@ -641,7 +692,8 @@ export default function AnalyticsPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `cassa-financial-statement-${financialStatement.month}.csv`;
+    const periodSlug = activeReportLabel.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    link.download = `cassa-financial-statement-${periodSlug || range}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -651,6 +703,10 @@ export default function AnalyticsPage() {
       generatedAt: new Date().toISOString(),
       range,
       selectedMonth,
+      selectedDateRange: {
+        from: selectedDateRange.from ? toDayKey(selectedDateRange.from.getTime()) : null,
+        to: selectedDateRange.to ? toDayKey(selectedDateRange.to.getTime()) : null,
+      },
       activeReportLabel,
       totals,
       history,
@@ -665,7 +721,10 @@ export default function AnalyticsPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `management-report-${range}${range === "monthly" ? `-${selectedMonth}` : ""}.json`;
+    const customSuffix = range === "custom" && selectedDateRange.from
+      ? `-${toDayKey(selectedDateRange.from.getTime())}${selectedDateRange.to ? `-to-${toDayKey(selectedDateRange.to.getTime())}` : ""}`
+      : "";
+    link.download = `management-report-${range}${range === "monthly" ? `-${selectedMonth}` : ""}${customSuffix}.json`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -682,19 +741,70 @@ export default function AnalyticsPage() {
             <p className="text-muted-foreground text-sm uppercase font-bold tracking-wider">Live performance and financial statements from recorded system data</p>
           </div>
         </div>
-        {view === "analytics" && <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2">
           <Tabs value={range} onValueChange={(value) => setRange(value as ReportRange)}>
-            <TabsList className="h-10 flex-wrap">
+            <TabsList className="h-auto min-h-10 flex-wrap justify-start">
               <TabsTrigger value="daily" className="text-[10px] font-black uppercase tracking-widest">Daily</TabsTrigger>
               <TabsTrigger value="weekly" className="text-[10px] font-black uppercase tracking-widest">Weekly</TabsTrigger>
               <TabsTrigger value="monthly" className="text-[10px] font-black uppercase tracking-widest">Monthly</TabsTrigger>
+              <TabsTrigger value="custom" className="text-[10px] font-black uppercase tracking-widest">Custom</TabsTrigger>
               <TabsTrigger value="all-time" className="text-[10px] font-black uppercase tracking-widest">All Time</TabsTrigger>
             </TabsList>
           </Tabs>
-          <Button size="sm" className="bg-primary font-black uppercase tracking-widest text-[10px]" onClick={exportReport}>
-            <Download className="w-4 h-4 mr-2" /> Export Report
+          <Popover
+            open={isDateFilterOpen}
+            onOpenChange={(open) => {
+              setIsDateFilterOpen(open);
+              if (open) setPendingDateRange(selectedDateRange);
+            }}
+          >
+            <PopoverTrigger asChild>
+              <Button
+                variant={range === "custom" ? "default" : "outline"}
+                size="sm"
+                className="max-w-full justify-start font-black uppercase tracking-wide text-[10px]"
+              >
+                <Calendar className="mr-2 h-4 w-4 shrink-0" />
+                <span className="truncate">{range === "custom" ? activeReportLabel : "Filter by date"}</span>
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="end">
+              <DatePickerCalendar
+                mode="range"
+                defaultMonth={pendingDateRange.from}
+                selected={pendingDateRange}
+                onSelect={(nextRange) => {
+                  if (!nextRange?.from) return;
+                  setPendingDateRange(nextRange);
+                }}
+                initialFocus
+              />
+              <div className="border-t px-4 py-3 space-y-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Selected period</p>
+                <p className="text-sm font-bold">{formatSelectedDateRange(pendingDateRange)}</p>
+                <Button
+                  type="button"
+                  className="w-full font-black uppercase tracking-widest text-[10px]"
+                  disabled={!pendingDateRange.from}
+                  onClick={() => {
+                    setSelectedDateRange(pendingDateRange);
+                    setRange("custom");
+                    setIsDateFilterOpen(false);
+                  }}
+                >
+                  Filter Date
+                </Button>
+              </div>
+            </PopoverContent>
+          </Popover>
+          <Button
+            size="sm"
+            className="bg-primary font-black uppercase tracking-widest text-[10px]"
+            onClick={view === "reports" ? exportFinancialStatement : exportReport}
+          >
+            <Download className="w-4 h-4 mr-2" /> {view === "reports" ? "Download CSV" : "Export Report"}
           </Button>
-        </div>}
+        </div>
       </header>
 
       <Tabs value={view} onValueChange={(value) => setView(value as AnalyticsView)}>
@@ -706,15 +816,12 @@ export default function AnalyticsPage() {
 
       {view === "reports" && (
         <div className="space-y-4">
-          <Card className="border-none bg-white shadow-sm">
+          {range === "monthly" && <Card className="border-none bg-white shadow-sm">
             <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
-                <CardTitle className="text-lg font-black uppercase tracking-tight">Financial Statement Month</CardTitle>
+                <CardTitle className="text-lg font-black uppercase tracking-tight">Select Statement Month</CardTitle>
                 <CardDescription>Every available month is derived from saved revenue or expense records.</CardDescription>
               </div>
-              <Button onClick={exportFinancialStatement} className="font-black uppercase tracking-widest text-[10px]">
-                <Download className="mr-2 h-4 w-4" /> Download CSV
-              </Button>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-6">
@@ -724,7 +831,7 @@ export default function AnalyticsPage() {
                     type="button"
                     onClick={() => setSelectedMonth(month)}
                     className={`rounded-lg border p-3 text-left transition-colors ${
-                      financialStatement.month === month ? "border-primary bg-primary/10 text-primary" : "hover:border-primary/40"
+                      selectedMonth === month ? "border-primary bg-primary/10 text-primary" : "hover:border-primary/40"
                     }`}
                   >
                     <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Statement</p>
@@ -733,13 +840,13 @@ export default function AnalyticsPage() {
                 ))}
               </div>
             </CardContent>
-          </Card>
+          </Card>}
 
           <Card className="overflow-hidden border-none bg-white shadow-lg">
             <div className="bg-black px-5 py-6 text-white md:px-8">
               <p className="text-[10px] font-black uppercase tracking-[0.3em] text-primary">Cassa Motel</p>
-              <h2 className="mt-2 text-2xl font-black uppercase tracking-tight">Monthly Financial Statement</h2>
-              <p className="mt-1 text-sm font-bold uppercase text-white/60">{formatMonthLabel(financialStatement.month)} · TSh</p>
+              <h2 className="mt-2 text-2xl font-black uppercase tracking-tight">Financial Statement</h2>
+              <p className="mt-1 text-sm font-bold uppercase text-white/60">{activeReportLabel} - TSh</p>
             </div>
             <CardContent className="p-0">
               <div className="overflow-x-auto">
@@ -766,7 +873,7 @@ export default function AnalyticsPage() {
                 </table>
               </div>
               <p className="border-t bg-muted/30 px-5 py-4 text-[10px] font-bold text-muted-foreground md:px-8">
-                Room, kitchen, bar, laundry, and expense figures are calculated only from records saved for this month. Conference remains zero until a conference revenue module records sales.
+                Room, kitchen, bar, laundry, and expense figures are calculated only from records saved for the selected period. Conference remains zero until a conference revenue module records sales.
               </p>
             </CardContent>
           </Card>
