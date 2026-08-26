@@ -161,12 +161,12 @@ export default function OverviewPage() {
     refreshOverview();
 
     void Promise.all([
-      hydrateStorageKeyFromFirebase("orange-hotel-cashier-state"),
-      hydrateStorageKeyFromFirebase(activeKitchenKey),
-      hydrateStorageKeyFromFirebase(activeBaristaKey),
-      hydrateStorageKeyFromFirebase(STORAGE_LAUNDRY_RECORDS),
-      hydrateStorageKeyFromFirebase(STORAGE_EXPENSES),
-      hydrateStorageKeyFromFirebase("orange-hotel-rooms-state"),
+      hydrateStorageKeyFromFirebase("orange-hotel-cashier-state", true),
+      hydrateStorageKeyFromFirebase(activeKitchenKey, true),
+      hydrateStorageKeyFromFirebase(activeBaristaKey, true),
+      hydrateStorageKeyFromFirebase(STORAGE_LAUNDRY_RECORDS, true),
+      hydrateStorageKeyFromFirebase(STORAGE_EXPENSES, true),
+      hydrateStorageKeyFromFirebase("orange-hotel-rooms-state", true),
     ]).finally(refreshOverview);
 
     const unsubscribeCashier = subscribeToSyncedStorageKey("orange-hotel-cashier-state", refreshOverview);

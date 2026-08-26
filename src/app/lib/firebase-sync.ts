@@ -23,7 +23,8 @@ const DIRECT_FIREBASE_WRITE_TIMEOUT_MS = 15000;
 const SERVER_SYNC_FALLBACK_ENABLED = process.env.NEXT_PUBLIC_ENABLE_SERVER_SYNC_FALLBACK === "true";
 const SERVER_SYNC_ETAG_PREFIX = "orange-hotel-server-sync-etag";
 const PENDING_SYNC_MARKER_PREFIX = "orange-hotel-pending-sync";
-const HYDRATION_DEDUP_WINDOW_MS = 30000;
+const PENDING_SYNC_MAX_AGE_MS = 60000;
+const HYDRATION_DEDUP_WINDOW_MS = 2000;
 const _hydrationInFlight = new Map<string, Promise<void>>();
 const _lastHydratedAt: Record<string, number> = {};
 const _serverReadsInFlight = new Map<string, Promise<unknown | null>>();
@@ -35,7 +36,16 @@ function getPendingSyncMarkerKey(key: string) {
 }
 
 function hasPendingSyncMarker(key: string) {
-  return typeof window !== "undefined" && window.localStorage.getItem(getPendingSyncMarkerKey(key)) !== null;
+  if (typeof window === "undefined") return false;
+  const markerKey = getPendingSyncMarkerKey(key);
+  const raw = window.localStorage.getItem(markerKey);
+  if (!raw) return false;
+  const markerTime = Number(raw);
+  if (!Number.isFinite(markerTime) || Date.now() - markerTime > PENDING_SYNC_MAX_AGE_MS) {
+    window.localStorage.removeItem(markerKey);
+    return false;
+  }
+  return true;
 }
 
 function markPendingSync(key: string) {
@@ -538,10 +548,16 @@ function areSnapshotsEqual(a: unknown, b: unknown) {
 
 function shouldIgnoreRemoteValue(key: string, remoteValue: unknown) {
   const pending = _pendingLocalWrites[key];
-  if (!pending) return hasPendingSyncMarker(key) && getLocalSyncedValue(key) !== null;
+  if (!pending) {
+    if (typeof window !== "undefined" && !hasPendingSyncMarker(key)) {
+      clearPendingSync(key);
+    }
+    return false;
+  }
 
   if (areSnapshotsEqual(remoteValue, pending.value)) {
     delete _pendingLocalWrites[key];
+    clearPendingSync(key);
     return false;
   }
 
@@ -670,7 +686,7 @@ function chooseRecordBySettlementPriority(currentRecord: unknown, incomingRecord
     return incomingRevision > currentRevision ? incomingRecord : currentRecord;
   }
 
-  return incomingPriority >= currentPriority ? incomingRecord : currentRecord;
+  return incomingPriority > currentPriority ? incomingRecord : currentRecord;
 }
 
 function mergeRecordsById(localRecords: unknown[], remoteRecords: unknown[]) {

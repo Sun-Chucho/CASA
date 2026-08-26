@@ -104,7 +104,7 @@ export default function LaundryPage() {
     };
 
     refreshLaundry();
-    void hydrateStorageKeyFromFirebase(STORAGE_LAUNDRY_RECORDS).finally(refreshLaundry);
+    void hydrateStorageKeyFromFirebase(STORAGE_LAUNDRY_RECORDS, true).finally(refreshLaundry);
     return subscribeToSyncedStorageKey(STORAGE_LAUNDRY_RECORDS, refreshLaundry);
   }, []);
 

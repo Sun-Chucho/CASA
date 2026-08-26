@@ -296,16 +296,16 @@ export default function AnalyticsPage() {
     applyAnalyticsSnapshot();
 
     void Promise.all([
-      hydrateStorageKeyFromFirebase("orange-hotel-cashier-state"),
-      hydrateStorageKeyFromFirebase(activeKitchenKey),
-      hydrateStorageKeyFromFirebase(activeBaristaKey),
-      hydrateStorageKeyFromFirebase(STORAGE_BEVERAGE_COST),
-      hydrateStorageKeyFromFirebase(STORAGE_RECIPE_COST),
-      hydrateStorageKeyFromFirebase(STORAGE_STOCK_SALES),
-      hydrateStorageKeyFromFirebase(STORAGE_LAUNDRY_RECORDS),
-      hydrateStorageKeyFromFirebase(STORAGE_EXPENSES),
+      hydrateStorageKeyFromFirebase("orange-hotel-cashier-state", true),
+      hydrateStorageKeyFromFirebase(activeKitchenKey, true),
+      hydrateStorageKeyFromFirebase(activeBaristaKey, true),
+      hydrateStorageKeyFromFirebase(STORAGE_BEVERAGE_COST, true),
+      hydrateStorageKeyFromFirebase(STORAGE_RECIPE_COST, true),
+      hydrateStorageKeyFromFirebase(STORAGE_STOCK_SALES, true),
+      hydrateStorageKeyFromFirebase(STORAGE_LAUNDRY_RECORDS, true),
+      hydrateStorageKeyFromFirebase(STORAGE_EXPENSES, true),
     ])
-      .then(() => hydrateStorageKeyFromFirebase("orange-hotel-kitchen-payments"))
+      .then(() => hydrateStorageKeyFromFirebase("orange-hotel-kitchen-payments", true))
       .finally(applyAnalyticsSnapshot);
 
     const unsubscribers = [

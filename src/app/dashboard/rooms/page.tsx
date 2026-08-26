@@ -21,7 +21,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useIsDirector } from "@/hooks/use-is-director";
 import { useConfirmDialog } from "@/hooks/use-confirm-dialog";
 import { isBookingStillActive, readRoomsState, syncRoomsStateFromBookings, updateRoomStatusById } from "@/app/lib/rooms-storage";
-import { subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
+import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
 import { readCashierState, STORAGE_CASHIER_STATE, writeCashierState } from "@/app/lib/storage";
 import { toast } from "@/hooks/use-toast";
 
@@ -64,6 +64,11 @@ export default function RoomsPage() {
     };
 
     applyRoomSnapshot();
+
+    void Promise.all([
+      hydrateStorageKeyFromFirebase("orange-hotel-rooms-state", true),
+      hydrateStorageKeyFromFirebase(STORAGE_CASHIER_STATE, true),
+    ]).finally(applyRoomSnapshot);
 
     const unsubscribeRooms = subscribeToSyncedStorageKey<Room[]>("orange-hotel-rooms-state", (value) => {
       applyRoomSnapshot(Array.isArray(value) && value.length > 0 ? value : readRoomsState());

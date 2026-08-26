@@ -68,7 +68,7 @@ export default function ExpensesPage() {
     };
 
     refreshExpenses();
-    void hydrateStorageKeyFromFirebase(STORAGE_EXPENSES).finally(refreshExpenses);
+    void hydrateStorageKeyFromFirebase(STORAGE_EXPENSES, true).finally(refreshExpenses);
     return subscribeToSyncedStorageKey(STORAGE_EXPENSES, refreshExpenses);
   }, []);
 

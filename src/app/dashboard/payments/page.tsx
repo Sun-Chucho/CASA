@@ -269,9 +269,6 @@ export default function PaymentsPage() {
       });
 
       setBookingTransactions(correctedBookingTransactions);
-      if (JSON.stringify(cashierSnapshot.transactions) !== JSON.stringify(correctedBookingTransactions)) {
-        writeCashierState(correctedBookingTransactions, cashierSnapshot.receiptSeq);
-      }
       setKitchenPayments(kitchenSnapshot.payments.map((tx) => ({ ...tx, status: tx.status === "credit" ? "credit" : "completed" })));
       setBaristaPayments(baristaSnapshot.payments.map((tx) => ({ ...tx, status: tx.status === "credit" ? "credit" : "completed" })));
     };
@@ -279,9 +276,9 @@ export default function PaymentsPage() {
     refreshPayments();
 
     void Promise.all([
-      hydrateStorageKeyFromFirebase("orange-hotel-cashier-state"),
-      hydrateStorageKeyFromFirebase(activeKitchenKey),
-      hydrateStorageKeyFromFirebase(activeBaristaKey),
+      hydrateStorageKeyFromFirebase("orange-hotel-cashier-state", true),
+      hydrateStorageKeyFromFirebase(activeKitchenKey, true),
+      hydrateStorageKeyFromFirebase(activeBaristaKey, true),
     ]).finally(refreshPayments);
 
     const unsubscribeCashier = subscribeToSyncedStorageKey("orange-hotel-cashier-state", refreshPayments);

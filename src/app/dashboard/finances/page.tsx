@@ -33,7 +33,8 @@ function asNumber(value: unknown) {
 function getDayKey(value: unknown) {
   const date = new Date(asNumber(value));
   if (!Number.isFinite(date.getTime())) return "";
-  return date.toISOString().slice(0, 10);
+  const offsetMs = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 10);
 }
 
 function matchesSelectedDate(createdAt: unknown, selectedDate: string) {
@@ -66,11 +67,11 @@ export default function FinancesPage() {
 
     refreshFinances();
     void Promise.all([
-      hydrateStorageKeyFromFirebase("orange-hotel-cashier-state"),
-      hydrateStorageKeyFromFirebase(activeKitchenKey),
-      hydrateStorageKeyFromFirebase(activeBaristaKey),
-      hydrateStorageKeyFromFirebase(STORAGE_LAUNDRY_RECORDS),
-      hydrateStorageKeyFromFirebase(STORAGE_EXPENSES),
+      hydrateStorageKeyFromFirebase("orange-hotel-cashier-state", true),
+      hydrateStorageKeyFromFirebase(activeKitchenKey, true),
+      hydrateStorageKeyFromFirebase(activeBaristaKey, true),
+      hydrateStorageKeyFromFirebase(STORAGE_LAUNDRY_RECORDS, true),
+      hydrateStorageKeyFromFirebase(STORAGE_EXPENSES, true),
     ]).finally(refreshFinances);
     const unsubscribers = [
       subscribeToSyncedStorageKey("orange-hotel-cashier-state", refreshFinances),
