@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { SidebarNav } from "@/components/layout/sidebar-nav";
 import { BARISTA_INVENTORY_SEED } from "@/app/lib/seed-barista-data";
-import { DEFAULT_KITCHEN_MENU, mergeKitchenMenuItems } from "@/app/lib/kitchen-menu";
+import { DEFAULT_KITCHEN_MENU } from "@/app/lib/kitchen-menu";
 import { InventoryItem, Role } from "@/app/lib/mock-data";
 import { ExpenseRecord, STORAGE_EXPENSES } from "@/app/lib/expenses";
 import { KitchenPurchaseHistoryEntry, STORAGE_KITCHEN_PURCHASE_HISTORY } from "@/app/lib/kitchen-session-storage";
@@ -31,7 +31,6 @@ const DIRECTOR_MOBILE_NAV = [
   { label: "Payments", href: "/dashboard/payments", icon: WalletCards },
   { label: "Expenses", href: "/dashboard/expenses", icon: ReceiptText },
 ] as const;
-const KITCHEN_TRANSACTIONS_RESET_KEY = "orange-hotel-kitchen-transactions-reset-v3";
 const KITCHEN_MENU_PRICE_FIX_KEY = "orange-hotel-kitchen-menu-price-fix-v2";
 const DOMPO_STOCK_FIX_KEY = "orange-hotel-dompo-750ml-stock-fix-v1";
 const BARISTA_STOCK_FIX_KEY = "orange-hotel-barista-stock-fix-v5";
@@ -87,7 +86,6 @@ async function hydrateStartupStateForRole(role: Role) {
 const KALUSE_KIANGI_BOOKING_FIX_KEY = "orange-hotel-kaluse-kiangi-booking-fix-v2";
 const LOCAL_BUSINESS_CORRECTION_KEYS = [
   KALUSE_KIANGI_BOOKING_FIX_KEY,
-  KITCHEN_TRANSACTIONS_RESET_KEY,
   KITCHEN_MENU_PRICE_FIX_KEY,
   DOMPO_STOCK_FIX_KEY,
   BARISTA_STOCK_FIX_KEY,
@@ -527,22 +525,6 @@ function applyBusinessCorrections() {
     }
 
     localStorage.setItem(KALUSE_KIANGI_BOOKING_FIX_KEY, "1");
-  }
-
-  if (!localStorage.getItem(KITCHEN_TRANSACTIONS_RESET_KEY)) {
-    const kitchenSnapshot = readPosState<unknown, unknown, unknown>(
-      STORAGE_KITCHEN_STATE,
-      "orange-hotel-kitchen-tickets",
-      "orange-hotel-kitchen-seq",
-      "orange-hotel-kitchen-payments",
-      "orange-hotel-kitchen-menu",
-      300,
-    );
-    const cleanedKitchenMenu = mergeKitchenMenuItems(kitchenSnapshot.menuItems as Parameters<typeof mergeKitchenMenuItems>[0], {
-      stripDefaultMenu: true,
-    });
-    writePosState(STORAGE_KITCHEN_STATE, [], kitchenSnapshot.ticketSeq, [], cleanedKitchenMenu);
-    localStorage.setItem(KITCHEN_TRANSACTIONS_RESET_KEY, "1");
   }
 
   if (!localStorage.getItem(KITCHEN_MENU_PRICE_FIX_KEY)) {

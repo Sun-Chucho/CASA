@@ -876,6 +876,13 @@ function protectSyncedValueBeforeWrite(key: string, localValue: unknown, remoteV
   return localValue;
 }
 
+async function reconcileStorageValueInFirebase(key: string, preferredValue: unknown) {
+  const transaction = await runTransaction(ref(firebaseDatabase, toStoragePath(key)), (currentValue) =>
+    sanitizeForStorage(sanitizeSyncedValue(key, protectSyncedValueBeforeWrite(key, preferredValue, currentValue))),
+  );
+  return sanitizeForStorage(sanitizeSyncedValue(key, transaction.snapshot.val()));
+}
+
 function getCanonicalDefaultValue(key: string) {
   switch (key) {
     case "orange-hotel-cashier-state":
@@ -1187,11 +1194,12 @@ async function hydrateStorageKeyFromFirebaseInternal(key: string) {
     if (sanitizedPreferredValue === null) return;
 
     if (!areSnapshotsEqual(remoteValue, sanitizedPreferredValue)) {
-      await withTimeout(
-        set(ref(firebaseDatabase, toStoragePath(key)), sanitizedPreferredValue),
+      const committedValue = await withTimeout(
+        reconcileStorageValueInFirebase(key, sanitizedPreferredValue),
         DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
         `Firebase reconciliation timed out while hydrating ${key}`,
       );
+      applyHydratedValue(committedValue);
     }
 
     clearPendingSync(key);
@@ -1356,7 +1364,7 @@ export function subscribeToSyncedStorageKey<T>(key: string, onChange: (value: T 
             if (fallbackValue !== null) {
               setLocalCache(key, JSON.stringify(fallbackValue));
               mirrorCanonicalStateToLegacyLocal(key, fallbackValue);
-              void set(ref(firebaseDatabase, toStoragePath(key)), fallbackValue).catch(() => undefined);
+              void reconcileStorageValueInFirebase(key, fallbackValue).catch(() => undefined);
               dispatchStorageUpdated(key);
               onChange(fallbackValue);
               markSyncHealthy(key);
@@ -1374,7 +1382,7 @@ export function subscribeToSyncedStorageKey<T>(key: string, onChange: (value: T 
           mirrorCanonicalStateToLegacyLocal(key, mergedValue);
           readSnapshotValue<T>(key, mergedValue as T, onChange);
           if (!areSnapshotsEqual(nextValue, mergedValue)) {
-            void set(ref(firebaseDatabase, toStoragePath(key)), mergedValue).catch(() => undefined);
+            void reconcileStorageValueInFirebase(key, mergedValue).catch(() => undefined);
           }
           markSyncHealthy(key);
           stopFallbackPolling();
