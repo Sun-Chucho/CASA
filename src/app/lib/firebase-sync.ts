@@ -23,7 +23,6 @@ const DIRECT_FIREBASE_WRITE_TIMEOUT_MS = 15000;
 const SERVER_SYNC_FALLBACK_ENABLED = process.env.NEXT_PUBLIC_ENABLE_SERVER_SYNC_FALLBACK === "true";
 const SERVER_SYNC_ETAG_PREFIX = "orange-hotel-server-sync-etag";
 const PENDING_SYNC_MARKER_PREFIX = "orange-hotel-pending-sync";
-const PENDING_SYNC_MAX_AGE_MS = 60000;
 const HYDRATION_DEDUP_WINDOW_MS = 2000;
 const _hydrationInFlight = new Map<string, Promise<void>>();
 const _lastHydratedAt: Record<string, number> = {};
@@ -37,15 +36,11 @@ function getPendingSyncMarkerKey(key: string) {
 
 function hasPendingSyncMarker(key: string) {
   if (typeof window === "undefined") return false;
-  const markerKey = getPendingSyncMarkerKey(key);
-  const raw = window.localStorage.getItem(markerKey);
-  if (!raw) return false;
-  const markerTime = Number(raw);
-  if (!Number.isFinite(markerTime) || Date.now() - markerTime > PENDING_SYNC_MAX_AGE_MS) {
-    window.localStorage.removeItem(markerKey);
-    return false;
-  }
-  return true;
+  // The complete pending snapshot already lives in the canonical local cache.
+  // Keep this marker across reloads until a backend write is acknowledged;
+  // expiring it after one minute allowed a delayed reconnect to replace an
+  // unsent menu edit with the older Firebase value.
+  return window.localStorage.getItem(getPendingSyncMarkerKey(key)) !== null;
 }
 
 function markPendingSync(key: string) {

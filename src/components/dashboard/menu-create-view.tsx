@@ -2,7 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { readJson, readPosState, STORAGE_BARISTA_STATE, STORAGE_KITCHEN_STATE, writeJson, writePosState } from "@/app/lib/storage";
-import { subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
+import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
+import { updateBaristaCatalog } from "@/app/lib/barista-menu-sync";
+import {
+  type MainStoreItem,
+  STORAGE_INVENTORY_ITEMS,
+  STORAGE_MAIN_STORE_ITEMS,
+} from "@/app/lib/inventory-transfer";
+import type { InventoryItem } from "@/app/lib/mock-data";
 import {
   KITCHEN_CATEGORY_LABELS,
   KITCHEN_CATEGORY_OPTIONS,
@@ -20,6 +27,7 @@ import { useConfirmDialog } from "@/hooks/use-confirm-dialog";
 import { readStoredRole } from "@/app/lib/auth";
 import { readActiveSessionUsername } from "@/app/lib/login-profiles";
 import { Role } from "@/app/lib/mock-data";
+import { useToast } from "@/hooks/use-toast";
 
 type BaristaCategory = "espresso" | "coffee" | "tea" | "cold" | "snacks";
 
@@ -29,6 +37,9 @@ interface BaristaMenuItem {
   price: number;
   category: BaristaCategory;
   prepMinutes: number;
+  createdAt?: number;
+  updatedAt?: number;
+  deletedAt?: number;
 }
 
 interface QueueTicket {
@@ -67,6 +78,12 @@ const BARISTA_LEGACY = {
 
 const STORAGE_MENU_AUDIT = "orange-hotel-menu-audit-trail";
 
+async function allWritesSynced(writes: Array<Promise<boolean> | void>) {
+  const pendingWrites = writes.filter((write): write is Promise<boolean> => Boolean(write));
+  const results = await Promise.all(pendingWrites);
+  return results.every(Boolean);
+}
+
 function formatAuditDate(value: number) {
   return new Intl.DateTimeFormat("en-GB", {
     day: "2-digit",
@@ -80,6 +97,7 @@ function formatAuditDate(value: number) {
 export function MenuCreateView() {
   const isDirector = useIsDirector();
   const { confirm, dialog } = useConfirmDialog();
+  const { toast } = useToast();
   const [tab, setTab] = useState<"kitchen" | "barista">("kitchen");
   const [sessionRole, setSessionRole] = useState<Role | null>(null);
   const [changedBy, setChangedBy] = useState("manager");
@@ -104,50 +122,75 @@ export function MenuCreateView() {
   const [auditTrail, setAuditTrail] = useState<MenuAuditEntry[]>([]);
 
   useEffect(() => {
+    let cancelled = false;
     const currentRole = readStoredRole();
     setSessionRole(currentRole);
     setChangedBy(readActiveSessionUsername(currentRole ?? "manager") || currentRole || "manager");
 
-    const kitchenSnapshot = readPosState<QueueTicket, PaymentRecord, KitchenMenuItem>(
-      STORAGE_KITCHEN_STATE,
-      KITCHEN_LEGACY.tickets,
-      KITCHEN_LEGACY.seq,
-      KITCHEN_LEGACY.payments,
-      KITCHEN_LEGACY.menu,
-      KITCHEN_LEGACY.defaultSeq,
-    );
-    const nextKitchenMenuItems = mergeKitchenMenuItems(kitchenSnapshot.menuItems);
-    setKitchenMenuItems(nextKitchenMenuItems);
-    if (JSON.stringify(nextKitchenMenuItems) !== JSON.stringify(kitchenSnapshot.menuItems)) {
-      writePosState(
+    const applyMenuSnapshots = (persistKitchenNormalization = true) => {
+      if (cancelled) return;
+      const kitchenSnapshot = readPosState<QueueTicket, PaymentRecord, KitchenMenuItem>(
         STORAGE_KITCHEN_STATE,
-        kitchenSnapshot.tickets,
-        kitchenSnapshot.ticketSeq,
-        kitchenSnapshot.payments,
-        nextKitchenMenuItems,
+        KITCHEN_LEGACY.tickets,
+        KITCHEN_LEGACY.seq,
+        KITCHEN_LEGACY.payments,
+        KITCHEN_LEGACY.menu,
+        KITCHEN_LEGACY.defaultSeq,
       );
-    }
+      const nextKitchenMenuItems = mergeKitchenMenuItems(kitchenSnapshot.menuItems);
+      setKitchenMenuItems(nextKitchenMenuItems);
+      if (
+        persistKitchenNormalization &&
+        JSON.stringify(nextKitchenMenuItems) !== JSON.stringify(kitchenSnapshot.menuItems)
+      ) {
+        void writePosState(
+          STORAGE_KITCHEN_STATE,
+          kitchenSnapshot.tickets,
+          kitchenSnapshot.ticketSeq,
+          kitchenSnapshot.payments,
+          nextKitchenMenuItems,
+        );
+      }
 
-    const baristaSnapshot = readPosState<QueueTicket, PaymentRecord, BaristaMenuItem>(
-      STORAGE_BARISTA_STATE,
-      BARISTA_LEGACY.tickets,
-      BARISTA_LEGACY.seq,
-      BARISTA_LEGACY.payments,
-      BARISTA_LEGACY.menu,
-      BARISTA_LEGACY.defaultSeq,
-    );
-    setBaristaMenuItems(baristaSnapshot.menuItems);
+      const baristaSnapshot = readPosState<QueueTicket, PaymentRecord, BaristaMenuItem>(
+        STORAGE_BARISTA_STATE,
+        BARISTA_LEGACY.tickets,
+        BARISTA_LEGACY.seq,
+        BARISTA_LEGACY.payments,
+        BARISTA_LEGACY.menu,
+        BARISTA_LEGACY.defaultSeq,
+      );
+      setBaristaMenuItems(baristaSnapshot.menuItems.filter((item) => !item.deletedAt));
+    };
+
+    applyMenuSnapshots(false);
     setAuditTrail(readJson<MenuAuditEntry[]>(STORAGE_MENU_AUDIT) ?? []);
 
-    return subscribeToSyncedStorageKey<MenuAuditEntry[]>(STORAGE_MENU_AUDIT, (value) => {
+    void Promise.all([
+      hydrateStorageKeyFromFirebase(STORAGE_KITCHEN_STATE, true),
+      hydrateStorageKeyFromFirebase(STORAGE_BARISTA_STATE, true),
+    ]).finally(() => applyMenuSnapshots());
+
+    const unsubscribeKitchen = subscribeToSyncedStorageKey(STORAGE_KITCHEN_STATE, () => applyMenuSnapshots());
+    const unsubscribeBarista = subscribeToSyncedStorageKey(STORAGE_BARISTA_STATE, () => applyMenuSnapshots());
+    const unsubscribeAudit = subscribeToSyncedStorageKey<MenuAuditEntry[]>(STORAGE_MENU_AUDIT, (value) => {
       setAuditTrail(Array.isArray(value) ? value : readJson<MenuAuditEntry[]>(STORAGE_MENU_AUDIT) ?? []);
     });
+
+    return () => {
+      cancelled = true;
+      unsubscribeKitchen();
+      unsubscribeBarista();
+      unsubscribeAudit();
+    };
   }, []);
 
   const saveAuditEntry = (entry: MenuAuditEntry) => {
-    const nextAuditTrail = [entry, ...auditTrail].slice(0, 100);
-    setAuditTrail(nextAuditTrail);
-    writeJson(STORAGE_MENU_AUDIT, nextAuditTrail);
+    setAuditTrail((current) => {
+      const nextAuditTrail = [entry, ...current.filter((item) => item.id !== entry.id)].slice(0, 100);
+      void writeJson(STORAGE_MENU_AUDIT, nextAuditTrail);
+      return nextAuditTrail;
+    });
   };
 
   const persistKitchenMenu = (nextMenuItems: KitchenMenuItem[]) => {
@@ -159,7 +202,7 @@ export function MenuCreateView() {
       KITCHEN_LEGACY.menu,
       KITCHEN_LEGACY.defaultSeq,
     );
-    writePosState(
+    return writePosState(
       STORAGE_KITCHEN_STATE,
       latestSnapshot.tickets,
       latestSnapshot.ticketSeq,
@@ -177,13 +220,23 @@ export function MenuCreateView() {
       BARISTA_LEGACY.menu,
       BARISTA_LEGACY.defaultSeq,
     );
-    writePosState(
+    return writePosState(
       STORAGE_BARISTA_STATE,
       latestSnapshot.tickets,
       latestSnapshot.ticketSeq,
       latestSnapshot.payments,
       nextMenuItems,
     );
+  };
+
+  const showMenuSyncResult = (synced: boolean, itemName: string, action: "created" | "updated") => {
+    toast({
+      title: synced ? `Menu item ${action}` : "Saved locally - sync pending",
+      description: synced
+        ? `${itemName} is now available to the live POS screens.`
+        : `${itemName} will be sent to the POS screens automatically when the connection recovers.`,
+      variant: synced ? "default" : "destructive",
+    });
   };
 
   const addKitchenMenuItem = async () => {
@@ -198,18 +251,22 @@ export function MenuCreateView() {
     });
     if (!approved) return;
 
+    const updatedAt = Date.now();
     const nextMenuItems = [
       {
-        id: `km-${Date.now()}`,
+        id: `km-${updatedAt}`,
         name: kitchenName.trim(),
         price,
         prepMinutes,
         category: kitchenCategory,
+        createdAt: updatedAt,
+        updatedAt,
       },
       ...kitchenMenuItems,
     ];
     setKitchenMenuItems(nextMenuItems);
-    persistKitchenMenu(nextMenuItems);
+    const synced = await allWritesSynced([persistKitchenMenu(nextMenuItems)]);
+    showMenuSyncResult(synced, kitchenName.trim(), "created");
     setKitchenName("");
     setKitchenPrice("");
     setKitchenPrepMinutes("15");
@@ -250,21 +307,23 @@ export function MenuCreateView() {
     });
     if (!approved) return;
 
+    const updatedAt = Date.now();
     const nextMenuItems = kitchenMenuItems.map((entry) =>
-      entry.id === item.id ? { ...entry, name: nextName, price: nextPrice } : entry,
+      entry.id === item.id ? { ...entry, name: nextName, price: nextPrice, updatedAt } : entry,
     );
     setKitchenMenuItems(nextMenuItems);
-    persistKitchenMenu(nextMenuItems);
+    const synced = await allWritesSynced([persistKitchenMenu(nextMenuItems)]);
     saveAuditEntry({
-      id: `audit-${Date.now()}`,
+      id: `audit-${updatedAt}`,
       menu: "kitchen",
       itemId: item.id,
       itemName: nextName,
-      changedAt: Date.now(),
+      changedAt: updatedAt,
       changedBy,
       changes,
     });
     cancelKitchenEdit();
+    showMenuSyncResult(synced, nextName, "updated");
   };
 
   const addBaristaMenuItem = async () => {
@@ -279,18 +338,34 @@ export function MenuCreateView() {
     });
     if (!approved) return;
 
+    const updatedAt = Date.now();
+    const latestSnapshot = readPosState<QueueTicket, PaymentRecord, BaristaMenuItem>(
+      STORAGE_BARISTA_STATE,
+      BARISTA_LEGACY.tickets,
+      BARISTA_LEGACY.seq,
+      BARISTA_LEGACY.payments,
+      BARISTA_LEGACY.menu,
+      BARISTA_LEGACY.defaultSeq,
+    );
+    const activeMenuItems = latestSnapshot.menuItems.length > 0
+      ? latestSnapshot.menuItems.filter((item) => !item.deletedAt)
+      : baristaMenuItems;
+    const deletedMenuItems = latestSnapshot.menuItems.filter((item) => item.deletedAt);
     const nextMenuItems = [
       {
-        id: `bm-${Date.now()}`,
+        id: `bm-${updatedAt}`,
         name: baristaName.trim(),
         price,
         prepMinutes,
         category: baristaCategory,
+        createdAt: updatedAt,
+        updatedAt,
       },
-      ...baristaMenuItems,
+      ...activeMenuItems,
     ];
     setBaristaMenuItems(nextMenuItems);
-    persistBaristaMenu(nextMenuItems);
+    const synced = await allWritesSynced([persistBaristaMenu([...nextMenuItems, ...deletedMenuItems])]);
+    showMenuSyncResult(synced, baristaName.trim(), "created");
     setBaristaName("");
     setBaristaPrice("");
     setBaristaPrepMinutes("10");
@@ -331,21 +406,47 @@ export function MenuCreateView() {
     });
     if (!approved) return;
 
-    const nextMenuItems = baristaMenuItems.map((entry) =>
-      entry.id === item.id ? { ...entry, name: nextName, price: nextPrice } : entry,
+    const updatedAt = Date.now();
+    const latestSnapshot = readPosState<QueueTicket, PaymentRecord, BaristaMenuItem>(
+      STORAGE_BARISTA_STATE,
+      BARISTA_LEGACY.tickets,
+      BARISTA_LEGACY.seq,
+      BARISTA_LEGACY.payments,
+      BARISTA_LEGACY.menu,
+      BARISTA_LEGACY.defaultSeq,
     );
-    setBaristaMenuItems(nextMenuItems);
-    persistBaristaMenu(nextMenuItems);
+    const storedMenuItems = latestSnapshot.menuItems.some((entry) => entry.id === item.id)
+      ? latestSnapshot.menuItems
+      : baristaMenuItems;
+    const storeItems = readJson<MainStoreItem[]>(STORAGE_MAIN_STORE_ITEMS) ?? [];
+    const inventoryItems = readJson<InventoryItem[]>(STORAGE_INVENTORY_ITEMS) ?? [];
+    const catalogUpdate = updateBaristaCatalog({
+      menuItems: storedMenuItems,
+      storeItems,
+      inventoryItems,
+      menuItemId: item.id,
+      previousName: item.name,
+      nextName,
+      sellingPrice: nextPrice,
+      updatedAt,
+    });
+    setBaristaMenuItems(catalogUpdate.menuItems.filter((entry) => !entry.deletedAt));
+    const synced = await allWritesSynced([
+      persistBaristaMenu(catalogUpdate.menuItems),
+      catalogUpdate.storeChanged ? writeJson(STORAGE_MAIN_STORE_ITEMS, catalogUpdate.storeItems) : undefined,
+      catalogUpdate.inventoryChanged ? writeJson(STORAGE_INVENTORY_ITEMS, catalogUpdate.inventoryItems) : undefined,
+    ]);
     saveAuditEntry({
-      id: `audit-${Date.now()}`,
+      id: `audit-${updatedAt}`,
       menu: "barista",
       itemId: item.id,
       itemName: nextName,
-      changedAt: Date.now(),
+      changedAt: updatedAt,
       changedBy,
       changes,
     });
     cancelBaristaEdit();
+    showMenuSyncResult(synced, nextName, "updated");
   };
 
   const visibleAuditTrail = auditTrail.filter((entry) => entry.menu === tab);

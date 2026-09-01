@@ -33,6 +33,7 @@ import { KitchenSessionManager } from "@/components/dashboard/kitchen-session-ma
 import { CheckCircle2, Coffee, Lock, Minus, Pencil, Plus, Receipt, Search, Trash2, User, XCircle } from "lucide-react";
 import { useConfirmDialog } from "@/hooks/use-confirm-dialog";
 import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
+import { reconcileCartWithMenu } from "@/app/lib/pos-menu";
 import { DEFAULT_LOGIN_PASSWORD, getProfilePassword, readActiveSessionUsername, readLocalLoginProfiles, saveLoginProfileToServer, STORAGE_LOGIN_PROFILES, subscribeToSessionIdentity, upsertProfileUser } from "@/app/lib/login-profiles";
 
 type BaristaCategory =
@@ -723,6 +724,10 @@ export default function BaristaPage() {
     [baristaStoreItems, storedMenuItems],
   );
 
+  useEffect(() => {
+    setCart((current) => reconcileCartWithMenu(current, menuItems));
+  }, [menuItems]);
+
   const pastSaleItems = useMemo(() => {
     const normalizedSearch = normalizeStockName(pastSaleSearch);
     const searchTokens = normalizedSearch.split(" ").filter(Boolean);
@@ -1163,7 +1168,11 @@ export default function BaristaPage() {
     });
 
     try {
-      await Promise.all(writes);
+      const results = await Promise.all(writes);
+      if (results.some((result) => result === false)) {
+        window.alert("The values were saved on this device and are queued for POS synchronization when the connection recovers.");
+        return;
+      }
       setSavedBaristaItemId(item.id);
       window.setTimeout(() => {
         setSavedBaristaItemId((current) => (current === item.id ? "" : current));

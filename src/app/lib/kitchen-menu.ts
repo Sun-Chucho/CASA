@@ -19,6 +19,8 @@ export interface KitchenMenuItem {
   price: number;
   category: KitchenMenuCategory;
   prepMinutes: number;
+  createdAt?: number;
+  updatedAt?: number;
 }
 
 export const KITCHEN_CATEGORY_OPTIONS: Array<{ value: KitchenMenuCategory; label: string }> = [
@@ -201,6 +203,11 @@ function getApprovedKitchenMenuItem(item: KitchenMenuItem) {
   return aliasId ? DEFAULT_KITCHEN_MENU_BY_ID.get(aliasId) : undefined;
 }
 
+function getKitchenMenuRevision(item: KitchenMenuItem) {
+  const revision = Number(item.updatedAt ?? item.createdAt ?? 0);
+  return Number.isFinite(revision) ? revision : 0;
+}
+
 export function isDefaultKitchenMenuItem(item: KitchenMenuItem): boolean {
   return DEFAULT_KITCHEN_MENU_SIGNATURES.get(item.id) === buildKitchenMenuSignature(item);
 }
@@ -220,12 +227,22 @@ export function mergeKitchenMenuItems(
 
     const approvedItem = getApprovedKitchenMenuItem(item);
     if (stripDefaultMenu && approvedItem) continue;
-    merged.set(approvedItem?.id ?? item.id, approvedItem ?? item);
+
+    // Historical menu aliases are canonicalized to the stable default ID, but
+    // the persisted values remain authoritative. Replacing the whole record
+    // here used to erase every manager name/price edit to a built-in dish.
+    const normalizedItem = approvedItem && approvedItem.id !== item.id
+      ? { ...item, id: approvedItem.id }
+      : item;
+    const existingItem = merged.get(normalizedItem.id);
+    if (!existingItem || getKitchenMenuRevision(normalizedItem) > getKitchenMenuRevision(existingItem)) {
+      merged.set(normalizedItem.id, normalizedItem);
+    }
   }
 
   if (includeDefaultMenu) {
     for (const item of DEFAULT_KITCHEN_MENU) {
-      merged.set(item.id, item);
+      if (!merged.has(item.id)) merged.set(item.id, item);
     }
   }
 

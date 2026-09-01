@@ -26,7 +26,8 @@ import {
   STORAGE_KITCHEN_DAILY_STOCK_HISTORY,
   STORAGE_KITCHEN_PURCHASE_HISTORY,
 } from "@/app/lib/kitchen-session-storage";
-import { readJson, readPosState, STORAGE_BARISTA_STATE, STORAGE_KITCHEN_STATE, writeJson } from "@/app/lib/storage";
+import { readJson, readPosState, STORAGE_BARISTA_STATE, STORAGE_KITCHEN_STATE, writeJson, writePosState } from "@/app/lib/storage";
+import { updateBaristaCatalog, type SyncedBaristaMenuItem } from "@/app/lib/barista-menu-sync";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -67,7 +68,13 @@ interface PosPaymentRecord {
 
 interface PosStateSnapshot {
   payments?: PosPaymentRecord[];
-  menuItems?: Array<{ name: string; price: number }>;
+  menuItems?: Array<SyncedBaristaMenuItem>;
+}
+
+async function allWritesSynced(writes: Array<Promise<boolean> | void>) {
+  const pendingWrites = writes.filter((write): write is Promise<boolean> => Boolean(write));
+  const results = await Promise.all(pendingWrites);
+  return results.every(Boolean);
 }
 
 const KITCHEN_CATEGORY_OPTIONS = [
@@ -689,7 +696,43 @@ export function InventoryControlView({
     setBaristaSellingPrice("");
   };
 
-  const saveInlineSellingPrice = (lane: StoreLane, itemId: string, rawValue: string) => {
+  const prepareBaristaCatalogUpdate = (
+    previousName: string,
+    sellingPrice: number,
+    updatedAt: number,
+    nextStoreItems: MainStoreItem[],
+    nextInventoryItems: InventoryItem[],
+    nextName?: string,
+  ) => {
+    const snapshot = readPosState<unknown, PosPaymentRecord, SyncedBaristaMenuItem>(
+      STORAGE_BARISTA_STATE,
+      "orange-hotel-barista-orders",
+      "orange-hotel-barista-seq",
+      "orange-hotel-barista-payments",
+      "orange-hotel-barista-menu",
+      490,
+    );
+    const matchingMenuItem = snapshot.menuItems.find(
+      (item) => normalizeBaristaFinanceTarget(item.name) === normalizeBaristaFinanceTarget(previousName),
+    );
+    const resolvedNextName = nextName && matchingMenuItem && /\s*\(?TOTS?\)?$/i.test(matchingMenuItem.name)
+      ? `${nextName.replace(/\s*\(?TOTS?\)?$/i, "").trim()} (TOTS)`
+      : nextName;
+    const catalogUpdate = updateBaristaCatalog({
+      menuItems: snapshot.menuItems,
+      storeItems: nextStoreItems,
+      inventoryItems: nextInventoryItems,
+      menuItemId: matchingMenuItem?.id,
+      previousName,
+      nextName: resolvedNextName,
+      sellingPrice,
+      updatedAt,
+    });
+
+    return { snapshot, catalogUpdate };
+  };
+
+  const saveInlineSellingPrice = async (lane: StoreLane, itemId: string, rawValue: string) => {
     if (!canEditStock) return;
 
     const sellingPrice = Number(rawValue);
@@ -699,7 +742,7 @@ export function InventoryControlView({
     if (!matchingStore) return;
     const updatedAt = Date.now();
 
-    const nextStoreItems = storeItems.map((item) =>
+    let nextStoreItems = storeItems.map((item) =>
       item.id === itemId
         ? {
             ...item,
@@ -708,7 +751,7 @@ export function InventoryControlView({
           }
         : item,
     );
-    const nextInventoryItems = items.map((item) => {
+    let nextInventoryItems = items.map((item) => {
       if (inventoryMatchesStoreItem(item, lane, matchingStore)) {
         return {
           ...item,
@@ -720,10 +763,38 @@ export function InventoryControlView({
       return item;
     });
 
+    let posWrite: Promise<boolean> | void = undefined;
+    if (lane === "barista") {
+      const { snapshot, catalogUpdate } = prepareBaristaCatalogUpdate(
+        getStoreItemLabel(matchingStore),
+        sellingPrice,
+        updatedAt,
+        nextStoreItems,
+        nextInventoryItems,
+      );
+      nextStoreItems = catalogUpdate.storeItems;
+      nextInventoryItems = catalogUpdate.inventoryItems;
+      if (catalogUpdate.menuChanged) {
+        posWrite = writePosState(
+          STORAGE_BARISTA_STATE,
+          snapshot.tickets,
+          snapshot.ticketSeq,
+          snapshot.payments,
+          catalogUpdate.menuItems,
+        );
+      }
+    }
+
     setStoreItems(nextStoreItems);
     setItems(nextInventoryItems);
-    writeJson(STORAGE_MAIN_STORE_ITEMS, nextStoreItems);
-    writeJson(STORAGE_INVENTORY_ITEMS, nextInventoryItems);
+    const synced = await allWritesSynced([
+      writeJson(STORAGE_MAIN_STORE_ITEMS, nextStoreItems),
+      writeJson(STORAGE_INVENTORY_ITEMS, nextInventoryItems),
+      posWrite,
+    ]);
+    if (!synced) {
+      window.alert("The price was saved on this device and is queued for POS synchronization when the connection recovers.");
+    }
   };
 
   const openEditModal = (lane: StoreLane, item: MainStoreItem) => {
@@ -879,8 +950,9 @@ export function InventoryControlView({
     });
     if (!approved) return;
     const updatedAt = Date.now();
+    const matchingStore = storeItems.find((entry) => entry.id === editModal.itemId);
 
-    const nextStoreItems = storeItems.map((item) =>
+    let nextStoreItems = storeItems.map((item) =>
       item.id === editModal.itemId
         ? {
             ...item,
@@ -897,8 +969,7 @@ export function InventoryControlView({
           }
         : item,
     );
-    const nextInventoryItems = items.map((item) => {
-      const matchingStore = storeItems.find((entry) => entry.id === editModal.itemId);
+    let nextInventoryItems = items.map((item) => {
       if (matchingStore && inventoryMatchesStoreItem(item, editModal.lane, matchingStore)) {
         return {
           ...item,
@@ -919,11 +990,41 @@ export function InventoryControlView({
       return item;
     });
 
+    let posWrite: Promise<boolean> | void = undefined;
+    if (editModal.lane === "barista" && matchingStore) {
+      const nextStoreItem = nextStoreItems.find((entry) => entry.id === editModal.itemId);
+      const { snapshot, catalogUpdate } = prepareBaristaCatalogUpdate(
+        getStoreItemLabel(matchingStore),
+        sellingPrice,
+        updatedAt,
+        nextStoreItems,
+        nextInventoryItems,
+        nextStoreItem ? getStoreItemLabel(nextStoreItem) : editModal.name.trim(),
+      );
+      nextStoreItems = catalogUpdate.storeItems;
+      nextInventoryItems = catalogUpdate.inventoryItems;
+      if (catalogUpdate.menuChanged) {
+        posWrite = writePosState(
+          STORAGE_BARISTA_STATE,
+          snapshot.tickets,
+          snapshot.ticketSeq,
+          snapshot.payments,
+          catalogUpdate.menuItems,
+        );
+      }
+    }
+
     setStoreItems(nextStoreItems);
     setItems(nextInventoryItems);
-    writeJson(STORAGE_MAIN_STORE_ITEMS, nextStoreItems);
-    writeJson(STORAGE_INVENTORY_ITEMS, nextInventoryItems);
+    const synced = await allWritesSynced([
+      writeJson(STORAGE_MAIN_STORE_ITEMS, nextStoreItems),
+      writeJson(STORAGE_INVENTORY_ITEMS, nextInventoryItems),
+      posWrite,
+    ]);
     setEditModal(null);
+    if (!synced) {
+      window.alert("The item was saved on this device and is queued for POS synchronization when the connection recovers.");
+    }
   };
 
   const clearDepartmentInventory = async (lane: StoreLane) => {
@@ -1129,7 +1230,7 @@ export function InventoryControlView({
                             }))
                           }
                           onBlur={(event) => {
-                            saveInlineSellingPrice(lane, item.id, event.target.value);
+                            void saveInlineSellingPrice(lane, item.id, event.target.value);
                             setSellingPriceDrafts((current) => {
                               const next = { ...current };
                               delete next[item.id];

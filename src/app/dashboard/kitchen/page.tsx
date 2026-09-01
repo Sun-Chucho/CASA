@@ -34,6 +34,7 @@ import { KitchenSessionManager } from "@/components/dashboard/kitchen-session-ma
 import { ChefHat, Minus, Plus, Receipt, Search, Trash2, CheckCircle2, XCircle } from "lucide-react";
 import { useConfirmDialog } from "@/hooks/use-confirm-dialog";
 import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
+import { reconcileCartWithMenu } from "@/app/lib/pos-menu";
 
 type KitchenCategory = "all" | KitchenMenuCategory;
 type ServiceMode = "restaurant" | "room-service" | "take-away";
@@ -216,6 +217,10 @@ export default function KitchenPage() {
       unsubscribeLegacyPayments();
     };
   }, []);
+
+  useEffect(() => {
+    setCart((current) => reconcileCartWithMenu(current, menuItems));
+  }, [menuItems]);
 
   const loadFromStoreData = () => {
     const savedStoreItems = readJson<Array<MainStoreItem & { lane?: "kitchen" | "barista" }>>(STORAGE_MAIN_STORE_ITEMS);
