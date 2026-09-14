@@ -3,7 +3,6 @@ import type { NextRequest } from "next/server";
 
 const DIRECT_ROLE_ROUTES: Record<string, string> = {
   "/manager": "/MANAGER",
-  "/md": "/MD",
   "/im": "/IM",
   "/rb": "/RB",
   "/kp": "/KP",
@@ -44,8 +43,6 @@ export const config = {
   matcher: [
     "/manager",
     "/manager/:path*",
-    "/md",
-    "/md/:path*",
     "/im",
     "/im/:path*",
     "/rb",
