@@ -2,9 +2,13 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { readJson, writeJson } from "@/app/lib/storage";
+import { hydrateStorageKeyFromFirebase, transactSyncedStorageKeys } from "@/app/lib/firebase-sync";
+import { readStoredRole } from "@/app/lib/auth";
+import { readActiveSessionUsername } from "@/app/lib/login-profiles";
 import {
   ReceptionItem,
   INV_RECEPTION_ITEMS_KEY,
+  INV_RECEPTION_MOVEMENTS_KEY,
   downloadCSV,
 } from "@/app/lib/inventory-manager";
 import { Button } from "@/components/ui/button";
@@ -49,6 +53,7 @@ export default function ReceptionStockPage() {
   const [addStockForm, setAddStockForm] = useState({ itemId: "", destination: "reception" as "reception" | "store", quantity: "" });
   const [transferForm, setTransferForm] = useState({ itemId: "", direction: "store-to-reception" as "store-to-reception" | "reception-to-store", quantity: "" });
   const [editForm, setEditForm] = useState({ name: "", unit: "", receptionQty: "", storeQty: "", minStockLevel: "", notes: "" });
+  const [editReason, setEditReason] = useState("");
 
   const load = () => {
     const stored = readJson<ReceptionItem[]>(INV_RECEPTION_ITEMS_KEY) ?? [];
@@ -57,6 +62,7 @@ export default function ReceptionStockPage() {
 
   useEffect(() => {
     load();
+    void hydrateStorageKeyFromFirebase(INV_RECEPTION_ITEMS_KEY).then(load);
     const handler = () => load();
     window.addEventListener("orange-hotel-storage-updated", handler);
     return () => window.removeEventListener("orange-hotel-storage-updated", handler);
@@ -73,92 +79,110 @@ export default function ReceptionStockPage() {
     return list;
   }, [items, search, filter]);
 
-  const handleAddItem = () => {
+  const handleAddItem = async () => {
     if (!form.name.trim() || !form.unit.trim()) return;
+    if (items.some((item) => item.name.trim().toLowerCase() === form.name.trim().toLowerCase())) return window.alert("This item exists. Use Add Stock.");
+    const quantities = [form.receptionQty, form.storeQty, form.minStockLevel].map(Number);
+    if (!quantities.every((value) => Number.isInteger(value) && value >= 0)) return window.alert("Enter valid non-negative whole quantities.");
     const now = Date.now();
     const newItem: ReceptionItem = {
       id: crypto.randomUUID(),
       name: form.name.trim(),
       unit: form.unit.trim(),
-      receptionQty: Math.max(0, Number(form.receptionQty) || 0),
-      storeQty: Math.max(0, Number(form.storeQty) || 0),
-      minStockLevel: Math.max(0, Number(form.minStockLevel) || 5),
+      receptionQty: quantities[0],
+      storeQty: quantities[1],
+      minStockLevel: quantities[2],
       notes: form.notes.trim() || undefined,
       createdAt: now,
       updatedAt: now,
     };
-    const all = readJson<ReceptionItem[]>(INV_RECEPTION_ITEMS_KEY) ?? [];
-    all.push(newItem);
-    void writeJson(INV_RECEPTION_ITEMS_KEY, all);
-    setItems(all.filter((i) => !i.deletedAt));
+    try {
+      await transactSyncedStorageKeys([INV_RECEPTION_ITEMS_KEY, INV_RECEPTION_MOVEMENTS_KEY], (current) => {
+        const all = (current[INV_RECEPTION_ITEMS_KEY] as ReceptionItem[] | null) ?? [];
+        if (all.some((item) => !item.deletedAt && item.name.trim().toLowerCase() === newItem.name.toLowerCase())) throw new Error("This item already exists. Use Add Stock.");
+        const movement = { id: newItem.id, itemId: newItem.id, itemName: newItem.name, fromLocation: "new receipt", toLocation: "reception/store", quantity: newItem.receptionQty + newItem.storeQty, type: "add", user: readActiveSessionUsername(readStoredRole() ?? "unknown"), createdAt: now };
+        return { [INV_RECEPTION_ITEMS_KEY]: [...all, newItem], [INV_RECEPTION_MOVEMENTS_KEY]: [...((current[INV_RECEPTION_MOVEMENTS_KEY] as unknown[] | null) ?? []), movement] };
+      });
+    } catch (error) { window.alert(error instanceof Error ? error.message : "Could not add item."); return; }
+    load();
     setForm({ name: "", unit: "", receptionQty: "", storeQty: "", minStockLevel: "5", notes: "" });
     setAddItemOpen(false);
   };
 
-  const handleAddStock = () => {
+  const handleAddStock = async () => {
     if (!addStockForm.itemId) return;
-    const qty = Math.max(0, Number(addStockForm.quantity) || 0);
-    if (qty === 0) return;
-    const all = readJson<ReceptionItem[]>(INV_RECEPTION_ITEMS_KEY) ?? [];
-    const updated = all.map((i) => {
-      if (i.id !== addStockForm.itemId) return i;
-      return {
-        ...i,
-        receptionQty: addStockForm.destination === "reception" ? i.receptionQty + qty : i.receptionQty,
-        storeQty: addStockForm.destination === "store" ? i.storeQty + qty : i.storeQty,
-        updatedAt: Date.now(),
-      };
-    });
-    void writeJson(INV_RECEPTION_ITEMS_KEY, updated);
-    setItems(updated.filter((i) => !i.deletedAt));
+    const qty = Number(addStockForm.quantity);
+    if (!Number.isInteger(qty) || qty <= 0) return window.alert("Enter a positive whole quantity.");
+    const now = Date.now();
+    const movementId = crypto.randomUUID();
+    try {
+      await transactSyncedStorageKeys([INV_RECEPTION_ITEMS_KEY, INV_RECEPTION_MOVEMENTS_KEY], (current) => {
+        const all = (current[INV_RECEPTION_ITEMS_KEY] as ReceptionItem[] | null) ?? [];
+        const item = all.find((entry) => entry.id === addStockForm.itemId && !entry.deletedAt);
+        if (!item) throw new Error("Item no longer exists.");
+        const updated = all.map((entry) => entry.id !== item.id ? entry : { ...entry, receptionQty: addStockForm.destination === "reception" ? entry.receptionQty + qty : entry.receptionQty, storeQty: addStockForm.destination === "store" ? entry.storeQty + qty : entry.storeQty, updatedAt: now });
+        const movement = { id: movementId, itemId: item.id, itemName: item.name, fromLocation: "new receipt", toLocation: addStockForm.destination, quantity: qty, type: "add", user: readActiveSessionUsername(readStoredRole() ?? "unknown"), createdAt: now };
+        return { [INV_RECEPTION_ITEMS_KEY]: updated, [INV_RECEPTION_MOVEMENTS_KEY]: [...((current[INV_RECEPTION_MOVEMENTS_KEY] as unknown[] | null) ?? []), movement] };
+      });
+    } catch (error) { window.alert(error instanceof Error ? error.message : "Could not add stock."); return; }
+    load();
     setAddStockForm({ itemId: "", destination: "reception", quantity: "" });
     setAddStockOpen(false);
   };
 
-  const handleTransfer = () => {
+  const handleTransfer = async () => {
     if (!transferForm.itemId) return;
-    const qty = Math.max(0, Number(transferForm.quantity) || 0);
-    if (qty === 0) return;
-    const all = readJson<ReceptionItem[]>(INV_RECEPTION_ITEMS_KEY) ?? [];
-    const updated = all.map((i) => {
-      if (i.id !== transferForm.itemId) return i;
-      if (transferForm.direction === "store-to-reception") {
-        const actual = Math.min(qty, i.storeQty);
-        return { ...i, storeQty: i.storeQty - actual, receptionQty: i.receptionQty + actual, updatedAt: Date.now() };
-      } else {
-        const actual = Math.min(qty, i.receptionQty);
-        return { ...i, receptionQty: i.receptionQty - actual, storeQty: i.storeQty + actual, updatedAt: Date.now() };
-      }
-    });
-    void writeJson(INV_RECEPTION_ITEMS_KEY, updated);
-    setItems(updated.filter((i) => !i.deletedAt));
+    const qty = Number(transferForm.quantity);
+    if (!Number.isInteger(qty) || qty <= 0) return window.alert("Enter a positive whole quantity.");
+    const now = Date.now();
+    const movementId = crypto.randomUUID();
+    try {
+      await transactSyncedStorageKeys([INV_RECEPTION_ITEMS_KEY, INV_RECEPTION_MOVEMENTS_KEY], (current) => {
+        const all = (current[INV_RECEPTION_ITEMS_KEY] as ReceptionItem[] | null) ?? [];
+        const item = all.find((entry) => entry.id === transferForm.itemId && !entry.deletedAt);
+        if (!item) throw new Error("Item no longer exists.");
+        const fromStore = transferForm.direction === "store-to-reception";
+        const available = fromStore ? item.storeQty : item.receptionQty;
+        if (available < qty) throw new Error(`Only ${available} units are available at the source.`);
+        const updated = all.map((entry) => entry.id !== item.id ? entry : { ...entry, storeQty: entry.storeQty + (fromStore ? -qty : qty), receptionQty: entry.receptionQty + (fromStore ? qty : -qty), updatedAt: now });
+        const movement = { id: movementId, itemId: item.id, itemName: item.name, fromLocation: fromStore ? "store" : "reception", toLocation: fromStore ? "reception" : "store", quantity: qty, type: "transfer", user: readActiveSessionUsername(readStoredRole() ?? "unknown"), createdAt: now };
+        return { [INV_RECEPTION_ITEMS_KEY]: updated, [INV_RECEPTION_MOVEMENTS_KEY]: [...((current[INV_RECEPTION_MOVEMENTS_KEY] as unknown[] | null) ?? []), movement] };
+      });
+    } catch (error) { window.alert(error instanceof Error ? error.message : "Transfer failed."); return; }
+    load();
     setTransferForm({ itemId: "", direction: "store-to-reception", quantity: "" });
     setTransferOpen(false);
   };
 
-  const handleEdit = () => {
+  const handleEdit = async () => {
     if (!editItem) return;
-    const all = readJson<ReceptionItem[]>(INV_RECEPTION_ITEMS_KEY) ?? [];
-    const updated = all.map((i) => {
-      if (i.id !== editItem.id) return i;
-      return {
-        ...i,
-        name: editForm.name.trim() || i.name,
-        unit: editForm.unit.trim() || i.unit,
-        receptionQty: Math.max(0, Number(editForm.receptionQty) || 0),
-        storeQty: Math.max(0, Number(editForm.storeQty) || 0),
-        minStockLevel: Math.max(0, Number(editForm.minStockLevel) || 5),
-        notes: editForm.notes.trim() || undefined,
-        updatedAt: Date.now(),
-      };
-    });
-    void writeJson(INV_RECEPTION_ITEMS_KEY, updated);
-    setItems(updated.filter((i) => !i.deletedAt));
+    const receptionQty = Number(editForm.receptionQty);
+    const storeQty = Number(editForm.storeQty);
+    const minStockLevel = Number(editForm.minStockLevel);
+    if (![receptionQty, storeQty, minStockLevel].every((value) => Number.isInteger(value) && value >= 0)) return window.alert("Enter valid non-negative whole quantities.");
+    const changed = receptionQty !== editItem.receptionQty || storeQty !== editItem.storeQty;
+    if (changed && readStoredRole() !== "manager") return window.alert("Manager access is required for quantity adjustments.");
+    if (changed && !editReason.trim()) return window.alert("Enter a reason for the stock adjustment.");
+    const itemId = editItem.id;
+    const now = Date.now();
+    const movementId = crypto.randomUUID();
+    try {
+      await transactSyncedStorageKeys([INV_RECEPTION_ITEMS_KEY, INV_RECEPTION_MOVEMENTS_KEY], (current) => {
+        const all = (current[INV_RECEPTION_ITEMS_KEY] as ReceptionItem[] | null) ?? [];
+        const item = all.find((entry) => entry.id === itemId && !entry.deletedAt);
+        if (!item) throw new Error("Item no longer exists.");
+        const updated = all.map((entry) => entry.id !== itemId ? entry : { ...entry, name: editForm.name.trim() || entry.name, unit: editForm.unit.trim() || entry.unit, receptionQty, storeQty, minStockLevel, notes: editForm.notes.trim() || undefined, updatedAt: now });
+        const movement = { id: movementId, itemId, itemName: item.name, fromLocation: "reception/store", toLocation: "reception/store", quantity: receptionQty + storeQty - item.receptionQty - item.storeQty, type: "adjustment", reason: editReason.trim(), user: readActiveSessionUsername(readStoredRole() ?? "unknown"), createdAt: now };
+        return { [INV_RECEPTION_ITEMS_KEY]: updated, [INV_RECEPTION_MOVEMENTS_KEY]: [...((current[INV_RECEPTION_MOVEMENTS_KEY] as unknown[] | null) ?? []), movement] };
+      });
+    } catch (error) { window.alert(error instanceof Error ? error.message : "Item edit failed."); return; }
+    load();
     setEditItem(null);
   };
 
   const handleDelete = () => {
     if (!deleteItem) return;
+    if (readStoredRole() !== "manager") return window.alert("Manager access is required to archive items.");
     const all = readJson<ReceptionItem[]>(INV_RECEPTION_ITEMS_KEY) ?? [];
     const updated = all.map((i) => (i.id === deleteItem.id ? { ...i, deletedAt: Date.now() } : i));
     void writeJson(INV_RECEPTION_ITEMS_KEY, updated);
@@ -167,6 +191,7 @@ export default function ReceptionStockPage() {
   };
 
   const openEdit = (item: ReceptionItem) => {
+    setEditReason("");
     setEditForm({ name: item.name, unit: item.unit, receptionQty: String(item.receptionQty), storeQty: String(item.storeQty), minStockLevel: String(item.minStockLevel), notes: item.notes ?? "" });
     setEditItem(item);
   };
@@ -367,6 +392,7 @@ export default function ReceptionStockPage() {
               <div><label className={labelClass("mb-1 block")}>Min Level</label><Input type="number" min={0} value={editForm.minStockLevel} onChange={(e) => setEditForm((f) => ({ ...f, minStockLevel: e.target.value }))} /></div>
             </div>
             <div><label className={labelClass("mb-1 block")}>Notes</label><Input value={editForm.notes} onChange={(e) => setEditForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Any notes..." /></div>
+            <div><label className={labelClass("mb-1 block")}>Reason for quantity adjustment</label><Input value={editReason} onChange={(event) => setEditReason(event.target.value)} placeholder="Required if quantities change" /></div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditItem(null)} className="font-black uppercase tracking-widest text-xs">Cancel</Button>

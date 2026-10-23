@@ -1185,6 +1185,54 @@ export async function syncStorageValueToFirebase<T>(key: string, value: T) {
   }
 }
 
+/** Apply a stock change against the latest Firebase value, so two devices cannot
+ * overwrite each other's receipt or import. The updater must be pure because
+ * Firebase may call it again when another client wins the transaction. */
+export async function transactSyncedStorageValue<T>(
+  key: string,
+  updater: (current: T | null) => T | undefined,
+): Promise<T> {
+  if (typeof window === "undefined") throw new Error("Stock changes require a browser session.");
+  await withTimeout(ensureFirebaseAuthReady(), DIRECT_FIREBASE_WRITE_TIMEOUT_MS, "Firebase authentication timed out");
+  const result = await withTimeout(
+    runTransaction(ref(firebaseDatabase, toStoragePath(key)), (remoteValue) => {
+      const next = updater(remoteValue as T | null);
+      return next === undefined ? undefined : sanitizeForStorage(next);
+    }),
+    DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
+    `Stock transaction timed out for ${key}`,
+  );
+  if (!result.committed) throw new Error("Stock change was not saved. Please refresh and try again.");
+  const committed = result.snapshot.val() as T;
+  setLocalCache(key, JSON.stringify(committed));
+  clearPendingSync(key);
+  dispatchStorageUpdated(key);
+  markSyncHealthy(key);
+  return committed;
+}
+
+/** Atomically change several inventory keys for a transfer across departments. */
+export async function transactSyncedStorageKeys(
+  keys: string[],
+  updater: (current: Record<string, unknown>) => Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  if (typeof window === "undefined") throw new Error("Stock changes require a browser session.");
+  await withTimeout(ensureFirebaseAuthReady(), DIRECT_FIREBASE_WRITE_TIMEOUT_MS, "Firebase authentication timed out");
+  const names = keys.map((key) => key.replace(/[.#$[\]/]/g, "-"));
+  const result = await withTimeout(runTransaction(ref(firebaseDatabase, FIREBASE_STORAGE_ROOT), (remoteValue) => {
+    const root = remoteValue && typeof remoteValue === "object" ? { ...remoteValue as Record<string, unknown> } : {};
+    const current = Object.fromEntries(keys.map((key, index) => [key, root[names[index]] ?? null]));
+    const next = updater(current);
+    keys.forEach((key, index) => { root[names[index]] = sanitizeForStorage(next[key]); });
+    return root;
+  }), 30000, "Inventory transfer timed out");
+  if (!result.committed) throw new Error("Inventory transfer was not saved.");
+  const root = result.snapshot.val() as Record<string, unknown>;
+  const committed = Object.fromEntries(keys.map((key, index) => [key, root[names[index]] ?? null]));
+  keys.forEach((key) => { setLocalCache(key, JSON.stringify(committed[key])); clearPendingSync(key); dispatchStorageUpdated(key); markSyncHealthy(key); });
+  return committed;
+}
+
 async function flushPendingFirebaseWrites() {
   if (_pendingFlushInFlight || typeof window === "undefined" || !window.navigator.onLine) return;
   const pendingKeys = Object.keys(_pendingLocalWrites);

@@ -2,6 +2,10 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { readJson, writeJson } from "@/app/lib/storage";
+import { importPhysicalStock } from "@/app/lib/inventory-physical-import";
+import { transactSyncedStorageValue } from "@/app/lib/firebase-sync";
+import { readStoredRole } from "@/app/lib/auth";
+import { readActiveSessionUsername } from "@/app/lib/login-profiles";
 import {
   BarItem,
   BarMovement,
@@ -40,6 +44,7 @@ export default function BarStockPage() {
   const [items, setItems] = useState<BarItem[]>([]);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<FilterType>("all");
+  const [importReport, setImportReport] = useState("");
 
   const [addItemOpen, setAddItemOpen] = useState(false);
   const [addStockOpen, setAddStockOpen] = useState(false);
@@ -63,6 +68,7 @@ export default function BarStockPage() {
   const [transferForm, setTransferForm] = useState({ itemId: "", direction: "store-to-bar" as "store-to-bar" | "bar-to-store", quantity: "" });
   const [brokenForm, setBrokenForm] = useState({ itemId: "", location: "store" as "store" | "bar", quantity: "" });
   const [editForm, setEditForm] = useState({ name: "", unit: "", storeQty: "", barQty: "", brokenQty: "", sellingPrice: "", buyingPrice: "", notes: "" });
+  const [editReason, setEditReason] = useState("");
 
   const load = () => {
     const stored = readJson<BarItem[]>(INV_BAR_ITEMS_KEY) ?? [];
@@ -71,15 +77,15 @@ export default function BarStockPage() {
 
   useEffect(() => {
     load();
+    void importPhysicalStock("bar").then((report) => { setImportReport(`Physical stock import: ${report.imported} imported, ${report.updated} linked, ${report.skipped} skipped, ${report.flagged} flagged for review.`); load(); }).catch(() => setImportReport("Physical stock import could not complete. Reopen this page when the database is available."));
     const handler = () => load();
     window.addEventListener("orange-hotel-storage-updated", handler);
     return () => window.removeEventListener("orange-hotel-storage-updated", handler);
   }, []);
 
   const saveMovement = (mov: Omit<BarMovement, "id" | "createdAt">) => {
-    const movements = readJson<BarMovement[]>(INV_BAR_MOVEMENTS_KEY) ?? [];
-    movements.push({ ...mov, id: crypto.randomUUID(), createdAt: Date.now() });
-    void writeJson(INV_BAR_MOVEMENTS_KEY, movements);
+    const entry = { ...mov, id: crypto.randomUUID(), user: readActiveSessionUsername(readStoredRole() ?? "unknown"), createdAt: Date.now() };
+    void transactSyncedStorageValue<BarMovement[]>(INV_BAR_MOVEMENTS_KEY, (current) => [...(current ?? []), entry]).catch((error) => console.error("Bar movement was not recorded", error));
   };
 
   const filtered = useMemo(() => {
@@ -94,9 +100,11 @@ export default function BarStockPage() {
     return list;
   }, [items, search, filter]);
 
-  const handleAddItem = () => {
+  const handleAddItem = async () => {
     if (!form.name.trim() || !form.unit.trim()) return;
-    const qty = Math.max(0, Number(form.quantity) || 0);
+    if (items.some((item) => item.name.trim().toLowerCase() === form.name.trim().toLowerCase())) return window.alert("This item exists. Use Add Stock.");
+    const qty = Number(form.quantity);
+    if (!Number.isInteger(qty) || qty < 0) return window.alert("Enter a valid non-negative whole quantity.");
     const now = Date.now();
     const newItem: BarItem = {
       id: crypto.randomUUID(),
@@ -111,55 +119,57 @@ export default function BarStockPage() {
       createdAt: now,
       updatedAt: now,
     };
-    const all = readJson<BarItem[]>(INV_BAR_ITEMS_KEY) ?? [];
-    all.push(newItem);
-    void writeJson(INV_BAR_ITEMS_KEY, all);
-    setItems(all.filter((i) => !i.deletedAt));
+    try {
+      await transactSyncedStorageValue<BarItem[]>(INV_BAR_ITEMS_KEY, (current) => {
+        const all = current ?? [];
+        if (all.some((item) => !item.deletedAt && item.name.trim().toLowerCase() === newItem.name.toLowerCase())) throw new Error("This item already exists. Use Add Stock.");
+        return [...all, newItem];
+      });
+    } catch (error) { window.alert(error instanceof Error ? error.message : "Could not add item."); return; }
+    load();
     saveMovement({ itemId: newItem.id, itemName: newItem.name, type: "add", toLocation: form.destination, quantity: qty });
     setForm({ name: "", unit: "", quantity: "", destination: "store", condition: "good", sellingPrice: "", buyingPrice: "", notes: "" });
     setAddItemOpen(false);
   };
 
-  const handleAddStock = () => {
+  const handleAddStock = async () => {
     if (!addStockForm.itemId) return;
-    const qty = Math.max(0, Number(addStockForm.quantity) || 0);
-    if (qty === 0) return;
-    const all = readJson<BarItem[]>(INV_BAR_ITEMS_KEY) ?? [];
-    const updated = all.map((i) => {
-      if (i.id !== addStockForm.itemId) return i;
-      return {
-        ...i,
-        storeQty: addStockForm.destination === "store" ? i.storeQty + qty : i.storeQty,
-        barQty: addStockForm.destination === "bar" ? i.barQty + qty : i.barQty,
-        updatedAt: Date.now(),
-      };
-    });
-    void writeJson(INV_BAR_ITEMS_KEY, updated);
-    setItems(updated.filter((i) => !i.deletedAt));
-    const item = all.find((i) => i.id === addStockForm.itemId);
+    const qty = Number(addStockForm.quantity);
+    if (!Number.isInteger(qty) || qty <= 0) return window.alert("Enter a positive whole quantity.");
+    let item: BarItem | undefined;
+    try {
+      await transactSyncedStorageValue<BarItem[]>(INV_BAR_ITEMS_KEY, (current) => {
+        const all = current ?? [];
+        item = all.find((entry) => entry.id === addStockForm.itemId && !entry.deletedAt);
+        if (!item) throw new Error("Item no longer exists.");
+        return all.map((entry) => entry.id !== item!.id ? entry : { ...entry, storeQty: addStockForm.destination === "store" ? entry.storeQty + qty : entry.storeQty, barQty: addStockForm.destination === "bar" ? entry.barQty + qty : entry.barQty, updatedAt: Date.now() });
+      });
+    } catch (error) { window.alert(error instanceof Error ? error.message : "Could not add stock."); return; }
+    load();
     if (item) saveMovement({ itemId: item.id, itemName: item.name, type: "add", toLocation: addStockForm.destination, quantity: qty });
     setAddStockForm({ itemId: "", destination: "store", quantity: "" });
     setAddStockOpen(false);
   };
 
-  const handleTransfer = () => {
+  const handleTransfer = async () => {
     if (!transferForm.itemId) return;
-    const qty = Math.max(0, Number(transferForm.quantity) || 0);
-    if (qty === 0) return;
-    const all = readJson<BarItem[]>(INV_BAR_ITEMS_KEY) ?? [];
-    const updated = all.map((i) => {
-      if (i.id !== transferForm.itemId) return i;
-      if (transferForm.direction === "store-to-bar") {
-        const actual = Math.min(qty, i.storeQty);
-        return { ...i, storeQty: i.storeQty - actual, barQty: i.barQty + actual, updatedAt: Date.now() };
-      } else {
-        const actual = Math.min(qty, i.barQty);
-        return { ...i, barQty: i.barQty - actual, storeQty: i.storeQty + actual, updatedAt: Date.now() };
-      }
-    });
-    void writeJson(INV_BAR_ITEMS_KEY, updated);
+    const qty = Number(transferForm.quantity);
+    if (!Number.isInteger(qty) || qty <= 0) return window.alert("Enter a positive whole quantity.");
+    let item: BarItem | undefined;
+    let updated: BarItem[];
+    try {
+      updated = await transactSyncedStorageValue<BarItem[]>(INV_BAR_ITEMS_KEY, (current) => {
+        const all = current ?? [];
+        item = all.find((i) => i.id === transferForm.itemId && !i.deletedAt);
+        if (!item) throw new Error("Item no longer exists.");
+        const source = transferForm.direction === "store-to-bar" ? item.storeQty : item.barQty;
+        if (source < qty) throw new Error(`Only ${source} units are available at the source.`);
+        return all.map((i) => i.id !== item!.id ? i : transferForm.direction === "store-to-bar"
+          ? { ...i, storeQty: i.storeQty - qty, barQty: i.barQty + qty, updatedAt: Date.now() }
+          : { ...i, barQty: i.barQty - qty, storeQty: i.storeQty + qty, updatedAt: Date.now() });
+      });
+    } catch (error) { window.alert(error instanceof Error ? error.message : "Transfer failed."); return; }
     setItems(updated.filter((i) => !i.deletedAt));
-    const item = all.find((i) => i.id === transferForm.itemId);
     if (item) saveMovement({
       itemId: item.id, itemName: item.name, type: "transfer",
       fromLocation: transferForm.direction === "store-to-bar" ? "store" : "bar",
@@ -170,20 +180,27 @@ export default function BarStockPage() {
     setTransferOpen(false);
   };
 
-  const handleRecordBroken = () => {
+  const handleRecordBroken = async () => {
     if (!brokenForm.itemId) return;
-    const qty = Math.max(0, Number(brokenForm.quantity) || 0);
-    if (qty === 0) return;
-    const all = readJson<BarItem[]>(INV_BAR_ITEMS_KEY) ?? [];
-    const updated = all.map((i) => {
-      if (i.id !== brokenForm.itemId) return i;
-      const deductStore = brokenForm.location === "store" ? Math.min(qty, i.storeQty) : 0;
-      const deductBar = brokenForm.location === "bar" ? Math.min(qty, i.barQty) : 0;
-      return { ...i, storeQty: i.storeQty - deductStore, barQty: i.barQty - deductBar, brokenQty: i.brokenQty + qty, updatedAt: Date.now() };
-    });
-    void writeJson(INV_BAR_ITEMS_KEY, updated);
+    const qty = Number(brokenForm.quantity);
+    if (!Number.isInteger(qty) || qty <= 0) return window.alert("Enter a positive whole quantity.");
+    let item: BarItem | undefined;
+    let updated: BarItem[];
+    try {
+      updated = await transactSyncedStorageValue<BarItem[]>(INV_BAR_ITEMS_KEY, (current) => {
+        const all = current ?? [];
+        item = all.find((i) => i.id === brokenForm.itemId && !i.deletedAt);
+        if (!item) throw new Error("Item no longer exists.");
+        const available = brokenForm.location === "store" ? item.storeQty : item.barQty;
+        if (available < qty) throw new Error(`Only ${available} usable units are available at this location.`);
+        return all.map((i) => i.id !== item!.id ? i : {
+          ...i, storeQty: brokenForm.location === "store" ? i.storeQty - qty : i.storeQty,
+          barQty: brokenForm.location === "bar" ? i.barQty - qty : i.barQty,
+          brokenQty: i.brokenQty + qty, updatedAt: Date.now(),
+        });
+      });
+    } catch (error) { window.alert(error instanceof Error ? error.message : "Could not record damage."); return; }
     setItems(updated.filter((i) => !i.deletedAt));
-    const item = all.find((i) => i.id === brokenForm.itemId);
     if (item) saveMovement({ itemId: item.id, itemName: item.name, type: "broken", fromLocation: brokenForm.location, quantity: qty });
     setBrokenForm({ itemId: "", location: "store", quantity: "" });
     setBrokenOpen(false);
@@ -191,6 +208,11 @@ export default function BarStockPage() {
 
   const handleEdit = () => {
     if (!editItem) return;
+    const quantities = [editForm.storeQty, editForm.barQty, editForm.brokenQty].map(Number);
+    if (!quantities.every((value) => Number.isInteger(value) && value >= 0)) return window.alert("Enter valid non-negative whole quantities.");
+    const changed = quantities[0] !== editItem.storeQty || quantities[1] !== editItem.barQty || quantities[2] !== editItem.brokenQty;
+    if (changed && readStoredRole() !== "manager") return window.alert("Manager access is required for quantity adjustments.");
+    if (changed && !editReason.trim()) return window.alert("Enter a reason for the stock adjustment.");
     const all = readJson<BarItem[]>(INV_BAR_ITEMS_KEY) ?? [];
     const updated = all.map((i) => {
       if (i.id !== editItem.id) return i;
@@ -209,19 +231,23 @@ export default function BarStockPage() {
     });
     void writeJson(INV_BAR_ITEMS_KEY, updated);
     setItems(updated.filter((i) => !i.deletedAt));
+    if (changed) saveMovement({ itemId: editItem.id, itemName: editItem.name, type: "adjustment", quantity: quantities[0] + quantities[1] + quantities[2] - editItem.storeQty - editItem.barQty - editItem.brokenQty, notes: editReason.trim() });
     setEditItem(null);
   };
 
   const handleDelete = () => {
     if (!deleteItem) return;
+    if (readStoredRole() !== "manager") return window.alert("Manager access is required to archive items.");
     const all = readJson<BarItem[]>(INV_BAR_ITEMS_KEY) ?? [];
     const updated = all.map((i) => (i.id === deleteItem.id ? { ...i, deletedAt: Date.now() } : i));
     void writeJson(INV_BAR_ITEMS_KEY, updated);
     setItems(updated.filter((i) => !i.deletedAt));
+    saveMovement({ itemId: deleteItem.id, itemName: deleteItem.name, type: "archive", quantity: 0 });
     setDeleteItem(null);
   };
 
   const openEdit = (item: BarItem) => {
+    setEditReason("");
     setEditForm({
       name: item.name, unit: item.unit,
       storeQty: String(item.storeQty), barQty: String(item.barQty), brokenQty: String(item.brokenQty),
@@ -235,8 +261,8 @@ export default function BarStockPage() {
   const handleDownloadCSV = () => {
     const headers = ["#", "Item Name", "Store Qty", "Bar Qty", "Total Qty", "Broken Qty", "Good Qty", "Unit", "Selling Price", "Buying Price"];
     const rows = filtered.map((item, idx) => {
-      const total = item.storeQty + item.barQty;
-      const good = total - item.brokenQty;
+      const good = item.storeQty + item.barQty;
+      const total = good + item.brokenQty;
       return [String(idx + 1), item.name, String(item.storeQty), String(item.barQty), String(total), String(item.brokenQty), String(good), item.unit, String(item.sellingPrice ?? ""), String(item.buyingPrice ?? "")];
     });
     downloadCSV("bar-stock.csv", headers, rows);
@@ -244,6 +270,7 @@ export default function BarStockPage() {
 
   return (
     <div className="p-6 space-y-6">
+      {importReport && <p role="status" className="rounded-lg border bg-white px-4 py-2 text-xs text-gray-600">{importReport}</p>}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-black uppercase tracking-widest">Bar Stock</h1>
@@ -302,9 +329,9 @@ export default function BarStockPage() {
               </TableRow>
             ) : (
               filtered.map((item, idx) => {
-                const total = item.storeQty + item.barQty;
-                const good = total - item.brokenQty;
-                const isLow = total < 5;
+                const good = item.storeQty + item.barQty;
+                const total = good + item.brokenQty;
+                const isLow = good < 5;
                 return (
                   <TableRow key={item.id} className="hover:bg-gray-50">
                     <TableCell className="text-xs text-gray-400">{idx + 1}</TableCell>
@@ -313,6 +340,7 @@ export default function BarStockPage() {
                         <span className="font-semibold text-sm">{item.name}</span>
                         {isLow && <Badge variant="destructive" className="text-[9px] px-1.5 py-0">LOW</Badge>}
                         {item.brokenQty > 0 && <Badge variant="outline" className="text-[9px] px-1.5 py-0 text-amber-600 border-amber-300">BROKEN</Badge>}
+                        {item.source?.warnings.some((warning) => !warning.startsWith("Original blank")) && <Badge variant="outline" title={item.source.warnings.join(" ")} className="text-[9px] px-1.5 py-0 text-amber-600 border-amber-300">REVIEW SOURCE</Badge>}
                       </div>
                     </TableCell>
                     <TableCell className="text-right text-sm">{item.storeQty}</TableCell>
@@ -500,6 +528,7 @@ export default function BarStockPage() {
               <div><label className={labelClass("mb-1 block")}>Buying Price</label><Input type="number" min={0} value={editForm.buyingPrice} onChange={(e) => setEditForm((f) => ({ ...f, buyingPrice: e.target.value }))} /></div>
             </div>
             <div><label className={labelClass("mb-1 block")}>Notes</label><Input value={editForm.notes} onChange={(e) => setEditForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Any notes..." /></div>
+            <div><label className={labelClass("mb-1 block")}>Reason for quantity adjustment</label><Input value={editReason} onChange={(event) => setEditReason(event.target.value)} placeholder="Required if quantities change" /></div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditItem(null)} className="font-black uppercase tracking-widest text-xs">Cancel</Button>

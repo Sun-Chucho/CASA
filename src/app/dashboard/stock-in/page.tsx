@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { readStoredRole } from "@/app/lib/auth";
-import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
+import { readActiveSessionUsername } from "@/app/lib/login-profiles";
+import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey, transactSyncedStorageKeys } from "@/app/lib/firebase-sync";
 import { getStoreItemLabel, MainStoreItem, normalizeBaristaProductTarget, STORAGE_INVENTORY_ITEMS, STORAGE_MAIN_STORE_ITEMS } from "@/app/lib/inventory-transfer";
 import { InventoryItem } from "@/app/lib/mock-data";
-import { readJson, readPosState, STORAGE_BARISTA_STATE, writeJson, writePosState } from "@/app/lib/storage";
+import { readJson, readPosState, STORAGE_BARISTA_STATE } from "@/app/lib/storage";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -17,7 +18,7 @@ const CATEGORIES = ["beer", "wine", "spirits", "cider", "soft-drinks", "water-ju
 type DrinkCategory = typeof CATEGORIES[number];
 type StockMode = "new" | "addition";
 type StockMenuItem = { id: string; name: string; price: number; buyingPrice?: number; category: DrinkCategory; prepMinutes: number; updatedAt?: number; deletedAt?: number };
-type StockInEntry = { id: string; itemId: string; itemName: string; kind: StockMode; date: string; quantity: number; buyingPrice: number; sellingPrice: number; recordedAt: number };
+type StockInEntry = { id: string; itemId: string; itemName: string; kind: StockMode; date: string; quantity: number; buyingPrice: number; sellingPrice: number; recordedAt: number; user?: string };
 
 function today() {
   const date = new Date();
@@ -139,50 +140,51 @@ export default function StockInPage() {
     setFeedback("");
     try {
       const now = Date.now();
-      const allStores = readJson<MainStoreItem[]>(STORAGE_MAIN_STORE_ITEMS) ?? [];
-      const allInventory = readJson<InventoryItem[]>(STORAGE_INVENTORY_ITEMS) ?? [];
-      const snapshot = readBaristaSnapshot();
       const target = normalizeBaristaProductTarget(mode === "new" ? label : selectedChoice!.label);
-      const existingStore = allStores.find((item) => item.lane === "barista" && !item.deletedAt && normalizeBaristaProductTarget(getStoreItemLabel(item)) === target);
-      const existingMenu = snapshot.menuItems.find((item) => !item.deletedAt && normalizeBaristaProductTarget(item.name) === target);
-      const existingInventory = allInventory.find((item) => item.category.trim().toLowerCase() === "bar" && item.status !== "INACTIVE" && normalizeBaristaProductTarget(item.size ? `${item.name} ${item.size}` : item.name) === target);
-      if (mode === "new" && (existingStore || existingMenu || existingInventory)) {
-        setFeedback("This drink was added on another device. Select it under Add Stock.");
-        load();
-        return;
-      }
-      const itemName = existingStore?.name ?? existingInventory?.name ?? (mode === "new" ? drinkName : selectedChoice!.label);
-      const itemSize = existingStore?.size ?? existingInventory?.size ?? (mode === "new" ? drinkSize : "");
-      const itemLabel = itemSize && !itemName.toLowerCase().includes(itemSize.toLowerCase()) ? `${itemName} ${itemSize}` : itemName;
-      const itemUnit = existingStore?.unit ?? existingInventory?.unit ?? unit.trim();
-      const rawCategory = existingMenu?.category ?? existingStore?.subCategory ?? existingInventory?.subCategory ?? (mode === "new" ? category : "cold");
-      const itemCategory = CATEGORIES.includes(rawCategory as DrinkCategory) ? rawCategory as DrinkCategory : "cold";
-      const stock = (existingStore?.stock ?? existingInventory?.stock ?? 0) + qty;
       const id = crypto.randomUUID();
-      const storeId = existingStore?.id ?? `bs-${id}`;
-      const nextStore: MainStoreItem = existingStore
-        ? { ...existingStore, stock, buyingPrice: buy, sellingPrice: sell, receivedStock: (existingStore.receivedStock ?? 0) + qty, updatedAt: now }
-        : { id: storeId, name: itemName, size: itemSize, stock, unit: itemUnit, minStock: 0, lane: "barista", subCategory: itemCategory, buyingPrice: buy, sellingPrice: sell, receivedStock: qty, updatedAt: now };
-      const nextInventory: InventoryItem = existingInventory
-        ? { ...existingInventory, stock, buyingPrice: buy, sellingPrice: sell, price: sell, receivedStock: (existingInventory.receivedStock ?? 0) + qty, updatedAt: now }
-        : { id: `inv-${id}`, barcode: "", name: itemName, category: "Bar", subCategory: itemCategory, size: itemSize, stock, totSold: 0, buyingPrice: buy, sellingPrice: sell, price: sell, status: "ACTIVE", minStock: 0, unit: itemUnit, receivedStock: qty, updatedAt: now };
-      const nextMenu: StockMenuItem = existingMenu
-        ? { ...existingMenu, buyingPrice: buy, price: sell, updatedAt: now }
-        : { id: `barista-${id}`, name: itemLabel, price: sell, buyingPrice: buy, category: itemCategory, prepMinutes: 2, updatedAt: now };
-      const entry: StockInEntry = { id, itemId: storeId, itemName: itemLabel, kind: mode, date, quantity: qty, buyingPrice: buy, sellingPrice: sell, recordedAt: now };
-      const nextHistory = [entry, ...(readJson<StockInEntry[]>(STOCK_IN_HISTORY_KEY) ?? [])];
-      const writes = await Promise.all([
-        writeJson(STORAGE_MAIN_STORE_ITEMS, existingStore ? allStores.map((item) => item.id === existingStore.id ? nextStore : item) : [...allStores, nextStore]),
-        writeJson(STORAGE_INVENTORY_ITEMS, existingInventory ? allInventory.map((item) => item.id === existingInventory.id ? nextInventory : item) : [...allInventory, nextInventory]),
-        writePosState(STORAGE_BARISTA_STATE, snapshot.tickets, snapshot.ticketSeq, snapshot.payments, existingMenu ? snapshot.menuItems.map((item) => item.id === existingMenu.id ? nextMenu : item) : [...snapshot.menuItems, nextMenu]),
-        writeJson(STOCK_IN_HISTORY_KEY, nextHistory),
-      ]);
+      await transactSyncedStorageKeys([STORAGE_MAIN_STORE_ITEMS, STORAGE_INVENTORY_ITEMS, STORAGE_BARISTA_STATE, STOCK_IN_HISTORY_KEY], (current) => {
+        const allStores = (current[STORAGE_MAIN_STORE_ITEMS] as MainStoreItem[] | null) ?? [];
+        const allInventory = (current[STORAGE_INVENTORY_ITEMS] as InventoryItem[] | null) ?? [];
+        const snapshot = (current[STORAGE_BARISTA_STATE] as ReturnType<typeof readBaristaSnapshot> | null) ?? { tickets: [], ticketSeq: 490, payments: [], menuItems: [] };
+        const history = (current[STOCK_IN_HISTORY_KEY] as StockInEntry[] | null) ?? [];
+        if (history.some((entry) => entry.id === id)) return current;
+        const existingStore = allStores.find((item) => item.lane === "barista" && !item.deletedAt && normalizeBaristaProductTarget(getStoreItemLabel(item)) === target);
+        const existingMenu = snapshot.menuItems.find((item) => !item.deletedAt && normalizeBaristaProductTarget(item.name) === target);
+        const existingInventory = allInventory.find((item) => item.category.trim().toLowerCase() === "bar" && item.status !== "INACTIVE" && normalizeBaristaProductTarget(item.size ? `${item.name} ${item.size}` : item.name) === target);
+        if (mode === "new" && (existingStore || existingMenu || existingInventory)) throw new Error("This drink already exists. Select it under New Additions.");
+        if (mode === "addition" && !existingStore && !existingMenu && !existingInventory) throw new Error("The selected drink no longer exists. Refresh and select it again.");
+        const itemName = existingStore?.name ?? existingInventory?.name ?? (mode === "new" ? drinkName : selectedChoice!.label);
+        const itemSize = existingStore?.size ?? existingInventory?.size ?? (mode === "new" ? drinkSize : "");
+        const itemLabel = itemSize && !itemName.toLowerCase().includes(itemSize.toLowerCase()) ? `${itemName} ${itemSize}` : itemName;
+        const itemUnit = existingStore?.unit ?? existingInventory?.unit ?? unit.trim();
+        const rawCategory = existingMenu?.category ?? existingStore?.subCategory ?? existingInventory?.subCategory ?? (mode === "new" ? category : "cold");
+        const itemCategory = CATEGORIES.includes(rawCategory as DrinkCategory) ? rawCategory as DrinkCategory : "cold";
+        const previousStock = (existingInventory?.updatedAt ?? 0) > (existingStore?.updatedAt ?? 0) ? existingInventory?.stock : existingStore?.stock ?? existingInventory?.stock;
+        const stock = (previousStock ?? 0) + qty;
+        const storeId = existingStore?.id ?? `bs-${id}`;
+        const nextStore: MainStoreItem = existingStore
+          ? { ...existingStore, stock, buyingPrice: buy, sellingPrice: sell, receivedStock: (existingStore.receivedStock ?? 0) + qty, updatedAt: now }
+          : { id: storeId, name: itemName, size: itemSize, stock, unit: itemUnit, minStock: 0, lane: "barista", subCategory: itemCategory, buyingPrice: buy, sellingPrice: sell, receivedStock: qty, updatedAt: now };
+        const nextInventory: InventoryItem = existingInventory
+          ? { ...existingInventory, stock, buyingPrice: buy, sellingPrice: sell, price: sell, receivedStock: (existingInventory.receivedStock ?? 0) + qty, updatedAt: now }
+          : { id: `inv-${id}`, barcode: "", name: itemName, category: "Bar", subCategory: itemCategory, size: itemSize, stock, totSold: 0, buyingPrice: buy, sellingPrice: sell, price: sell, status: "ACTIVE", minStock: 0, unit: itemUnit, receivedStock: qty, updatedAt: now };
+        const nextMenu: StockMenuItem = existingMenu
+          ? { ...existingMenu, buyingPrice: buy, price: sell, updatedAt: now }
+          : { id: `barista-${id}`, name: itemLabel, price: sell, buyingPrice: buy, category: itemCategory, prepMinutes: 2, updatedAt: now };
+        const entry: StockInEntry = { id, itemId: storeId, itemName: itemLabel, kind: mode, date, quantity: qty, buyingPrice: buy, sellingPrice: sell, recordedAt: now, user: readActiveSessionUsername("manager") };
+        return {
+          [STORAGE_MAIN_STORE_ITEMS]: existingStore ? allStores.map((item) => item.id === existingStore.id ? nextStore : item) : [...allStores, nextStore],
+          [STORAGE_INVENTORY_ITEMS]: existingInventory ? allInventory.map((item) => item.id === existingInventory.id ? nextInventory : item) : [...allInventory, nextInventory],
+          [STORAGE_BARISTA_STATE]: { ...snapshot, menuItems: existingMenu ? snapshot.menuItems.map((item) => item.id === existingMenu.id ? nextMenu : item) : [...snapshot.menuItems, nextMenu] },
+          [STOCK_IN_HISTORY_KEY]: [entry, ...history],
+        };
+      });
       load();
       setQuantity("");
       if (mode === "new") { setName(""); setSize(""); setBuyingPrice(""); setSellingPrice(""); }
-      setFeedback(writes.some((result) => result === false) ? "Saved on this device; cloud sync is pending." : "Stock saved successfully.");
-    } catch {
-      setFeedback("Stock was saved locally, but cloud synchronization is pending. Check sync status before adding it again.");
+      setFeedback("Stock saved successfully.");
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "Stock could not be saved. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -194,11 +196,11 @@ export default function StockInPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-3xl font-black tracking-tight">Drink Stock In</h1>
-        <p className="text-sm text-muted-foreground">Set opening stock for a new drink or record a dated addition to an existing drink.</p>
+        <h1 className="text-3xl font-black tracking-tight">Stock In</h1>
+        <p className="text-sm text-muted-foreground">Manager drink stock: create a new item or record a dated addition to an existing item.</p>
       </header>
       <Tabs value={mode} onValueChange={(value) => { setMode(value as StockMode); setFeedback(""); setQuantity(""); setBuyingPrice(""); setSellingPrice(""); setSelected(""); }}>
-        <TabsList><TabsTrigger value="new">New Drink</TabsTrigger><TabsTrigger value="addition">Add Stock</TabsTrigger></TabsList>
+        <TabsList><TabsTrigger value="new">New Item</TabsTrigger><TabsTrigger value="addition">New Additions</TabsTrigger></TabsList>
       </Tabs>
       <Card>
         <CardHeader><CardTitle>{mode === "new" ? "Set opening stock" : "Record stock addition"}</CardTitle><CardDescription>Buying price is the cost per unit. Selling price is the POS price per unit.</CardDescription></CardHeader>
@@ -217,8 +219,12 @@ export default function StockInPage() {
         </CardContent>
       </Card>
       <Card>
+        <CardHeader><CardTitle>Current drink stock</CardTitle><CardDescription>Use Add Stock to record a new purchase for an existing drink.</CardDescription></CardHeader>
+        <CardContent className="overflow-x-auto p-0"><Table><TableHeader><TableRow><TableHead>Drink</TableHead><TableHead>Quantity</TableHead><TableHead>Unit</TableHead><TableHead>Buying price</TableHead><TableHead>Selling price</TableHead><TableHead>Action</TableHead></TableRow></TableHeader><TableBody>{choices.map(([key, choice]) => <TableRow key={key}><TableCell>{choice.label}</TableCell><TableCell>{choice.inventory?.stock ?? choice.store?.stock ?? 0}</TableCell><TableCell>{choice.store?.unit ?? choice.inventory?.unit ?? "—"}</TableCell><TableCell>TSh {(choice.store?.buyingPrice ?? choice.inventory?.buyingPrice ?? choice.menu?.buyingPrice ?? 0).toLocaleString()}</TableCell><TableCell>TSh {(choice.store?.sellingPrice ?? choice.inventory?.sellingPrice ?? choice.menu?.price ?? 0).toLocaleString()}</TableCell><TableCell><Button variant="outline" size="sm" onClick={() => { setMode("addition"); chooseDrink(key); setQuantity(""); }}>Add Stock</Button></TableCell></TableRow>)}{choices.length === 0 && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">No drinks recorded. Use New Item to set the first opening stock.</TableCell></TableRow>}</TableBody></Table></CardContent>
+      </Card>
+      <Card>
         <CardHeader><CardTitle>Recent additions</CardTitle><CardDescription>Recorded stock entries and their purchase dates.</CardDescription></CardHeader>
-        <CardContent className="overflow-x-auto p-0"><Table><TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Drink</TableHead><TableHead>Type</TableHead><TableHead>Quantity</TableHead><TableHead>Buying price</TableHead><TableHead>Selling price</TableHead></TableRow></TableHeader><TableBody>{history.slice(0, 30).map((entry) => <TableRow key={entry.id}><TableCell>{entry.date}</TableCell><TableCell>{entry.itemName}</TableCell><TableCell>{entry.kind === "new" ? "Opening stock" : "Addition"}</TableCell><TableCell>{entry.quantity}</TableCell><TableCell>TSh {entry.buyingPrice.toLocaleString()}</TableCell><TableCell>TSh {entry.sellingPrice.toLocaleString()}</TableCell></TableRow>)}{history.length === 0 && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">No stock entries yet.</TableCell></TableRow>}</TableBody></Table></CardContent>
+        <CardContent className="overflow-x-auto p-0"><Table><TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Drink</TableHead><TableHead>Type</TableHead><TableHead>Quantity</TableHead><TableHead>Buying price</TableHead><TableHead>Selling price</TableHead><TableHead>Recorded by</TableHead></TableRow></TableHeader><TableBody>{history.slice(0, 30).map((entry) => <TableRow key={entry.id}><TableCell>{entry.date}</TableCell><TableCell>{entry.itemName}</TableCell><TableCell>{entry.kind === "new" ? "Opening stock" : "Addition"}</TableCell><TableCell>{entry.quantity}</TableCell><TableCell>TSh {entry.buyingPrice.toLocaleString()}</TableCell><TableCell>TSh {entry.sellingPrice.toLocaleString()}</TableCell><TableCell>{entry.user ?? "—"}</TableCell></TableRow>)}{history.length === 0 && <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">No stock entries yet.</TableCell></TableRow>}</TableBody></Table></CardContent>
       </Card>
     </div>
   );

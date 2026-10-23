@@ -301,13 +301,13 @@ export default function OverviewPage() {
           <div>
             <h2 className="text-2xl font-black tracking-tight uppercase">Stock Review</h2>
             <p className="text-muted-foreground uppercase font-bold text-[10px] tracking-wider">
-              Open compact read-only kitchen and barista stock pages without loading the full tables here.
+              Open kitchen inventory, manager drink stock in, and related pages.
             </p>
           </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {[
               { label: "Kitchen Stock", href: "/dashboard/inventory/kitchen-stock" },
-              { label: "Barista Stock", href: "/dashboard/inventory/barista-stock" },
+              { label: "Drink Stock In", href: "/dashboard/stock-in" },
               { label: "Laundry", href: "/dashboard/laundry" },
               { label: "Finances", href: "/dashboard/finances" },
             ].map((item) => (
@@ -317,7 +317,7 @@ export default function OverviewPage() {
                 className="flex items-center justify-between rounded-lg border bg-white p-4 shadow-sm transition-colors hover:border-primary/40 hover:bg-primary/5"
               >
                 <div>
-                  <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Read Only</p>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Open Page</p>
                   <p className="mt-1 text-lg font-black uppercase tracking-tight">{item.label}</p>
                 </div>
                 <Package className="h-5 w-5 text-primary" />

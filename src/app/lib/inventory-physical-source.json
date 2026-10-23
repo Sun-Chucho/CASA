@@ -1,0 +1,690 @@
+{
+  "kitchen": [
+    {
+      "sourceRow": 1,
+      "name": "Baking Oven",
+      "store": null,
+      "working": 1,
+      "total": 1,
+      "broken": null,
+      "good": 1,
+      "sourceLine": "KITCHEN ITEM 1: Baking Oven. Store Quantity: blank. Kitchen Quantity: 1. Total Quantity: 1. Broken Quantity: blank. Good Quantity: 1. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 2,
+      "name": "Frizer",
+      "store": 1,
+      "working": null,
+      "total": 1,
+      "broken": null,
+      "good": 1,
+      "sourceLine": "KITCHEN ITEM 2: Frizer. Store Quantity: 1. Kitchen Quantity: blank. Total Quantity: 1. Broken Quantity: blank. Good Quantity: 1. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 3,
+      "name": "Fridge",
+      "store": 1,
+      "working": null,
+      "total": 1,
+      "broken": null,
+      "good": 1,
+      "sourceLine": "KITCHEN ITEM 3: Fridge. Store Quantity: 1. Kitchen Quantity: blank. Total Quantity: 1. Broken Quantity: blank. Good Quantity: 1. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 4,
+      "name": "Food Wormer",
+      "store": null,
+      "working": 2,
+      "total": 2,
+      "broken": null,
+      "good": 2,
+      "sourceLine": "KITCHEN ITEM 4: Food Wormer. Store Quantity: blank. Kitchen Quantity: 2. Total Quantity: 2. Broken Quantity: blank. Good Quantity: 2. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 5,
+      "name": "Round Plate",
+      "store": null,
+      "working": 8,
+      "total": 8,
+      "broken": null,
+      "good": 8,
+      "sourceLine": "KITCHEN ITEM 5: Round Plate. Store Quantity: blank. Kitchen Quantity: 8. Total Quantity: 8. Broken Quantity: blank. Good Quantity: 8. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 6,
+      "name": "Squre Plate",
+      "store": null,
+      "working": 19,
+      "total": 19,
+      "broken": null,
+      "good": 19,
+      "sourceLine": "KITCHEN ITEM 6: Squre Plate. Store Quantity: blank. Kitchen Quantity: 19. Total Quantity: 19. Broken Quantity: blank. Good Quantity: 19. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 7,
+      "name": "Side Plate",
+      "store": 6,
+      "working": 12,
+      "total": 18,
+      "broken": null,
+      "good": 18,
+      "sourceLine": "KITCHEN ITEM 7: Side Plate. Store Quantity: 6. Kitchen Quantity: 12. Total Quantity: 18. Broken Quantity: blank. Good Quantity: 18. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 8,
+      "name": "Cups",
+      "store": 6,
+      "working": 23,
+      "total": 29,
+      "broken": null,
+      "good": 29,
+      "sourceLine": "KITCHEN ITEM 8: Cups. Store Quantity: 6. Kitchen Quantity: 23. Total Quantity: 29. Broken Quantity: blank. Good Quantity: 29. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 9,
+      "name": "Cups Soser",
+      "store": 6,
+      "working": 14,
+      "total": 20,
+      "broken": null,
+      "good": 20,
+      "sourceLine": "KITCHEN ITEM 9: Cups Soser. Store Quantity: 6. Kitchen Quantity: 14. Total Quantity: 20. Broken Quantity: blank. Good Quantity: 20. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 10,
+      "name": "Table Knife",
+      "store": 12,
+      "working": 23,
+      "total": 35,
+      "broken": null,
+      "good": 35,
+      "sourceLine": "KITCHEN ITEM 10: Table Knife. Store Quantity: 12. Kitchen Quantity: 23. Total Quantity: 35. Broken Quantity: blank. Good Quantity: 35. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 11,
+      "name": "Chef Knife",
+      "store": null,
+      "working": 4,
+      "total": 4,
+      "broken": 2,
+      "good": 2,
+      "sourceLine": "KITCHEN ITEM 11: Chef Knife. Store Quantity: blank. Kitchen Quantity: 4. Total Quantity: 4. Broken Quantity: 2. Good Quantity: 2. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 12,
+      "name": "Fish Plate",
+      "store": null,
+      "working": 6,
+      "total": 6,
+      "broken": null,
+      "good": 6,
+      "sourceLine": "KITCHEN ITEM 12: Fish Plate. Store Quantity: blank. Kitchen Quantity: 6. Total Quantity: 6. Broken Quantity: blank. Good Quantity: 6. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 13,
+      "name": "Air Fryer",
+      "store": 2,
+      "working": 3,
+      "total": 5,
+      "broken": null,
+      "good": 5,
+      "sourceLine": "KITCHEN ITEM 13: Air Fryer. Store Quantity: 2. Kitchen Quantity: 3. Total Quantity: 5. Broken Quantity: blank. Good Quantity: 5. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 14,
+      "name": "Small Semoth",
+      "store": null,
+      "working": 9,
+      "total": 9,
+      "broken": null,
+      "good": 9,
+      "sourceLine": "KITCHEN ITEM 14: Small Semoth. Store Quantity: blank. Kitchen Quantity: 9. Total Quantity: 9. Broken Quantity: blank. Good Quantity: 9. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 15,
+      "name": "Fork",
+      "store": 12,
+      "working": 9,
+      "total": 21,
+      "broken": null,
+      "good": 21,
+      "sourceLine": "KITCHEN ITEM 15: Fork. Store Quantity: 12. Kitchen Quantity: 9. Total Quantity: 21. Broken Quantity: blank. Good Quantity: 21. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 16,
+      "name": "Microwave",
+      "store": null,
+      "working": 1,
+      "total": 1,
+      "broken": null,
+      "good": null,
+      "sourceLine": "KITCHEN ITEM 16: Microwave. Store Quantity: blank. Kitchen Quantity: 1. Total Quantity: 1. Broken Quantity: blank. Good Quantity: blank. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 17,
+      "name": "Food Spoon",
+      "store": 12,
+      "working": 21,
+      "total": 33,
+      "broken": null,
+      "good": 33,
+      "sourceLine": "KITCHEN ITEM 17: Food Spoon. Store Quantity: 12. Kitchen Quantity: 21. Total Quantity: 33. Broken Quantity: blank. Good Quantity: 33. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 18,
+      "name": "Small Bowls",
+      "store": 6,
+      "working": 5,
+      "total": 11,
+      "broken": null,
+      "good": 11,
+      "sourceLine": "KITCHEN ITEM 18: Small Bowls. Store Quantity: 6. Kitchen Quantity: 5. Total Quantity: 11. Broken Quantity: blank. Good Quantity: 11. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 19,
+      "name": "Large Bowls",
+      "store": null,
+      "working": 2,
+      "total": 2,
+      "broken": null,
+      "good": 2,
+      "sourceLine": "KITCHEN ITEM 19: Large Bowls. Store Quantity: blank. Kitchen Quantity: 2. Total Quantity: 2. Broken Quantity: blank. Good Quantity: 2. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 20,
+      "name": "Brender",
+      "store": null,
+      "working": 1,
+      "total": 1,
+      "broken": null,
+      "good": 1,
+      "sourceLine": "KITCHEN ITEM 20: Brender. Store Quantity: blank. Kitchen Quantity: 1. Total Quantity: 1. Broken Quantity: blank. Good Quantity: 1. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 21,
+      "name": "Toast Machine",
+      "store": null,
+      "working": 1,
+      "total": 1,
+      "broken": null,
+      "good": 1,
+      "sourceLine": "KITCHEN ITEM 21: Toast Machine. Store Quantity: blank. Kitchen Quantity: 1. Total Quantity: 1. Broken Quantity: blank. Good Quantity: 1. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 22,
+      "name": "Tray Sever",
+      "store": null,
+      "working": 4,
+      "total": 4,
+      "broken": 2,
+      "good": 2,
+      "sourceLine": "KITCHEN ITEM 22: Tray Sever. Store Quantity: blank. Kitchen Quantity: 4. Total Quantity: 4. Broken Quantity: 2. Good Quantity: 2. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 23,
+      "name": "Cutting Bod",
+      "store": null,
+      "working": 2,
+      "total": 2,
+      "broken": null,
+      "good": 2,
+      "sourceLine": "KITCHEN ITEM 23: Cutting Bod. Store Quantity: blank. Kitchen Quantity: 2. Total Quantity: 2. Broken Quantity: blank. Good Quantity: 2. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 24,
+      "name": "Suger Pot",
+      "store": null,
+      "working": 5,
+      "total": 5,
+      "broken": null,
+      "good": 5,
+      "sourceLine": "KITCHEN ITEM 24: Suger Pot. Store Quantity: blank. Kitchen Quantity: 5. Total Quantity: 5. Broken Quantity: blank. Good Quantity: 5. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 25,
+      "name": "Salt Pot",
+      "store": null,
+      "working": 6,
+      "total": 6,
+      "broken": 2,
+      "good": 4,
+      "sourceLine": "KITCHEN ITEM 25: Salt Pot. Store Quantity: blank. Kitchen Quantity: 6. Total Quantity: 6. Broken Quantity: 2. Good Quantity: 4. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 26,
+      "name": "Tissue Holder",
+      "store": null,
+      "working": 4,
+      "total": 4,
+      "broken": null,
+      "good": 4,
+      "sourceLine": "KITCHEN ITEM 26: Tissue Holder. Store Quantity: blank. Kitchen Quantity: 4. Total Quantity: 4. Broken Quantity: blank. Good Quantity: 4. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 27,
+      "name": "Cooking Pot",
+      "store": null,
+      "working": 8,
+      "total": 8,
+      "broken": null,
+      "good": 8,
+      "sourceLine": "KITCHEN ITEM 27: Cooking Pot. Store Quantity: blank. Kitchen Quantity: 8. Total Quantity: 8. Broken Quantity: blank. Good Quantity: 8. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 28,
+      "name": "Flypan",
+      "store": null,
+      "working": 3,
+      "total": 3,
+      "broken": null,
+      "good": 3,
+      "sourceLine": "KITCHEN ITEM 28: Flypan. Store Quantity: blank. Kitchen Quantity: 3. Total Quantity: 3. Broken Quantity: blank. Good Quantity: 3. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 29,
+      "name": "Stove",
+      "store": null,
+      "working": 2,
+      "total": 2,
+      "broken": null,
+      "good": 2,
+      "sourceLine": "KITCHEN ITEM 29: Stove. Store Quantity: blank. Kitchen Quantity: 2. Total Quantity: 2. Broken Quantity: blank. Good Quantity: 2. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 30,
+      "name": "Small Juice Glass",
+      "store": null,
+      "working": 18,
+      "total": 0,
+      "broken": null,
+      "good": null,
+      "sourceLine": "KITCHEN ITEM 30: Small Juice Glass. Store Quantity: blank. Kitchen Quantity: 18. Total Quantity: 0 as written in the document. Broken Quantity: blank. Good Quantity: blank. Add Quantity: blank. IMPORTANT: Flag this record for manual verification because Kitchen Quantity and Total Quantity disagree."
+    },
+    {
+      "sourceRow": 31,
+      "name": "Big Juice Glass",
+      "store": null,
+      "working": null,
+      "total": null,
+      "broken": null,
+      "good": null,
+      "sourceLine": "KITCHEN ITEM 31: Big Juice Glass. Store Quantity: blank. Kitchen Quantity: blank. Total Quantity: blank. Broken Quantity: blank. Good Quantity: blank. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 32,
+      "name": "Saving Spoon",
+      "store": null,
+      "working": 12,
+      "total": 12,
+      "broken": 3,
+      "good": 9,
+      "sourceLine": "KITCHEN ITEM 32: Saving Spoon. Store Quantity: blank. Kitchen Quantity: 12. Total Quantity: 12. Broken Quantity: 3. Good Quantity: 9. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 33,
+      "name": "Tea Spoon",
+      "store": null,
+      "working": 6,
+      "total": 6,
+      "broken": null,
+      "good": 6,
+      "sourceLine": "KITCHEN ITEM 33: Tea Spoon. Store Quantity: blank. Kitchen Quantity: 6. Total Quantity: 6. Broken Quantity: blank. Good Quantity: 6. Add Quantity: blank."
+    },
+    {
+      "sourceRow": 34,
+      "name": "Napkin",
+      "store": 12,
+      "working": null,
+      "total": 12,
+      "broken": null,
+      "good": 12,
+      "sourceLine": "KITCHEN ITEM 34: Napkin. Store Quantity: 12. Kitchen Quantity: blank. Total Quantity: 12. Broken Quantity: blank. Good Quantity: 12. Add Quantity: blank."
+    }
+  ],
+  "bar": [
+    {
+      "sourceRow": 1,
+      "name": "Juice/Water Glass",
+      "store": 30,
+      "working": 9,
+      "total": null,
+      "broken": 8,
+      "good": 1,
+      "sourceLine": "BAR ITEM 1: Juice/Water Glass. Store Quantity: 30. Bar Quantity: 9. Broken Quantity: 8. Good Quantity: 1. Add From Store: blank. Add New: blank."
+    },
+    {
+      "sourceRow": 2,
+      "name": "Bear Glass",
+      "store": null,
+      "working": 6,
+      "total": null,
+      "broken": 2,
+      "good": 4,
+      "sourceLine": "BAR ITEM 2: Bear Glass. Store Quantity: blank. Bar Quantity: 6. Broken Quantity: 2. Good Quantity: 4. Add From Store: unclear handwritten mark. Add New: blank."
+    },
+    {
+      "sourceRow": 3,
+      "name": "Whisky Glass",
+      "store": 14,
+      "working": 6,
+      "total": null,
+      "broken": 4,
+      "good": 2,
+      "sourceLine": "BAR ITEM 3: Whisky Glass. Store Quantity: 14. Bar Quantity: 6. Broken Quantity: 4. Good Quantity: 2. Add From Store: blank. Add New: blank."
+    },
+    {
+      "sourceRow": 4,
+      "name": "Wine Glass",
+      "store": null,
+      "working": 7,
+      "total": null,
+      "broken": 1,
+      "good": 6,
+      "sourceLine": "BAR ITEM 4: Wine Glass. Store Quantity: blank. Bar Quantity: 7. Broken Quantity: 1. Good Quantity: 6. Add From Store: blank. Add New: blank."
+    },
+    {
+      "sourceRow": 5,
+      "name": "Champane Glass",
+      "store": null,
+      "working": 3,
+      "total": null,
+      "broken": 2,
+      "good": 1,
+      "sourceLine": "BAR ITEM 5: Champane Glass. Store Quantity: blank. Bar Quantity: 3. Broken Quantity: 2. Good Quantity: 1. Add From Store: blank. Add New: blank."
+    },
+    {
+      "sourceRow": 6,
+      "name": "Tot Glass",
+      "store": null,
+      "working": 6,
+      "total": null,
+      "broken": null,
+      "good": 6,
+      "sourceLine": "BAR ITEM 6: Tot Glass. Store Quantity: blank. Bar Quantity: 6. Broken Quantity: blank. Good Quantity: 6. Add From Store: blank. Add New: blank."
+    },
+    {
+      "sourceRow": 7,
+      "name": "Coctal Glass",
+      "store": null,
+      "working": 3,
+      "total": null,
+      "broken": null,
+      "good": 3,
+      "sourceLine": "BAR ITEM 7: Coctal Glass. Store Quantity: blank. Bar Quantity: 3. Broken Quantity: blank. Good Quantity: 3. Add From Store: blank. Add New: blank."
+    },
+    {
+      "sourceRow": 8,
+      "name": "Arsh Tray",
+      "store": null,
+      "working": 4,
+      "total": null,
+      "broken": 1,
+      "good": 3,
+      "sourceLine": "BAR ITEM 8: Arsh Tray. Store Quantity: blank. Bar Quantity: 4. Broken Quantity: 1. Good Quantity: 3. Add From Store: blank. Add New: blank."
+    },
+    {
+      "sourceRow": 9,
+      "name": "Opena",
+      "store": null,
+      "working": 2,
+      "total": null,
+      "broken": 1,
+      "good": 1,
+      "sourceLine": "BAR ITEM 9: Opena. Store Quantity: blank. Bar Quantity: 2. Broken Quantity: 1. Good Quantity: 1. Add From Store: blank. Add New: blank."
+    },
+    {
+      "sourceRow": 10,
+      "name": "Saving Tray",
+      "store": null,
+      "working": 2,
+      "total": null,
+      "broken": 1,
+      "good": 1,
+      "sourceLine": "BAR ITEM 10: Saving Tray. Store Quantity: blank. Bar Quantity: 2. Broken Quantity: 1. Good Quantity: 1. Add From Store: blank. Add New: blank."
+    },
+    {
+      "sourceRow": 11,
+      "name": "Ice Cube Backet",
+      "store": null,
+      "working": 2,
+      "total": null,
+      "broken": null,
+      "good": 2,
+      "sourceLine": "BAR ITEM 11: Ice Cube Backet. Store Quantity: blank. Bar Quantity: 2. Broken Quantity: blank. Good Quantity: 2. Add From Store: blank. Add New: blank."
+    },
+    {
+      "sourceRow": 12,
+      "name": "Ice Maker",
+      "store": null,
+      "working": 1,
+      "total": null,
+      "broken": 1,
+      "good": null,
+      "sourceLine": "BAR ITEM 12: Ice Maker. Store Quantity: blank. Bar Quantity: 1. Broken Quantity: 1. Good Quantity: blank. Add From Store: blank. Add New: blank."
+    },
+    {
+      "sourceRow": 13,
+      "name": "Fridge",
+      "store": null,
+      "working": 1,
+      "total": null,
+      "broken": null,
+      "good": 1,
+      "sourceLine": "BAR ITEM 13: Fridge. Store Quantity: blank. Bar Quantity: 1. Broken Quantity: blank. Good Quantity: 1. Add From Store: blank. Add New: blank."
+    },
+    {
+      "sourceRow": 14,
+      "name": "Tissue Holder",
+      "store": null,
+      "working": 6,
+      "total": null,
+      "broken": null,
+      "good": 6,
+      "sourceLine": "BAR ITEM 14: Tissue Holder. Store Quantity: blank. Bar Quantity: 6. Broken Quantity: blank. Good Quantity: 6. Add From Store: blank. Add New: blank."
+    },
+    {
+      "sourceRow": 15,
+      "name": "Top Glass",
+      "store": null,
+      "working": 6,
+      "total": null,
+      "broken": null,
+      "good": 6,
+      "sourceLine": "BAR ITEM 15: Top Glass. Store Quantity: blank. Bar Quantity: 6. Broken Quantity: blank. Good Quantity: 6. Add From Store: blank. Add New: blank."
+    },
+    {
+      "sourceRow": 16,
+      "name": "Glant Glass",
+      "store": null,
+      "working": 6,
+      "total": null,
+      "broken": 3,
+      "good": 3,
+      "sourceLine": "BAR ITEM 16: Glant Glass. Store Quantity: blank. Bar Quantity: 6. Broken Quantity: 3. Good Quantity: 3. Add From Store: blank. Add New: blank."
+    },
+    {
+      "sourceRow": 17,
+      "name": "Mope Backet",
+      "store": null,
+      "working": 1,
+      "total": null,
+      "broken": null,
+      "good": 1,
+      "sourceLine": "BAR ITEM 17: Mope Backet. Store Quantity: blank. Bar Quantity: 1. Broken Quantity: blank. Good Quantity: 1. Add From Store: blank. Add New: blank."
+    },
+    {
+      "sourceRow": 18,
+      "name": "Bill Holder",
+      "store": null,
+      "working": 2,
+      "total": null,
+      "broken": null,
+      "good": 2,
+      "sourceLine": "BAR ITEM 18: Bill Holder. Store Quantity: blank. Bar Quantity: 2. Broken Quantity: blank. Good Quantity: 2. Add From Store: blank. Add New: blank."
+    }
+  ],
+  "housekeeping": [
+    {
+      "sourceRow": 1,
+      "name": "Bedsheet",
+      "old": 28,
+      "recorded": 8,
+      "balance": 36,
+      "unit": "pieces",
+      "sourceLine": "HOUSEKEEPING ITEM 1: Bedsheet. Old Quantity: 28 pieces. Recorded Quantity: 8 pieces. Balance: 36 pieces."
+    },
+    {
+      "sourceRow": 2,
+      "name": "Duvet",
+      "old": null,
+      "recorded": 5,
+      "balance": 5,
+      "unit": "pieces",
+      "sourceLine": "HOUSEKEEPING ITEM 2: Duvet. Old Quantity: blank. Recorded Quantity: 5 pieces. Balance: 5 pieces."
+    },
+    {
+      "sourceRow": 3,
+      "name": "Duvet Cover",
+      "old": null,
+      "recorded": 8,
+      "balance": 8,
+      "unit": "pieces",
+      "sourceLine": "HOUSEKEEPING ITEM 3: Duvet Cover. Old Quantity: blank. Recorded Quantity: 8 pieces. Balance: 8 pieces."
+    },
+    {
+      "sourceRow": 4,
+      "name": "Sleepers",
+      "old": null,
+      "recorded": 5,
+      "balance": 5,
+      "unit": "pairs",
+      "sourceLine": "HOUSEKEEPING ITEM 4: Sleepers. Old Quantity: blank. Recorded Quantity: 5 pairs. Balance: 5 pairs."
+    },
+    {
+      "sourceRow": 5,
+      "name": "Pillow Case",
+      "old": 52,
+      "recorded": 20,
+      "balance": 72,
+      "unit": "pieces",
+      "sourceLine": "HOUSEKEEPING ITEM 5: Pillow Case. Old Quantity: 52 pieces. Recorded Quantity: 20 pieces. Balance: 72 pieces."
+    },
+    {
+      "sourceRow": 6,
+      "name": "Big Towel",
+      "old": 12,
+      "recorded": 8,
+      "balance": 20,
+      "unit": "pieces",
+      "sourceLine": "HOUSEKEEPING ITEM 6: Big Towel. Old Quantity: 12 pieces. Recorded Quantity: 8 pieces. Balance: 20 pieces."
+    },
+    {
+      "sourceRow": 7,
+      "name": "Small Towel",
+      "old": null,
+      "recorded": 8,
+      "balance": 8,
+      "unit": "pieces",
+      "sourceLine": "HOUSEKEEPING ITEM 7: Small Towel. Old Quantity: blank. Recorded Quantity: 8 pieces. Balance: 8 pieces."
+    },
+    {
+      "sourceRow": 8,
+      "name": "Hand Towel/Face Towel",
+      "old": null,
+      "recorded": 8,
+      "balance": 8,
+      "unit": "pieces",
+      "sourceLine": "HOUSEKEEPING ITEM 8: Hand Towel/Face Towel. Old Quantity: blank. Recorded Quantity: 8 pieces. Balance: 8 pieces."
+    },
+    {
+      "sourceRow": 9,
+      "name": "Bath Malt",
+      "old": null,
+      "recorded": 5,
+      "balance": 5,
+      "unit": "pieces",
+      "sourceLine": "HOUSEKEEPING ITEM 9: Bath Malt. Old Quantity: blank. Recorded Quantity: 5 pieces. Balance: 5 pieces."
+    },
+    {
+      "sourceRow": 10,
+      "name": "Blanket",
+      "old": null,
+      "recorded": 5,
+      "balance": 5,
+      "unit": "pieces",
+      "sourceLine": "HOUSEKEEPING ITEM 10: Blanket. Old Quantity: blank. Recorded Quantity: 5 pieces. Balance: 5 pieces."
+    },
+    {
+      "sourceRow": 11,
+      "name": "Small Pillow",
+      "old": null,
+      "recorded": 10,
+      "balance": 10,
+      "unit": "pieces",
+      "sourceLine": "HOUSEKEEPING ITEM 11: Small Pillow. Old Quantity: blank. Recorded Quantity: 10 pieces. Balance: 10 pieces."
+    },
+    {
+      "sourceRow": 12,
+      "name": "Big Pillows",
+      "old": null,
+      "recorded": 20,
+      "balance": 20,
+      "unit": "pieces",
+      "sourceLine": "HOUSEKEEPING ITEM 12: Big Pillows. Old Quantity: blank. Recorded Quantity: 20 pieces. Balance: 20 pieces."
+    },
+    {
+      "sourceRow": 13,
+      "name": "Woodope Hang",
+      "old": null,
+      "recorded": 30,
+      "balance": 30,
+      "unit": "pieces",
+      "sourceLine": "HOUSEKEEPING ITEM 13: Woodope Hang. Old Quantity: blank. Recorded Quantity: 30 pieces. Balance: 30 pieces."
+    },
+    {
+      "sourceRow": 14,
+      "name": "Dust Bin",
+      "old": null,
+      "recorded": 5,
+      "balance": 5,
+      "unit": "pieces",
+      "sourceLine": "HOUSEKEEPING ITEM 14: Dust Bin. Old Quantity: blank. Recorded Quantity: 5 pieces. Balance: 5 pieces."
+    },
+    {
+      "sourceRow": 15,
+      "name": "Coffee Maker",
+      "old": null,
+      "recorded": 3,
+      "balance": 3,
+      "unit": "pieces",
+      "sourceLine": "HOUSEKEEPING ITEM 15: Coffee Maker. Old Quantity: blank. Recorded Quantity: 3 pieces. Balance: 3 pieces."
+    },
+    {
+      "sourceRow": 16,
+      "name": "Cups & Soser",
+      "old": null,
+      "recorded": 12,
+      "balance": 12,
+      "unit": "pieces",
+      "sourceLine": "HOUSEKEEPING ITEM 16: Cups & Soser. Old Quantity: blank. Recorded Quantity: 12 pieces. Balance: 12 pieces."
+    },
+    {
+      "sourceRow": 17,
+      "name": "Tea Spoons",
+      "old": null,
+      "recorded": 12,
+      "balance": 12,
+      "unit": "pieces",
+      "sourceLine": "HOUSEKEEPING ITEM 17: Tea Spoons. Old Quantity: blank. Recorded Quantity: 12 pieces. Balance: 12 pieces."
+    },
+    {
+      "sourceRow": 18,
+      "name": "Side Bed",
+      "old": null,
+      "recorded": 5,
+      "balance": 5,
+      "unit": "pieces",
+      "sourceLine": "HOUSEKEEPING ITEM 18: Side Bed. Old Quantity: blank. Recorded Quantity: 5 pieces. Balance: 5 pieces."
+    }
+  ]
+}

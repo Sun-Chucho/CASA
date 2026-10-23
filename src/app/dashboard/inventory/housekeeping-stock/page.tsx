@@ -2,9 +2,18 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { readJson, writeJson } from "@/app/lib/storage";
+import { importPhysicalStock } from "@/app/lib/inventory-physical-import";
+import { hydrateStorageKeyFromFirebase, transactSyncedStorageKeys } from "@/app/lib/firebase-sync";
+import { readRoomsState, STORAGE_ROOMS } from "@/app/lib/rooms-storage";
+import { readStoredRole } from "@/app/lib/auth";
+import { readActiveSessionUsername } from "@/app/lib/login-profiles";
 import {
   HousekeepingItem,
   INV_HOUSEKEEPING_ITEMS_KEY,
+  INV_HOUSEKEEPING_MOVEMENTS_KEY,
+  INV_ROOM_STOCK_KEY,
+  INV_ROOM_MOVEMENTS_KEY,
+  RoomStockRecord,
   downloadCSV,
 } from "@/app/lib/inventory-manager";
 import { Button } from "@/components/ui/button";
@@ -34,6 +43,7 @@ function labelClass(extra = "") {
 export default function HousekeepingStockPage() {
   const [items, setItems] = useState<HousekeepingItem[]>([]);
   const [search, setSearch] = useState("");
+  const [importReport, setImportReport] = useState("");
 
   const [addItemOpen, setAddItemOpen] = useState(false);
   const [addStockOpen, setAddStockOpen] = useState(false);
@@ -43,16 +53,21 @@ export default function HousekeepingStockPage() {
 
   const [form, setForm] = useState({ name: "", unit: "", openingStock: "", notes: "" });
   const [addStockForm, setAddStockForm] = useState({ itemId: "", quantity: "" });
-  const [issueForm, setIssueForm] = useState({ itemId: "", quantity: "" });
+  const [issueForm, setIssueForm] = useState({ itemId: "", quantity: "", roomId: "" });
+  const [rooms, setRooms] = useState(readRoomsState);
   const [editForm, setEditForm] = useState({ name: "", unit: "", openingStock: "", stockAdded: "", stockIssued: "", notes: "" });
+  const [editReason, setEditReason] = useState("");
 
   const load = () => {
     const stored = readJson<HousekeepingItem[]>(INV_HOUSEKEEPING_ITEMS_KEY) ?? [];
     setItems(stored.filter((i) => !i.deletedAt));
+    setRooms(readRoomsState());
   };
 
   useEffect(() => {
     load();
+    void hydrateStorageKeyFromFirebase(STORAGE_ROOMS).then(load);
+    void importPhysicalStock("housekeeping").then((report) => { setImportReport(`Physical stock import: ${report.imported} imported, ${report.updated} linked, ${report.skipped} skipped, ${report.flagged} flagged for review.`); load(); }).catch(() => setImportReport("Physical stock import could not complete. Reopen this page when the database is available."));
     const handler = () => load();
     window.addEventListener("orange-hotel-storage-updated", handler);
     return () => window.removeEventListener("orange-hotel-storage-updated", handler);
@@ -64,75 +79,121 @@ export default function HousekeepingStockPage() {
     return items.filter((i) => i.name.toLowerCase().includes(q));
   }, [items, search]);
 
-  const handleAddItem = () => {
+  const handleAddItem = async () => {
     if (!form.name.trim() || !form.unit.trim()) return;
+    if (items.some((item) => item.name.trim().toLowerCase() === form.name.trim().toLowerCase())) return window.alert("This item exists. Use Add Stock.");
     const now = Date.now();
+    const openingStock = Number(form.openingStock);
+    if (!Number.isInteger(openingStock) || openingStock < 0) return window.alert("Enter a valid non-negative whole quantity.");
     const newItem: HousekeepingItem = {
       id: crypto.randomUUID(),
       name: form.name.trim(),
       unit: form.unit.trim(),
-      openingStock: Math.max(0, Number(form.openingStock) || 0),
+      openingStock,
       stockAdded: 0,
       stockIssued: 0,
       notes: form.notes.trim() || undefined,
       createdAt: now,
       updatedAt: now,
     };
-    const all = readJson<HousekeepingItem[]>(INV_HOUSEKEEPING_ITEMS_KEY) ?? [];
-    all.push(newItem);
-    void writeJson(INV_HOUSEKEEPING_ITEMS_KEY, all);
-    setItems(all.filter((i) => !i.deletedAt));
+    try {
+      await transactSyncedStorageKeys([INV_HOUSEKEEPING_ITEMS_KEY, INV_HOUSEKEEPING_MOVEMENTS_KEY], (current) => {
+        const all = (current[INV_HOUSEKEEPING_ITEMS_KEY] as HousekeepingItem[] | null) ?? [];
+        if (all.some((item) => !item.deletedAt && item.name.trim().toLowerCase() === newItem.name.toLowerCase())) throw new Error("This item already exists. Use Add Stock.");
+        const movement = { id: newItem.id, itemId: newItem.id, itemName: newItem.name, fromLocation: "new receipt", toLocation: "housekeeping", quantity: openingStock, type: "add", user: readActiveSessionUsername(readStoredRole() ?? "unknown"), createdAt: now };
+        return { [INV_HOUSEKEEPING_ITEMS_KEY]: [...all, newItem], [INV_HOUSEKEEPING_MOVEMENTS_KEY]: [...((current[INV_HOUSEKEEPING_MOVEMENTS_KEY] as unknown[] | null) ?? []), movement] };
+      });
+    } catch (error) { window.alert(error instanceof Error ? error.message : "Could not add item."); return; }
+    load();
     setForm({ name: "", unit: "", openingStock: "", notes: "" });
     setAddItemOpen(false);
   };
 
-  const handleAddStock = () => {
+  const handleAddStock = async () => {
     if (!addStockForm.itemId) return;
-    const qty = Math.max(0, Number(addStockForm.quantity) || 0);
-    if (qty === 0) return;
-    const all = readJson<HousekeepingItem[]>(INV_HOUSEKEEPING_ITEMS_KEY) ?? [];
-    const updated = all.map((i) => i.id !== addStockForm.itemId ? i : { ...i, stockAdded: i.stockAdded + qty, updatedAt: Date.now() });
-    void writeJson(INV_HOUSEKEEPING_ITEMS_KEY, updated);
-    setItems(updated.filter((i) => !i.deletedAt));
+    const qty = Number(addStockForm.quantity);
+    if (!Number.isInteger(qty) || qty <= 0) return window.alert("Enter a positive whole quantity.");
+    const now = Date.now();
+    const movementId = crypto.randomUUID();
+    try {
+      await transactSyncedStorageKeys([INV_HOUSEKEEPING_ITEMS_KEY, INV_HOUSEKEEPING_MOVEMENTS_KEY], (current) => {
+        const all = (current[INV_HOUSEKEEPING_ITEMS_KEY] as HousekeepingItem[] | null) ?? [];
+        const item = all.find((entry) => entry.id === addStockForm.itemId && !entry.deletedAt);
+        if (!item) throw new Error("Item no longer exists.");
+        const movement = { id: movementId, itemId: item.id, itemName: item.name, fromLocation: "new receipt", toLocation: "housekeeping", quantity: qty, type: "add", user: readActiveSessionUsername(readStoredRole() ?? "unknown"), createdAt: now };
+        return { [INV_HOUSEKEEPING_ITEMS_KEY]: all.map((entry) => entry.id === item.id ? { ...entry, stockAdded: entry.stockAdded + qty, updatedAt: now } : entry), [INV_HOUSEKEEPING_MOVEMENTS_KEY]: [...((current[INV_HOUSEKEEPING_MOVEMENTS_KEY] as unknown[] | null) ?? []), movement] };
+      });
+    } catch (error) { window.alert(error instanceof Error ? error.message : "Stock addition failed."); return; }
+    load();
     setAddStockForm({ itemId: "", quantity: "" });
     setAddStockOpen(false);
   };
 
-  const handleIssueStock = () => {
-    if (!issueForm.itemId) return;
-    const qty = Math.max(0, Number(issueForm.quantity) || 0);
-    if (qty === 0) return;
-    const all = readJson<HousekeepingItem[]>(INV_HOUSEKEEPING_ITEMS_KEY) ?? [];
-    const updated = all.map((i) => i.id !== issueForm.itemId ? i : { ...i, stockIssued: i.stockIssued + qty, updatedAt: Date.now() });
-    void writeJson(INV_HOUSEKEEPING_ITEMS_KEY, updated);
-    setItems(updated.filter((i) => !i.deletedAt));
-    setIssueForm({ itemId: "", quantity: "" });
-    setIssueStockOpen(false);
+  const handleIssueStock = async () => {
+    const qty = Number(issueForm.quantity);
+    if (!issueForm.itemId || !issueForm.roomId || !Number.isInteger(qty) || qty <= 0) return window.alert("Select an item and room, then enter a positive whole quantity.");
+    if (!rooms.some((room) => room.number === issueForm.roomId)) return window.alert("Select a valid room.");
+    try {
+      const keys = [INV_HOUSEKEEPING_ITEMS_KEY, INV_ROOM_STOCK_KEY, INV_HOUSEKEEPING_MOVEMENTS_KEY, INV_ROOM_MOVEMENTS_KEY];
+      const movementId = crypto.randomUUID();
+      const now = Date.now();
+      await transactSyncedStorageKeys(keys, (current) => {
+        const all = (current[INV_HOUSEKEEPING_ITEMS_KEY] as HousekeepingItem[] | null) ?? [];
+        const item = all.find((entry) => entry.id === issueForm.itemId && !entry.deletedAt);
+        if (!item) throw new Error("This item no longer exists.");
+        const available = item.openingStock + item.stockAdded - item.stockIssued;
+        if (available < qty) throw new Error(`Only ${available} units remain in Housekeeping.`);
+        const records = (current[INV_ROOM_STOCK_KEY] as RoomStockRecord[] | null) ?? [];
+        const existing = records.find((record) => record.roomId === issueForm.roomId);
+        const roomItems = [...(existing?.items ?? [])];
+        const index = roomItems.findIndex((entry) => entry.itemName.trim().toLowerCase() === item.name.trim().toLowerCase() && entry.unit === item.unit && entry.condition === "good");
+        if (index >= 0) roomItems[index] = { ...roomItems[index], quantity: roomItems[index].quantity + qty };
+        else roomItems.push({ itemName: item.name, quantity: qty, unit: item.unit, condition: "good" });
+        const nextRoom = { roomId: issueForm.roomId, items: roomItems, lastUpdated: now };
+        const movement = { id: movementId, itemId: item.id, itemName: item.name, fromLocation: "housekeeping", toLocation: `room:${issueForm.roomId}`, quantity: qty, type: "transfer", user: readActiveSessionUsername(readStoredRole() ?? "unknown"), createdAt: now };
+        return {
+          [INV_HOUSEKEEPING_ITEMS_KEY]: all.map((entry) => entry.id === item.id ? { ...entry, stockIssued: entry.stockIssued + qty, updatedAt: now } : entry),
+          [INV_ROOM_STOCK_KEY]: existing ? records.map((record) => record.roomId === issueForm.roomId ? nextRoom : record) : [...records, nextRoom],
+          [INV_HOUSEKEEPING_MOVEMENTS_KEY]: [...((current[INV_HOUSEKEEPING_MOVEMENTS_KEY] as unknown[] | null) ?? []), movement],
+          [INV_ROOM_MOVEMENTS_KEY]: [...((current[INV_ROOM_MOVEMENTS_KEY] as unknown[] | null) ?? []), movement],
+        };
+      });
+      load();
+      setIssueForm({ itemId: "", quantity: "", roomId: "" });
+      setIssueStockOpen(false);
+    } catch (error) { window.alert(error instanceof Error ? error.message : "Could not issue stock."); }
   };
 
-  const handleEdit = () => {
+  const handleEdit = async () => {
     if (!editItem) return;
-    const all = readJson<HousekeepingItem[]>(INV_HOUSEKEEPING_ITEMS_KEY) ?? [];
-    const updated = all.map((i) => {
-      if (i.id !== editItem.id) return i;
-      return {
-        ...i,
-        name: editForm.name.trim() || i.name,
-        unit: editForm.unit.trim() || i.unit,
-        openingStock: Math.max(0, Number(editForm.openingStock) || 0),
-        stockAdded: Math.max(0, Number(editForm.stockAdded) || 0),
-        stockIssued: Math.max(0, Number(editForm.stockIssued) || 0),
-        notes: editForm.notes.trim() || undefined,
-        updatedAt: Date.now(),
-      };
-    });
-    void writeJson(INV_HOUSEKEEPING_ITEMS_KEY, updated);
-    setItems(updated.filter((i) => !i.deletedAt));
+    const opening = Number(editForm.openingStock);
+    const added = Number(editForm.stockAdded);
+    const issued = Number(editForm.stockIssued);
+    if (![opening, added, issued].every((value) => Number.isInteger(value) && value >= 0) || opening + added < issued) return window.alert("Enter valid quantities; issued stock cannot exceed stock available.");
+    if ((opening !== editItem.openingStock || added !== editItem.stockAdded || issued !== editItem.stockIssued) && !editReason.trim()) return window.alert("Enter a reason for the stock adjustment.");
+    if ((opening !== editItem.openingStock || added !== editItem.stockAdded || issued !== editItem.stockIssued) && readStoredRole() !== "manager") return window.alert("Manager access is required for quantity adjustments.");
+    const itemId = editItem.id;
+    const now = Date.now();
+    const movementId = crypto.randomUUID();
+    try {
+      await transactSyncedStorageKeys([INV_HOUSEKEEPING_ITEMS_KEY, INV_HOUSEKEEPING_MOVEMENTS_KEY], (current) => {
+        const all = (current[INV_HOUSEKEEPING_ITEMS_KEY] as HousekeepingItem[] | null) ?? [];
+        const item = all.find((entry) => entry.id === itemId && !entry.deletedAt);
+        if (!item) throw new Error("Item no longer exists.");
+        const before = item.openingStock + item.stockAdded - item.stockIssued;
+        const after = opening + added - issued;
+        const updated = all.map((entry) => entry.id !== itemId ? entry : { ...entry, name: editForm.name.trim() || entry.name, unit: editForm.unit.trim() || entry.unit, openingStock: opening, stockAdded: added, stockIssued: issued, notes: editForm.notes.trim() || undefined, updatedAt: now });
+        const movement = { id: movementId, itemId, itemName: item.name, fromLocation: "housekeeping", toLocation: "housekeeping", quantity: after - before, type: "adjustment", reason: editReason.trim(), user: readActiveSessionUsername(readStoredRole() ?? "unknown"), createdAt: now };
+        return { [INV_HOUSEKEEPING_ITEMS_KEY]: updated, [INV_HOUSEKEEPING_MOVEMENTS_KEY]: [...((current[INV_HOUSEKEEPING_MOVEMENTS_KEY] as unknown[] | null) ?? []), movement] };
+      });
+    } catch (error) { window.alert(error instanceof Error ? error.message : "Item edit failed."); return; }
+    load();
     setEditItem(null);
   };
 
   const handleDelete = () => {
     if (!deleteItem) return;
+    if (readStoredRole() !== "manager") return window.alert("Manager access is required to archive items.");
     const all = readJson<HousekeepingItem[]>(INV_HOUSEKEEPING_ITEMS_KEY) ?? [];
     const updated = all.map((i) => (i.id === deleteItem.id ? { ...i, deletedAt: Date.now() } : i));
     void writeJson(INV_HOUSEKEEPING_ITEMS_KEY, updated);
@@ -142,6 +203,7 @@ export default function HousekeepingStockPage() {
 
   const openEdit = (item: HousekeepingItem) => {
     setEditForm({ name: item.name, unit: item.unit, openingStock: String(item.openingStock), stockAdded: String(item.stockAdded), stockIssued: String(item.stockIssued), notes: item.notes ?? "" });
+    setEditReason("");
     setEditItem(item);
   };
 
@@ -156,6 +218,7 @@ export default function HousekeepingStockPage() {
 
   return (
     <div className="p-6 space-y-6">
+      {importReport && <p role="status" className="rounded-lg border bg-white px-4 py-2 text-xs text-gray-600">{importReport}</p>}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-black uppercase tracking-widest">Housekeeping Stock</h1>
@@ -205,7 +268,7 @@ export default function HousekeepingStockPage() {
                 return (
                   <TableRow key={item.id} className="hover:bg-gray-50">
                     <TableCell className="text-xs text-gray-400">{idx + 1}</TableCell>
-                    <TableCell><span className="font-semibold text-sm">{item.name}</span></TableCell>
+                    <TableCell><span className="font-semibold text-sm">{item.name}</span>{item.source?.warnings.length ? <span className="ml-2 text-[10px] font-semibold text-amber-700" title={item.source.warnings.join(" ")}>SOURCE REVIEW</span> : null}</TableCell>
                     <TableCell className="text-right text-sm">{item.openingStock}</TableCell>
                     <TableCell className="text-right text-sm text-green-600">{item.stockAdded}</TableCell>
                     <TableCell className="text-right text-sm text-red-600">{item.stockIssued}</TableCell>
@@ -286,6 +349,7 @@ export default function HousekeepingStockPage() {
               </select>
             </div>
             <div><label className={labelClass("mb-1 block")}>Quantity to Issue</label><Input type="number" min={0} value={issueForm.quantity} onChange={(e) => setIssueForm((f) => ({ ...f, quantity: e.target.value }))} placeholder="0" /></div>
+            <div><label className={labelClass("mb-1 block")}>Destination room</label><select value={issueForm.roomId} onChange={(e) => setIssueForm((f) => ({ ...f, roomId: e.target.value }))} className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm"><option value="">Select room...</option>{rooms.map((room) => <option key={room.id} value={room.number}>Room {room.number}</option>)}</select></div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIssueStockOpen(false)} className="font-black uppercase tracking-widest text-xs">Cancel</Button>
@@ -310,6 +374,7 @@ export default function HousekeepingStockPage() {
               <div><label className={labelClass("mb-1 block")}>Issued</label><Input type="number" min={0} value={editForm.stockIssued} onChange={(e) => setEditForm((f) => ({ ...f, stockIssued: e.target.value }))} /></div>
             </div>
             <div><label className={labelClass("mb-1 block")}>Notes</label><Input value={editForm.notes} onChange={(e) => setEditForm((f) => ({ ...f, notes: e.target.value }))} /></div>
+            <div><label className={labelClass("mb-1 block")}>Reason for stock adjustment</label><Input value={editReason} onChange={(e) => setEditReason(e.target.value)} placeholder="Required when changing quantities" /></div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditItem(null)} className="font-black uppercase tracking-widest text-xs">Cancel</Button>

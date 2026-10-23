@@ -13,6 +13,16 @@ export const INV_RECEPTION_MOVEMENTS_KEY = "orange-hotel-inv-reception-movements
 export const INV_HOUSEKEEPING_ITEMS_KEY = "orange-hotel-inv-housekeeping-items";
 
 export const INV_ROOM_STOCK_KEY = "orange-hotel-inv-room-stock";
+export const INV_HOUSEKEEPING_MOVEMENTS_KEY = "orange-hotel-inv-housekeeping-movements";
+export const INV_ROOM_MOVEMENTS_KEY = "orange-hotel-inv-room-movements";
+
+export interface PhysicalSource {
+  batch: "cassa-physical-stock";
+  row: number;
+  original: string;
+  values: Record<string, number | null>;
+  warnings: string[];
+}
 
 // ─── Kitchen ─────────────────────────────────────────────────────────────────
 export interface KitchenItem {
@@ -26,17 +36,19 @@ export interface KitchenItem {
   createdAt: number;
   updatedAt: number;
   deletedAt?: number;
+  source?: PhysicalSource;
 }
 
 export interface KitchenMovement {
   id: string;
   itemId: string;
   itemName: string;
-  type: "add" | "transfer" | "broken" | "adjustment";
+  type: "add" | "transfer" | "broken" | "adjustment" | "archive";
   fromLocation?: "store" | "kitchen";
   toLocation?: "store" | "kitchen";
   quantity: number;
   notes?: string;
+  user?: string;
   createdAt: number;
 }
 
@@ -54,17 +66,19 @@ export interface BarItem {
   createdAt: number;
   updatedAt: number;
   deletedAt?: number;
+  source?: PhysicalSource;
 }
 
 export interface BarMovement {
   id: string;
   itemId: string;
   itemName: string;
-  type: "add" | "transfer" | "broken" | "adjustment";
+  type: "add" | "transfer" | "broken" | "adjustment" | "archive";
   fromLocation?: "store" | "bar";
   toLocation?: "store" | "bar";
   quantity: number;
   notes?: string;
+  user?: string;
   createdAt: number;
 }
 
@@ -80,6 +94,7 @@ export interface ReceptionItem {
   createdAt: number;
   updatedAt: number;
   deletedAt?: number;
+  source?: PhysicalSource;
 }
 
 // ─── Housekeeping ─────────────────────────────────────────────────────────────
@@ -94,6 +109,7 @@ export interface HousekeepingItem {
   updatedAt: number;
   createdAt: number;
   deletedAt?: number;
+  source?: PhysicalSource;
 }
 
 // ─── Room Stock ───────────────────────────────────────────────────────────────
@@ -115,7 +131,7 @@ export function downloadCSV(filename: string, headers: string[], rows: string[][
   const csv = [headers, ...rows]
     .map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","))
     .join("\n");
-  const blob = new Blob([csv], { type: "text/csv" });
+  const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

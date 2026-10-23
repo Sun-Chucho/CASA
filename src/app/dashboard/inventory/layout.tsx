@@ -40,11 +40,6 @@ export default function InventoryLayout({ children }: { children: React.ReactNod
           </p>
         </div>
         <nav className="flex gap-1 overflow-x-auto p-3 md:flex-col md:overflow-visible">
-          {isManager && (
-            <Link href="/dashboard" className="flex shrink-0 items-center gap-3 rounded-lg px-3 py-2.5 text-xs font-black uppercase tracking-wider text-gray-300 hover:bg-gray-800 hover:text-white">
-              <ArrowLeft className="h-4 w-4" /> Dashboard
-            </Link>
-          )}
           {NAV_ITEMS.map(({ label, href, icon: Icon }) => {
             const isActive = pathname === href || pathname.startsWith(href + "/");
             return (
@@ -64,13 +59,12 @@ export default function InventoryLayout({ children }: { children: React.ReactNod
               </Link>
             );
           })}
-          <Link href="/dashboard/company-stock" className="flex shrink-0 items-center gap-3 rounded-lg px-3 py-2.5 text-xs font-black uppercase tracking-wider text-gray-300 hover:bg-gray-800 hover:text-white">
-            <Building2 className="h-4 w-4" /> Company Stock
-          </Link>
-          <Link href="/dashboard/settings/password" className="flex shrink-0 items-center gap-3 rounded-lg px-3 py-2.5 text-xs font-black uppercase tracking-wider text-gray-300 hover:bg-gray-800 hover:text-white">
-            <Settings className="h-4 w-4" /> Settings
-          </Link>
         </nav>
+        <div className="border-t border-gray-800 p-3 text-xs">
+          {isManager && <Link href="/dashboard" className="flex items-center gap-2 rounded-lg px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white"><ArrowLeft className="h-4 w-4" /> Dashboard</Link>}
+          <Link href="/dashboard/company-stock" className="flex items-center gap-2 rounded-lg px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white"><Building2 className="h-4 w-4" /> Company Stock</Link>
+          <Link href="/dashboard/settings/password" className="flex items-center gap-2 rounded-lg px-3 py-2 text-gray-300 hover:bg-gray-800 hover:text-white"><Settings className="h-4 w-4" /> Settings</Link>
+        </div>
       </aside>
 
       <main className="min-h-0 min-w-0 flex-1 overflow-auto bg-gray-50">{children}</main>
