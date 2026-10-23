@@ -1,6 +1,6 @@
-import { INV_KITCHEN_ITEMS_KEY, KitchenItem } from "@/app/lib/inventory-manager";
 "use client";
 
+import { INV_KITCHEN_ITEMS_KEY, KitchenItem } from "@/app/lib/inventory-manager";
 import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import { readStoredRole } from "@/app/lib/auth";

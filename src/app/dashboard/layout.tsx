@@ -10,7 +10,7 @@ import { KitchenPurchaseHistoryEntry, STORAGE_KITCHEN_PURCHASE_HISTORY } from "@
 import { MainStoreItem, STORAGE_MAIN_STORE_ITEMS, getStoreItemLabel, normalizeBaristaProductTarget, normalizeStockName } from "@/app/lib/inventory-transfer";
 import { getTotLimit } from "@/app/lib/barista-stock";
 import { normalizeRole } from "@/app/lib/auth";
-import { hydrateStorageKeyFromFirebase, migrateVerifiedCasaLocalData } from "@/app/lib/firebase-sync";
+import { clearKitchenBarCacheOnce, hydrateStorageKeyFromFirebase, migrateVerifiedCasaLocalData } from "@/app/lib/firebase-sync";
 import { readJson, readPosState, STORAGE_BARISTA_STATE, STORAGE_KITCHEN_STATE, writeJson, writePosState } from "@/app/lib/storage";
 import { usePathname, useRouter } from "next/navigation";
 import { Bell, Home, Hotel, Search, User, Clock, Menu, WalletCards, ReceiptText, Package } from "lucide-react";
@@ -429,14 +429,7 @@ type AdditionalBaristaItem = Partial<InventoryItem> & {
   unit: string;
 };
 
-const BARISTA_ADDITIONAL_ITEMS: AdditionalBaristaItem[] = [
-  { barcode: "6200100630063", name: "Bacardi Superior White Rum (TOTS)", category: "Spirit", size: "750ml", stock: 1, totPerBottle: 30, buyingPrice: 45000, sellingPrice: 8000, minStock: 1, unit: "Bottle", totSold: 0, status: "ACTIVE" },
-  { barcode: "6200100640064", name: "Camino Real Blanco (TOTS)", category: "Spirit", size: "750ml", stock: 1, totPerBottle: 30, buyingPrice: 42000, sellingPrice: 8000, minStock: 1, unit: "Bottle", totSold: 0, status: "ACTIVE" },
-  { barcode: "6200100650065", name: "Captain Morgan Black Rum (TOTS)", category: "Spirit", size: "750ml", stock: 1, totPerBottle: 30, buyingPrice: 30000, sellingPrice: 5000, minStock: 1, unit: "Bottle", totSold: 0, status: "ACTIVE" },
-  { barcode: "6200100660066", name: "Buttlers Blue Curacao (TOTS)", category: "Liqueur", size: "750ml", stock: 1, totPerBottle: 30, buyingPrice: 35000, sellingPrice: 5000, minStock: 1, unit: "Bottle", totSold: 0, status: "ACTIVE" },
-  { barcode: "6200100670067", name: "Hennessy VSOP Box", category: "Cognac", size: "700ml", stock: 1, buyingPrice: 160000, sellingPrice: 250000, minStock: 1, unit: "Bottle", totSold: 0, status: "ACTIVE" },
-  { barcode: "6200100680068", name: "Jack Daniels", category: "Whisky", size: "700ml", stock: 1, totPerBottle: 30, buyingPrice: 70000, sellingPrice: 10000, minStock: 1, unit: "Bottle", totSold: 0, status: "ACTIVE" },
-] as const;
+const BARISTA_ADDITIONAL_ITEMS: AdditionalBaristaItem[] = [];
 
 const SODA_MERGE_GROUPS = [
   {
@@ -1102,6 +1095,7 @@ export default function DashboardLayout({
       }
 
       localStorage.setItem("orange-hotel-role", savedRole);
+      clearKitchenBarCacheOnce();
       migrateVerifiedCasaLocalData();
       setActiveUsername(readActiveSessionUsername(""));
       setRole(savedRole);

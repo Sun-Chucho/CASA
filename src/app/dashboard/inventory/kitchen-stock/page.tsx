@@ -89,14 +89,6 @@ export default function KitchenStockPage() {
     void writeJson(INV_KITCHEN_MOVEMENTS_KEY, movements);
   };
 
-  const saveItems = (updated: KitchenItem[]) => {
-    const all = readJson<KitchenItem[]>(INV_KITCHEN_ITEMS_KEY) ?? [];
-    const map = new Map(all.map((i) => [i.id, i]));
-    updated.forEach((i) => map.set(i.id, i));
-    void writeJson(INV_KITCHEN_ITEMS_KEY, Array.from(map.values()));
-    setItems(updated.filter((i) => !i.deletedAt));
-  };
-
   const filtered = useMemo(() => {
     let list = items;
     if (search.trim()) {

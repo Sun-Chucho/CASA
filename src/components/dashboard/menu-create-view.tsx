@@ -180,20 +180,19 @@ export function MenuCreateView() {
       setAuditTrail(Array.isArray(value) ? value : readJson<MenuAuditEntry[]>(STORAGE_MENU_AUDIT) ?? []);
     });
 
-  
-  const filteredKitchenMenuItems = kitchenMenuItems.filter((item) => {
-    const matchesSearch = !kitchenSearch.trim() || item.name.toLowerCase().includes(kitchenSearch.toLowerCase());
-    const matchesCat = kitchenFilterCategory === "all" || item.category === kitchenFilterCategory;
-    return matchesSearch && matchesCat;
-  });
-
-  return () => {
+    return () => {
       cancelled = true;
       unsubscribeKitchen();
       unsubscribeBarista();
       unsubscribeAudit();
     };
   }, []);
+
+  const filteredKitchenMenuItems = kitchenMenuItems.filter((item) => {
+    const matchesSearch = item.name.toLowerCase().includes(kitchenSearch.trim().toLowerCase());
+    const matchesCategory = kitchenFilterCategory === "all" || item.category === kitchenFilterCategory;
+    return matchesSearch && matchesCategory;
+  });
 
   const saveAuditEntry = (entry: MenuAuditEntry) => {
     setAuditTrail((current) => {

@@ -242,50 +242,12 @@ const normalizeCategory = (value: string, itemName = ""): Exclude<BaristaCategor
   return "coffee";
 };
 
-function normalizeBaristaMenuItemsFromInventory(inventory: InventoryItem[]): BaristaMenuItem[] {
-  const deduped = new Map<string, BaristaMenuItem>();
-
-  inventory
-    .filter((item) => {
-      const status = item.status?.toUpperCase() ?? "ACTIVE";
-      const category = item.category?.trim().toLowerCase() ?? "";
-      return status === "ACTIVE" && category !== "kitchen";
-    })
-    .forEach((item) => {
-      const name = getBaristaInventoryLabel(item);
-      const key = `${normalizeBaristaTarget(name)}|${(item.category ?? "").toLowerCase()}|${isTotInventoryItem(item) ? "tot" : "full"}`;
-      const nextMenuItem: BaristaMenuItem = {
-        id: item.id,
-        name,
-        price:
-          typeof item.sellingPrice === "number" && item.sellingPrice > 0
-            ? item.sellingPrice
-            : typeof item.price === "number" && item.price > 0
-              ? item.price
-              : 0,
-        category: normalizeCategory(item.category, name),
-        prepMinutes: 2,
-        barcode: item.barcode || "",
-      };
-      const existingItem = deduped.get(key);
-      if (!existingItem || nextMenuItem.price > existingItem.price || (!!nextMenuItem.barcode && !existingItem.barcode)) {
-        deduped.set(key, nextMenuItem);
-      }
-    });
-
-  return Array.from(deduped.values());
-}
-
 function syncBaristaMenuItemsWithSharedInventory(
   menuItems: BaristaMenuItem[],
   inventory: InventoryItem[],
   storeItems: MainStoreItem[],
 ) {
-  // The POS menu is authoritative: seeded drinks plus manager edits. Stock
-  // levels are resolved separately at render time via getMenuStockStatus.
-  if (menuItems.length === 0) {
-    return normalizeBaristaMenuItemsFromInventory(inventory);
-  }
+  // Stock records alone should not publish drinks to the menu.
   return menuItems.map((menuItem) => {
     const target = normalizeBaristaTarget(menuItem.name);
     const storeMatch = storeItems.find(
@@ -334,10 +296,6 @@ function getBaristaInventoryLabel(item: Pick<InventoryItem, "name" | "size">) {
   if (!size) return isTotItem ? `${baseName} (TOTS)` : baseName;
   if (rawName.toLowerCase().includes(size.toLowerCase())) return rawName;
   return isTotItem ? `${baseName} ${size} (TOTS)`.trim() : `${baseName} ${size}`.trim();
-}
-
-function isTotInventoryItem(item: Pick<InventoryItem, "name" | "totPerBottle">) {
-  return (typeof item.totPerBottle === "number" && item.totPerBottle > 0) || /\s*\(?TOTS?\)?$/i.test(item.name);
 }
 
 function buildSeedMenuItems(): BaristaMenuItem[] {

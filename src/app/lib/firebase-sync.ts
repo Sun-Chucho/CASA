@@ -259,6 +259,50 @@ export function getUnifiedLocalKey(baseKey: string): string {
   return `${CASA_LOCAL_STORAGE_PREFIX}${baseKey}`;
 }
 
+// Clear snapshots from browsers that were used before the kitchen/bar reset.
+// Otherwise an offline cache can publish the old records back to Firebase.
+export function clearKitchenBarCacheOnce() {
+  if (typeof window === "undefined") return;
+  const marker = `${CASA_LOCAL_STORAGE_PREFIX}kitchen-bar-reset-v1`;
+  if (localStorage.getItem(marker) === "1") return;
+
+  const keys = [
+    "orange-hotel-kitchen-state",
+    "orange-hotel-barista-state",
+    "orange-hotel-kitchen-tickets",
+    "orange-hotel-kitchen-seq",
+    "orange-hotel-kitchen-payments",
+    "orange-hotel-kitchen-menu",
+    "orange-hotel-barista-orders",
+    "orange-hotel-barista-seq",
+    "orange-hotel-barista-payments",
+    "orange-hotel-barista-menu",
+    "orange-hotel-inventory-items",
+    "orange-hotel-main-store-items",
+    "orange-hotel-inv-kitchen-items",
+    "orange-hotel-inv-kitchen-movements",
+    "orange-hotel-inv-bar-items",
+    "orange-hotel-inv-bar-movements",
+    "orange-hotel-barista-waste",
+    "orange-hotel-cancelled-tickets",
+    "orange-hotel-menu-audit-trail",
+    "orange-hotel-kitchen-purchase-session",
+    "orange-hotel-kitchen-purchase-history",
+    "orange-hotel-kitchen-daily-stock-session",
+    "orange-hotel-kitchen-daily-stock-history",
+    "orange-hotel-barista-purchase-session",
+    "orange-hotel-barista-purchase-history",
+    "orange-hotel-barista-daily-stock-session",
+    "orange-hotel-barista-daily-stock-history",
+  ];
+  keys.forEach((key) => {
+    localStorage.removeItem(getUnifiedLocalKey(key));
+    localStorage.removeItem(key);
+    localStorage.removeItem(getPendingSyncMarkerKey(key));
+  });
+  localStorage.setItem(marker, "1");
+}
+
 export const FIREBASE_SYNC_KEYS = [
   "orange-hotel-cashier-state",
   "orange-hotel-kitchen-state",
