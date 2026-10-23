@@ -323,6 +323,7 @@ export const FIREBASE_SYNC_KEYS = [
   "orange-hotel-cashier-state",
   "orange-hotel-kitchen-state",
   "orange-hotel-barista-state",
+  "orange-hotel-barista-stock-in-history",
   "orange-hotel-company-stock",
   "orange-hotel-inventory-items",
   "orange-hotel-main-store-items",

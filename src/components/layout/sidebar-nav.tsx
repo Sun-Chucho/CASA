@@ -41,6 +41,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Rooms', href: '/dashboard/rooms', icon: Hotel, roles: ['manager', 'director', 'cashier'] },
   { label: 'Kitchen Stock', href: '/dashboard/inventory/kitchen-stock', icon: Package, roles: ['manager', 'inventory'] },
   { label: 'Bar', href: '/dashboard/inventory/barista-stock', icon: Package, roles: ['manager'] },
+  { label: 'Stock In', href: '/dashboard/stock-in', icon: Package, roles: ['manager'] },
   { label: 'Inventory', href: '/dashboard/inventory', icon: Package, roles: [] },
   { label: 'Kitchen Menu', href: '/dashboard/menu-create', icon: FileSpreadsheet, roles: ['manager'] },
   { label: 'Company Stock', href: '/dashboard/company-stock', icon: Building2, roles: ['manager', 'director', 'inventory'] },

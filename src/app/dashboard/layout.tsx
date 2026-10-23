@@ -1041,6 +1041,7 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const isInventoryRoute = pathname === "/dashboard/inventory" || pathname.startsWith("/dashboard/inventory/");
   const router = useRouter();
   const [role, setRole] = useState<Role>('manager');
   const [shift, setShift] = useState<string | null>(null);
@@ -1053,9 +1054,9 @@ export default function DashboardLayout({
   const [usernameFeedback, setUsernameFeedback] = useState<string | null>(null);
 
   const allowedByRole: Record<Role, string[]> = {
-    manager: ['/dashboard', '/dashboard/rooms', '/dashboard/inventory', '/dashboard/inventory/kitchen-stock', '/dashboard/inventory/barista-stock', '/dashboard/menu-create', '/dashboard/company-stock', '/dashboard/cashier', '/dashboard/laundry', '/dashboard/expenses', '/dashboard/finances', '/dashboard/payments', '/dashboard/kitchen', '/dashboard/cancelled', '/dashboard/barista', '/dashboard/staff', '/dashboard/analytics', '/dashboard/settings', '/dashboard/settings/sync', '/dashboard/settings/password'],
+    manager: ['/dashboard', '/dashboard/rooms', '/dashboard/inventory', '/dashboard/inventory/kitchen-stock', '/dashboard/inventory/bar-stock', '/dashboard/inventory/reception-stock', '/dashboard/inventory/housekeeping-stock', '/dashboard/inventory/room-stock', '/dashboard/inventory/stock-downloads', '/dashboard/inventory/barista-stock', '/dashboard/stock-in', '/dashboard/menu-create', '/dashboard/company-stock', '/dashboard/cashier', '/dashboard/laundry', '/dashboard/expenses', '/dashboard/finances', '/dashboard/payments', '/dashboard/kitchen', '/dashboard/cancelled', '/dashboard/barista', '/dashboard/staff', '/dashboard/analytics', '/dashboard/settings', '/dashboard/settings/sync', '/dashboard/settings/password'],
     director: ['/dashboard', '/dashboard/rooms', '/dashboard/company-stock', '/dashboard/cashier', '/dashboard/laundry', '/dashboard/expenses', '/dashboard/finances', '/dashboard/payments', '/dashboard/kitchen', '/dashboard/barista', '/dashboard/staff', '/dashboard/analytics', '/dashboard/settings', '/dashboard/settings/sync', '/dashboard/settings/password'],
-    inventory: ['/dashboard/inventory', '/dashboard/inventory/kitchen-stock', '/dashboard/inventory/barista-stock', '/dashboard/company-stock', '/dashboard/settings/password'],
+    inventory: ['/dashboard/inventory', '/dashboard/inventory/kitchen-stock', '/dashboard/inventory/bar-stock', '/dashboard/inventory/reception-stock', '/dashboard/inventory/housekeeping-stock', '/dashboard/inventory/room-stock', '/dashboard/inventory/stock-downloads', '/dashboard/inventory/barista-stock', '/dashboard/company-stock', '/dashboard/settings/password'],
     cashier: ['/dashboard/cashier', '/dashboard/laundry', '/dashboard/cash-requests', '/dashboard/website-bookings', '/dashboard/live-chat', '/dashboard/payments', '/dashboard/rooms', '/dashboard/settings/password'],
     kitchen: ['/dashboard/fnb-pos', '/dashboard/kitchen', '/dashboard/kitchen/past-payments', '/dashboard/menu-create', '/dashboard/cancelled', '/dashboard/payments', '/dashboard/settings/password'],
     barista: ['/dashboard/fnb-pos', '/dashboard/barista', '/dashboard/barista/past-sales', '/dashboard/barista/restock', '/dashboard/payments', '/dashboard/cancelled', '/dashboard/settings/password'],
@@ -1193,15 +1194,15 @@ export default function DashboardLayout({
 
   return (
     <div className={cn("flex h-[100dvh] w-full overflow-hidden bg-background", isDirector && "bg-[#f4f7f2] md:bg-background")}>
-      <aside
+      {!isInventoryRoute && <aside
         className={cn(
           "fixed left-0 top-0 z-50 h-[100dvh] w-64 transition-transform duration-300",
           sidebarOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
         <SidebarNav role={role} />
-      </aside>
-      {sidebarOpen && (
+      </aside>}
+      {!isInventoryRoute && sidebarOpen && (
         <button
           type="button"
           aria-label="Close sidebar"
@@ -1210,7 +1211,7 @@ export default function DashboardLayout({
         />
       )}
       
-      <div className={cn("flex h-[100dvh] min-w-0 flex-1 flex-col overflow-hidden transition-[margin] duration-300", sidebarOpen ? "md:ml-64" : "md:ml-0")}>
+      <div className={cn("flex h-[100dvh] min-w-0 flex-1 flex-col overflow-hidden transition-[margin] duration-300", !isInventoryRoute && sidebarOpen ? "md:ml-64" : "md:ml-0")}>
         <header
           className={cn(
             "h-16 shrink-0 bg-white border-b sticky top-0 z-30 flex items-center justify-between px-8 shadow-sm",
@@ -1218,7 +1219,7 @@ export default function DashboardLayout({
           )}
         >
           <div className={cn("flex items-center gap-4 w-full md:w-1/3", isDirector && "w-auto min-w-0")}>
-            <button
+            {!isInventoryRoute && <button
               type="button"
               onClick={() => setSidebarOpen((current) => !current)}
               aria-label="Toggle sidebar"
@@ -1228,7 +1229,7 @@ export default function DashboardLayout({
               )}
             >
               <Menu className="w-4 h-4" />
-            </button>
+            </button>}
             {isDirector && (
               <div className="min-w-0 text-left md:hidden">
                 <p className="truncate text-[10px] font-black uppercase tracking-[0.22em] text-emerald-200/80">Orange MD</p>
@@ -1287,7 +1288,7 @@ export default function DashboardLayout({
           </div>
         </header>
 
-        <main className={cn("min-h-0 min-w-0 flex-1 overflow-y-auto p-8 [-webkit-overflow-scrolling:touch]", isDirector && "px-3 pb-[calc(6.5rem+env(safe-area-inset-bottom))] pt-3 sm:px-4 sm:pt-4 md:p-8")}>
+        <main className={cn("min-h-0 min-w-0 flex-1 [-webkit-overflow-scrolling:touch]", isInventoryRoute ? "overflow-hidden p-0" : "overflow-y-auto p-8", isDirector && "px-3 pb-[calc(6.5rem+env(safe-area-inset-bottom))] pt-3 sm:px-4 sm:pt-4 md:p-8")}>
           {children}
         </main>
       </div>
