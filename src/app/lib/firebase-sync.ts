@@ -263,7 +263,7 @@ export function getUnifiedLocalKey(baseKey: string): string {
 // Otherwise an offline cache can publish the old records back to Firebase.
 export function clearKitchenBarCacheOnce() {
   if (typeof window === "undefined") return;
-  const marker = `${CASA_LOCAL_STORAGE_PREFIX}kitchen-bar-reset-v1`;
+  const marker = `${CASA_LOCAL_STORAGE_PREFIX}kitchen-bar-reset-v2`;
   if (localStorage.getItem(marker) === "1") return;
 
   const keys = [
@@ -300,6 +300,22 @@ export function clearKitchenBarCacheOnce() {
     localStorage.removeItem(key);
     localStorage.removeItem(getPendingSyncMarkerKey(key));
   });
+
+  const expensesKey = "orange-hotel-expenses";
+  [getUnifiedLocalKey(expensesKey), expensesKey].forEach((key) => {
+    const raw = localStorage.getItem(key);
+    if (!raw) return;
+    try {
+      const expenses = JSON.parse(raw) as Array<{ department?: string }>;
+      if (!Array.isArray(expenses)) throw new Error("Invalid expense cache");
+      localStorage.setItem(key, JSON.stringify(expenses.filter(
+        (expense) => expense?.department !== "kitchen" && expense?.department !== "barista",
+      )));
+    } catch {
+      localStorage.removeItem(key);
+    }
+  });
+  localStorage.removeItem(getPendingSyncMarkerKey(expensesKey));
   localStorage.setItem(marker, "1");
 }
 
