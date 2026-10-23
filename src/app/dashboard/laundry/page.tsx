@@ -65,7 +65,8 @@ function normalizeLaundryRecords(value: unknown): LaundryRecord[] {
 
       return {
         id: typeof record.id === "string" && record.id.trim() ? record.id : `laundry-${index}-${Date.now()}`,
-        clientName: typeof record.clientName === "string" && record.clientName.trim() ? record.clientName : "Walk-in Client",
+        roomNumber: typeof record.roomNumber === "string" && record.roomNumber.trim() ? record.roomNumber : (typeof record.clientName === "string" ? record.clientName : ""),
+        clientName: typeof record.clientName === "string" && record.clientName.trim() ? record.clientName : (typeof record.roomNumber === "string" ? record.roomNumber : "Room -"),
         itemCount: Number.isFinite(Number(record.itemCount)) ? Number(record.itemCount) : 0,
         totalAmount: Number.isFinite(Number(record.totalAmount)) ? Number(record.totalAmount) : 0,
         status,
@@ -85,7 +86,7 @@ export default function LaundryPage() {
   const [role, setRole] = useState<Role>("cashier");
   const [records, setRecords] = useState<LaundryRecord[]>([]);
   const [tab, setTab] = useState<LaundryPaymentStatus>("completed");
-  const [clientName, setClientName] = useState("");
+  const [roomNumber, setRoomNumber] = useState("");
   const [bookingDate, setBookingDate] = useState(todayText());
   const [paymentDate, setPaymentDate] = useState(todayText());
   const [itemCount, setItemCount] = useState("");
@@ -119,7 +120,7 @@ export default function LaundryPage() {
   const saveLaundry = () => {
     const parsedItems = Number(itemCount);
     const parsedAmount = Number(totalAmount);
-    if (!clientName.trim() || Number.isNaN(parsedItems) || parsedItems <= 0 || Number.isNaN(parsedAmount) || parsedAmount <= 0) return;
+    if (!roomNumber.trim() || Number.isNaN(parsedItems) || parsedItems <= 0 || Number.isNaN(parsedAmount) || parsedAmount <= 0) return;
 
     const recordedAt = Date.now();
     const serviceTimestamp = getLaundryDateTimestamp(bookingDate);
@@ -128,7 +129,8 @@ export default function LaundryPage() {
 
     const nextRecord: LaundryRecord = {
       id: `laundry-${recordedAt}`,
-      clientName: clientName.trim(),
+      roomNumber: roomNumber.trim(),
+      clientName: roomNumber.trim(),
       itemCount: parsedItems,
       totalAmount: parsedAmount,
       status,
@@ -143,7 +145,7 @@ export default function LaundryPage() {
     const nextRecords = [nextRecord, ...records];
     setRecords(nextRecords);
     writeJson(STORAGE_LAUNDRY_RECORDS, nextRecords);
-    setClientName("");
+    setRoomNumber("");
     setBookingDate(todayText());
     setPaymentDate(todayText());
     setItemCount("");
@@ -217,8 +219,8 @@ export default function LaundryPage() {
           </CardHeader>
           <CardContent className="grid grid-cols-1 gap-4 pt-4 md:grid-cols-2">
             <div className="space-y-1">
-              <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Client Name</Label>
-              <Input value={clientName} onChange={(event) => setClientName(event.target.value)} placeholder="Client name" />
+              <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Room Number</Label>
+              <Input value={roomNumber} onChange={(event) => setRoomNumber(event.target.value)} placeholder="e.g. 101" />
             </div>
             <div className="space-y-1">
               <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Date Laundry Was Done</Label>
@@ -282,7 +284,7 @@ export default function LaundryPage() {
               <TableRow>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Laundry Date</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Payment Date</TableHead>
-                <TableHead className="font-black uppercase text-[10px] tracking-widest">Client</TableHead>
+                <TableHead className="font-black uppercase text-[10px] tracking-widest">Room Number</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Items</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Method</TableHead>
                 <TableHead className="text-right font-black uppercase text-[10px] tracking-widest">Amount</TableHead>
@@ -294,7 +296,7 @@ export default function LaundryPage() {
                 <TableRow key={record.id}>
                   <TableCell className="font-bold">{formatBookingDate(record)}</TableCell>
                   <TableCell className="font-bold">{formatPaymentDate(record)}</TableCell>
-                  <TableCell className="font-bold">{record.clientName}</TableCell>
+                  <TableCell className="font-bold">{record.roomNumber || record.clientName}</TableCell>
                   <TableCell className="font-bold">{record.itemCount}</TableCell>
                   <TableCell className="font-black uppercase text-[10px] tracking-widest">{record.paymentMethod}</TableCell>
                   <TableCell className="text-right font-black">{formatMoney(record.totalAmount)}</TableCell>

@@ -52,6 +52,7 @@ __pycache__/
 # local generated assets
 .lh/
 .history/
+/recovery-backups/
 /print-ready-barcodes.html
 /test-barcode-label.html
 /test-barcode-label.png

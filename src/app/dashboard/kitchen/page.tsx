@@ -1,3 +1,4 @@
+import { INV_KITCHEN_ITEMS_KEY, KitchenItem } from "@/app/lib/inventory-manager";
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -653,6 +654,61 @@ export default function KitchenPage() {
       .filter((line) => line.qty > 0));
   };
 
+
+  const updateKitchenStoreStock = async (
+    lines: Array<{ name: string; qty: number }>,
+    direction: "consume" | "restore",
+  ) => {
+    const updatedAt = Date.now();
+    const allStoreItems = readJson<Array<MainStoreItem & { lane?: "kitchen" | "barista" }>>(STORAGE_MAIN_STORE_ITEMS) ?? [];
+    let updated = false;
+
+    const nextStoreItems = allStoreItems.map((item) => {
+      if (item.lane !== "kitchen") return item;
+      const matchedLine = lines.find((line) => {
+        const ln = line.name.trim().toLowerCase();
+        const iname = item.name.trim().toLowerCase();
+        return ln === iname || ln.includes(iname) || iname.includes(ln);
+      });
+      if (!matchedLine) return item;
+      updated = true;
+      const delta = direction === "consume" ? -matchedLine.qty : matchedLine.qty;
+      return {
+        ...item,
+        stock: Math.max(0, item.stock + delta),
+        updatedAt,
+      };
+    });
+
+    if (updated) {
+      await writeJson(STORAGE_MAIN_STORE_ITEMS, nextStoreItems);
+      setKitchenStoreItems(nextStoreItems.filter((entry) => entry.lane === "kitchen"));
+    }
+
+    const kitchenInvItems = readJson<KitchenItem[]>(INV_KITCHEN_ITEMS_KEY);
+    if (Array.isArray(kitchenInvItems) && kitchenInvItems.length > 0) {
+      let invUpdated = false;
+      const nextInv = kitchenInvItems.map((item) => {
+        const matchedLine = lines.find((line) => {
+          const ln = line.name.trim().toLowerCase();
+          const iname = item.name.trim().toLowerCase();
+          return ln === iname || ln.includes(iname) || iname.includes(ln);
+        });
+        if (!matchedLine) return item;
+        invUpdated = true;
+        const delta = direction === "consume" ? -matchedLine.qty : matchedLine.qty;
+        return {
+          ...item,
+          kitchenQty: Math.max(0, (item.kitchenQty || 0) + delta),
+          updatedAt,
+        };
+      });
+      if (invUpdated) {
+        await writeJson(INV_KITCHEN_ITEMS_KEY, nextInv);
+      }
+    }
+  };
+
   const recordPastPayment = async () => {
     const paymentTimestamp = new Date(`${pastPaymentDate}T12:00:00`).getTime();
     const today = new Date();
@@ -669,7 +725,7 @@ export default function KitchenPage() {
 
     const approved = await confirm({
       title: "Record Past Kitchen Sale",
-      description: `Record TSh ${pastPaymentTotal.toLocaleString()} in kitchen sales for ${pastPaymentDate}? Current stock will not be changed.`,
+      description: `Record TSh ${pastPaymentTotal.toLocaleString()} in kitchen sales for ${pastPaymentDate}? Stock will be deducted accordingly.`,
       actionLabel: "Record Sale",
     });
     if (!approved) return;
@@ -677,6 +733,10 @@ export default function KitchenPage() {
     setSavingPastPayment(true);
     setPastPaymentFeedback("");
     try {
+      await updateKitchenStoreStock(
+        pastPaymentCart.map((line) => ({ name: line.item.name, qty: line.qty })),
+        "consume",
+      );
       const activeKitchenKey = getActiveKitchenStateKey();
       const snapshot = readPosState<KitchenTicket, KitchenPaymentRecord, KitchenMenuItem>(
         activeKitchenKey,
@@ -822,13 +882,13 @@ export default function KitchenPage() {
         <header>
           <h1 className="text-3xl font-black tracking-tight">Record Past Kitchen Sales</h1>
           <p className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
-            Select menu items sold and backdate the sale without changing current stock
+            Select menu items sold and backdate the sale with inventory deduction
           </p>
         </header>
 
         <Card className="border-amber-200 bg-amber-50/60 shadow-none">
           <CardContent className="p-4 text-xs font-black uppercase tracking-widest text-amber-800">
-            Past sales are added to kitchen sales, finances, and reports. They do not create a live order or deduct inventory.
+            Past sales are added to kitchen sales, finances, and reports. Corresponding kitchen inventory is deducted.
           </CardContent>
         </Card>
 

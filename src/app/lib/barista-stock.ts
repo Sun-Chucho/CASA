@@ -3,14 +3,14 @@
 import { MainStoreItem } from "@/app/lib/inventory-transfer";
 
 const TOT_LIMITS_BY_LABEL: Record<string, number> = {
-  "Jagermeister 700ml": 30,
+  "Jagermeister 700ml": 28,
   "Black & White 750ml": 30,
   "Gordons 750ml": 30,
   "Amarula 750ml": 30,
   "Hennessy VSOP 700ml": 28,
   "Hennessy VS BOX 700ml": 28,
   "Campari 750ml": 30,
-  "Jack Daniels 700ml": 30,
+  "Jack Daniels 700ml": 28,
   "J & B 750ml": 30,
   "Grants 750ml": 30,
   "Johnnie Walker Black Label 750ml": 30,
@@ -32,7 +32,11 @@ export function getMenuBaseLabel(menuName: string): string {
 
 export function getTotLimit(item: Pick<MainStoreItem, "name" | "size" | "totLimit">): number {
   if (typeof item.totLimit === "number" && item.totLimit > 0) return item.totLimit;
-  return TOT_LIMITS_BY_LABEL[getMenuBaseLabel(getBaristaStoreLabel(item))] ?? 0;
+  const label = getBaristaStoreLabel(item);
+  const size = item.size ?? "";
+  if (/700\s*ml/i.test(size) || /700\s*ml/i.test(label)) return 28;
+  if (/750\s*ml/i.test(size) || /750\s*ml/i.test(label)) return 30;
+  return TOT_LIMITS_BY_LABEL[getMenuBaseLabel(label)] ?? 0;
 }
 
 export function isTotTrackedMenuItem(menuName: string): boolean {

@@ -40,14 +40,14 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Overview', href: '/dashboard', icon: LayoutDashboard, roles: ['manager', 'director'] },
   { label: 'Rooms', href: '/dashboard/rooms', icon: Hotel, roles: ['manager', 'director', 'cashier'] },
   { label: 'Kitchen Stock', href: '/dashboard/inventory/kitchen-stock', icon: Package, roles: ['manager', 'inventory'] },
-  { label: 'Barista Stock', href: '/dashboard/inventory/barista-stock', icon: Package, roles: ['manager', 'inventory'] },
-  { label: 'Inventory', href: '/dashboard/inventory', icon: Package, roles: ['inventory'] },
-  { label: 'Menu Create', href: '/dashboard/menu-create', icon: FileSpreadsheet, roles: ['manager', 'kitchen'] },
+  { label: 'Bar', href: '/dashboard/inventory/barista-stock', icon: Package, roles: ['manager'] },
+  { label: 'Inventory', href: '/dashboard/inventory', icon: Package, roles: [] },
+  { label: 'Kitchen Menu', href: '/dashboard/menu-create', icon: FileSpreadsheet, roles: ['manager'] },
   { label: 'Company Stock', href: '/dashboard/company-stock', icon: Building2, roles: ['manager', 'director', 'inventory'] },
   { label: 'F&B POS', href: '/dashboard/fnb-pos', icon: Utensils, roles: ['kitchen', 'barista'] },
   { label: 'Record Past Sales', href: '/dashboard/kitchen/past-payments', icon: ReceiptText, roles: ['kitchen'] },
   { label: 'Record Past Sales', href: '/dashboard/barista/past-sales', icon: ReceiptText, roles: ['barista'] },
-  { label: 'Restock / Stock In', href: '/dashboard/barista/restock', icon: Package, roles: ['barista'] },
+  { label: 'Restock / Stock In', href: '/dashboard/barista/restock', icon: Package, roles: [] },
   { label: 'Booking', href: '/dashboard/cashier', icon: ShoppingCart, roles: ['manager', 'director', 'cashier'] },
   { label: 'Cash Requests', href: '/dashboard/cash-requests', icon: HandCoins, roles: ['cashier'] },
   { label: 'Laundry', href: '/dashboard/laundry', icon: Shirt, roles: ['manager', 'director', 'cashier'] },
@@ -66,8 +66,8 @@ const NAV_ITEMS: NavItem[] = [
 
 const ROLE_NAV_PRIORITY: Partial<Record<Role, string[]>> = {
   cashier: ['/dashboard/cashier', '/dashboard/laundry', '/dashboard/cash-requests', '/dashboard/website-bookings', '/dashboard/live-chat'],
-  kitchen: ['/dashboard/kitchen', '/dashboard/kitchen/past-payments', '/dashboard/menu-create'],
-  barista: ['/dashboard/barista', '/dashboard/barista/past-sales', '/dashboard/barista/restock'],
+  kitchen: ['/dashboard/kitchen', '/dashboard/kitchen/past-payments'],
+  barista: ['/dashboard/barista', '/dashboard/barista/past-sales'],
 };
 
 export function SidebarNav({ role }: { role: Role }) {
@@ -87,9 +87,6 @@ export function SidebarNav({ role }: { role: Role }) {
       .filter(item => item.roles.includes(role))
       .filter((item) => !(role === "barista" && item.href === "/dashboard/live-chat"))
       .map((item) => {
-        if (role === "kitchen" && item.href === "/dashboard/menu-create") {
-          return { ...item, label: "Menu & Prices" };
-        }
         if (item.href !== "/dashboard/fnb-pos") return item;
         if (role === "kitchen") return { ...item, label: "Kitchen POS", href: "/dashboard/kitchen" };
         if (role === "barista") return { ...item, label: "Barista POS", href: "/dashboard/barista" };
@@ -99,7 +96,7 @@ export function SidebarNav({ role }: { role: Role }) {
         if (role !== "manager") return item;
         if (item.href === "/dashboard/inventory/kitchen-stock") return { ...item, label: "Kitchen" };
         if (item.href === "/dashboard/inventory/barista-stock") {
-          return { ...item, label: "Barista", href: "/dashboard/barista" };
+          return { ...item, label: "Bar", href: "/dashboard/barista" };
         }
         return item;
       })

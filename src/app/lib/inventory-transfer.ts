@@ -124,32 +124,41 @@ export function adjustInventoryQuantity<
     }
 
     // TOTS Logic
-    if (isTotAdjustment && typeof item.totPerBottle === "number" && item.totPerBottle > 0) {
+    const effectiveTotPerBottle =
+      typeof item.totPerBottle === "number" && item.totPerBottle > 0
+        ? item.totPerBottle
+        : /700\s*ml/i.test(item.size ?? "") || /700\s*ml/i.test(item.name)
+        ? 28
+        : /750\s*ml/i.test(item.size ?? "") || /750\s*ml/i.test(item.name)
+        ? 30
+        : 0;
+
+    if (isTotAdjustment && effectiveTotPerBottle > 0) {
       const currentTotSold = typeof item.totSold === "number" ? item.totSold : 0;
       
       if (delta < 0) {
         // Sale/Consumption (delta is negative, e.g., -1 for 1 tot)
         const totsToDeduct = Math.abs(delta);
         const nextTotSold = currentTotSold + totsToDeduct;
-        const bottlesToDeduct = Math.floor(nextTotSold / item.totPerBottle);
+        const bottlesToDeduct = Math.floor(nextTotSold / effectiveTotPerBottle);
         
         return {
           ...item,
           stock: Math.max(0, item.stock - bottlesToDeduct),
-          totSold: nextTotSold % item.totPerBottle,
+          totSold: nextTotSold % effectiveTotPerBottle,
           updatedAt,
         };
       } else {
         // Intake/Restore (delta is positive)
         const totsToAdd = delta;
-        const totalTots = (item.stock * item.totPerBottle) + (item.totPerBottle - currentTotSold) + totsToAdd;
-        const nextStock = Math.floor(totalTots / item.totPerBottle);
-        const nextTotSold = item.totPerBottle - (totalTots % item.totPerBottle);
+        const totalTots = (item.stock * effectiveTotPerBottle) + (effectiveTotPerBottle - currentTotSold) + totsToAdd;
+        const nextStock = Math.floor(totalTots / effectiveTotPerBottle);
+        const nextTotSold = effectiveTotPerBottle - (totalTots % effectiveTotPerBottle);
 
         return {
           ...item,
           stock: nextStock,
-          totSold: nextTotSold === item.totPerBottle ? 0 : nextTotSold,
+          totSold: nextTotSold === effectiveTotPerBottle ? 0 : nextTotSold,
           updatedAt,
         };
       }

@@ -43,7 +43,7 @@ export type InventoryTab =
   | "kitchen-stock"
   | "barista-stock";
 
-type KitchenManagerPane = "stock" | "expenses" | "entries" | "sales";
+type KitchenManagerPane = "stock" | "entries" | "sales";
 type BaristaManagerPane = "finance" | "inventory" | "purchase" | "sales";
 type SalesDateFilter = "all" | "date";
 type HistoryPreview =
@@ -333,7 +333,12 @@ export function InventoryControlView({
   const isInventoryRole = role === "inventory";
   const isReadOnlyStock = isDirector || role === "manager";
   const canEditStock = !isReadOnlyStock;
-  const effectiveVisibleTabs = useMemo(() => visibleTabs, [visibleTabs]);
+  const effectiveVisibleTabs = useMemo(() => {
+    if (role === "inventory") {
+      return visibleTabs.filter((tab) => tab !== "barista-stock");
+    }
+    return visibleTabs;
+  }, [role, visibleTabs]);
 
   useEffect(() => {
     setRole(readStoredRole());
@@ -1879,7 +1884,7 @@ export function InventoryControlView({
                 <Tabs value={kitchenManagerPane} onValueChange={(value) => setKitchenManagerPane(value as KitchenManagerPane)}>
                   <TabsList className="h-11 flex-wrap">
                     <TabsTrigger value="stock" className="font-black uppercase text-[10px] tracking-widest">Stock</TabsTrigger>
-                    <TabsTrigger value="expenses" className="font-black uppercase text-[10px] tracking-widest">Daily Expenses</TabsTrigger>
+
                     <TabsTrigger value="entries" className="font-black uppercase text-[10px] tracking-widest">Daily Entries</TabsTrigger>
                     <TabsTrigger value="sales" className="font-black uppercase text-[10px] tracking-widest">Sales</TabsTrigger>
                   </TabsList>
@@ -1890,7 +1895,7 @@ export function InventoryControlView({
                     {renderInventoryTable("Kitchen Inventory Records", filteredKitchenInventoryItems, "kitchen")}
                   </>
                 )}
-                {kitchenManagerPane === "expenses" && renderHistoryCards(kitchenPurchaseHistory, "purchase", "kitchen")}
+
                 {kitchenManagerPane === "entries" && renderHistoryCards(kitchenDailyHistory, "daily", "kitchen")}
                 {kitchenManagerPane === "sales" && renderKitchenSales()}
               </>

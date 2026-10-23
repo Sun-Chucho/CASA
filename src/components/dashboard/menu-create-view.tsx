@@ -28,6 +28,7 @@ import { readStoredRole } from "@/app/lib/auth";
 import { readActiveSessionUsername } from "@/app/lib/login-profiles";
 import { Role } from "@/app/lib/mock-data";
 import { useToast } from "@/hooks/use-toast";
+import { Search } from "lucide-react";
 
 type BaristaCategory = "espresso" | "coffee" | "tea" | "cold" | "snacks";
 
@@ -110,6 +111,8 @@ export function MenuCreateView() {
   const [editingKitchenId, setEditingKitchenId] = useState<string | null>(null);
   const [editingKitchenName, setEditingKitchenName] = useState("");
   const [editingKitchenPrice, setEditingKitchenPrice] = useState("");
+  const [kitchenSearch, setKitchenSearch] = useState("");
+  const [kitchenFilterCategory, setKitchenFilterCategory] = useState<string>("all");
 
   const [baristaMenuItems, setBaristaMenuItems] = useState<BaristaMenuItem[]>([]);
   const [baristaName, setBaristaName] = useState("");
@@ -177,7 +180,14 @@ export function MenuCreateView() {
       setAuditTrail(Array.isArray(value) ? value : readJson<MenuAuditEntry[]>(STORAGE_MENU_AUDIT) ?? []);
     });
 
-    return () => {
+  
+  const filteredKitchenMenuItems = kitchenMenuItems.filter((item) => {
+    const matchesSearch = !kitchenSearch.trim() || item.name.toLowerCase().includes(kitchenSearch.toLowerCase());
+    const matchesCat = kitchenFilterCategory === "all" || item.category === kitchenFilterCategory;
+    return matchesSearch && matchesCat;
+  });
+
+  return () => {
       cancelled = true;
       unsubscribeKitchen();
       unsubscribeBarista();
@@ -478,22 +488,34 @@ export function MenuCreateView() {
               <CardTitle className="text-xl font-black uppercase tracking-tight">Create Kitchen Menu Item</CardTitle>
               <CardDescription>Set dish name, section, preparation time, and selling price.</CardDescription>
             </CardHeader>
-            <CardContent className="grid grid-cols-1 md:grid-cols-4 gap-3">
-              <Input value={kitchenName} onChange={(event) => setKitchenName(event.target.value)} placeholder="Dish name" disabled={isDirector} />
-              <select
-                className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
-                value={kitchenCategory}
-                onChange={(event) => setKitchenCategory(event.target.value as KitchenMenuCategory)}
-                disabled={isDirector}
-              >
-                {KITCHEN_CATEGORY_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-              <Input type="number" min="1" value={kitchenPrepMinutes} onChange={(event) => setKitchenPrepMinutes(event.target.value)} placeholder="Prep minutes" disabled={isDirector} />
-              <Input type="number" min="1" value={kitchenPrice} onChange={(event) => setKitchenPrice(event.target.value)} placeholder="Price" disabled={isDirector} />
-              <div className="md:col-span-4">
-                <Button className="h-10 font-black uppercase text-[10px] tracking-widest" onClick={addKitchenMenuItem} disabled={isDirector}>
+            <CardContent className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Dish Name</label>
+                <Input value={kitchenName} onChange={(event) => setKitchenName(event.target.value)} placeholder="e.g. Grilled Chicken" disabled={isDirector} />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Section / Category</label>
+                <select
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={kitchenCategory}
+                  onChange={(event) => setKitchenCategory(event.target.value as KitchenMenuCategory)}
+                  disabled={isDirector}
+                >
+                  {KITCHEN_CATEGORY_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Prep Time (Mins)</label>
+                <Input type="number" min="1" value={kitchenPrepMinutes} onChange={(event) => setKitchenPrepMinutes(event.target.value)} placeholder="15" disabled={isDirector} />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Selling Price (TSh)</label>
+                <Input type="number" min="1" value={kitchenPrice} onChange={(event) => setKitchenPrice(event.target.value)} placeholder="15000" disabled={isDirector} />
+              </div>
+              <div className="md:col-span-4 pt-1">
+                <Button className="h-10 font-black uppercase text-[10px] tracking-widest px-6" onClick={addKitchenMenuItem} disabled={isDirector}>
                   Add Menu Item
                 </Button>
               </div>
@@ -501,9 +523,34 @@ export function MenuCreateView() {
           </Card>
 
           <Card className="border-none shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-xl font-black uppercase tracking-tight">Kitchen Menu</CardTitle>
-              <CardDescription>Current kitchen menu items and selling prices.</CardDescription>
+            <CardHeader className="space-y-3">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="text-xl font-black uppercase tracking-tight">Kitchen Menu</CardTitle>
+                  <CardDescription>Current kitchen menu items and selling prices.</CardDescription>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="relative w-48 md:w-64">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      value={kitchenSearch}
+                      onChange={(e) => setKitchenSearch(e.target.value)}
+                      placeholder="Search dish..."
+                      className="h-9 pl-9 text-xs"
+                    />
+                  </div>
+                  <select
+                    value={kitchenFilterCategory}
+                    onChange={(e) => setKitchenFilterCategory(e.target.value)}
+                    className="h-9 rounded-md border border-input bg-background px-3 py-1 text-xs font-semibold"
+                  >
+                    <option value="all">All Categories</option>
+                    {KITCHEN_CATEGORY_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               <Table>
@@ -517,7 +564,7 @@ export function MenuCreateView() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {kitchenMenuItems.map((item) => (
+                  {filteredKitchenMenuItems.map((item) => (
                     <TableRow key={item.id}>
                       <TableCell className="font-bold">
                         {editingKitchenId === item.id ? (

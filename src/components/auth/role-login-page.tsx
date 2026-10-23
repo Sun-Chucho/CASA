@@ -59,7 +59,7 @@ const ROLE_CONFIG: Record<Role, LoginConfig> = {
     username: "inventory",
     description: "Stock control, movements, and procurement management.",
     color: "bg-black",
-    destination: "/dashboard/inventory",
+    destination: "/dashboard/inventory/kitchen-stock",
     icon: Package,
   },
   cashier: {

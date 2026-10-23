@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { SyncStatusIndicator } from "@/components/sync-status-indicator";
 import { KitchenSessionManager } from "@/components/dashboard/kitchen-session-manager";
 import { CheckCircle2, Coffee, Lock, Minus, Pencil, Plus, Receipt, Search, Trash2, User, XCircle } from "lucide-react";
@@ -368,9 +369,12 @@ export default function BaristaPage() {
   const isManager = role === "manager";
   const isBaristaRestock = role === "barista" && initialView === "restock";
   const isBaristaPastSales = role === "barista" && initialView === "past-sales";
-  const [managerTab, setManagerTab] = useState<"inventory" | "finance" | "sales" | "drinks">(
-    initialView === "restock" ? "inventory" : "finance",
-  );
+  const [managerTab, setManagerTab] = useState<"inventory" | "finance" | "sales" | "drinks">("inventory");
+  const [restockDialogOpen, setRestockDialogOpen] = useState(false);
+  const [restockTargetItem, setRestockTargetItem] = useState<BaristaManagerPricingRow | null>(null);
+  const [restockQtyInput, setRestockQtyInput] = useState("");
+  const [restockBuyingPriceInput, setRestockBuyingPriceInput] = useState("");
+  const [isAddItemDialogOpen, setIsAddItemDialogOpen] = useState(false);
   const [drinkEditId, setDrinkEditId] = useState<string | null>(null);
   const [drinkName, setDrinkName] = useState("");
   const [drinkPrice, setDrinkPrice] = useState("");
@@ -1028,16 +1032,25 @@ export default function BaristaPage() {
   // Save quantity and both prices as one manager action. The same values are
   // written to the POS menu, Barista store stock and inventory collection so a
   // refresh or a new login cannot reintroduce an older value from another key.
-  const saveBaristaManagerItem = async (item: BaristaManagerPricingRow) => {
+  const saveBaristaManagerItem = async (
+    item: BaristaManagerPricingRow,
+    customValues?: { stockIn?: number; buyingPrice?: number; sellingPrice?: number },
+  ) => {
     const draft = managerPricingDrafts[item.id] ?? {
       stockIn: "",
       buyingPrice: String(item.buyingPrice),
       sellingPrice: String(item.sellingPrice),
     };
-    const stockIn = draft.stockIn.trim() === "" ? 0 : Number(draft.stockIn);
+    const stockIn = customValues?.stockIn !== undefined
+      ? customValues.stockIn
+      : draft.stockIn.trim() === "" ? 0 : Number(draft.stockIn);
     let stock = item.stock + stockIn;
-    const buyingPrice = Number(draft.buyingPrice);
-    const sellingPrice = Number(draft.sellingPrice);
+    const buyingPrice = customValues?.buyingPrice !== undefined
+      ? customValues.buyingPrice
+      : Number(draft.buyingPrice);
+    const sellingPrice = customValues?.sellingPrice !== undefined
+      ? customValues.sellingPrice
+      : Number(draft.sellingPrice);
     if (
       !Number.isFinite(stockIn) ||
       stockIn < 0 ||
@@ -1182,6 +1195,38 @@ export default function BaristaPage() {
     } finally {
       setSavingBaristaItemId("");
     }
+  };
+
+  const openRestockDialog = (item: BaristaManagerPricingRow) => {
+    setRestockTargetItem(item);
+    setRestockQtyInput("");
+    setRestockBuyingPriceInput(item.buyingPrice > 0 ? String(item.buyingPrice) : "");
+    setRestockDialogOpen(true);
+  };
+
+  const handleConfirmRestock = async () => {
+    if (!restockTargetItem) return;
+    const qty = Number(restockQtyInput);
+    const buying = Number(restockBuyingPriceInput);
+    if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(buying) || buying < 0) {
+      window.alert("Please enter a valid positive quantity to add and a valid non-negative buying price.");
+      return;
+    }
+
+    const currentSelling = managerPricingDrafts[restockTargetItem.id]?.sellingPrice
+      ? Number(managerPricingDrafts[restockTargetItem.id]?.sellingPrice)
+      : restockTargetItem.sellingPrice;
+
+    await saveBaristaManagerItem(restockTargetItem, {
+      stockIn: qty,
+      buyingPrice: buying,
+      sellingPrice: currentSelling,
+    });
+
+    setRestockDialogOpen(false);
+    setRestockTargetItem(null);
+    setRestockQtyInput("");
+    setRestockBuyingPriceInput("");
   };
 
   const deleteBaristaItem = async (itemId: string, itemName?: string) => {
@@ -1615,7 +1660,7 @@ export default function BaristaPage() {
 
     const approved = await confirm({
       title: "Record Past Bar Sale",
-      description: `Record TSh ${pastSaleTotal.toLocaleString()} in alcohol sales for ${pastSaleDate}? Current stock will not be changed.`,
+      description: `Record TSh ${pastSaleTotal.toLocaleString()} in alcohol sales for ${pastSaleDate}? Stock will be deducted accordingly.`,
       actionLabel: "Record Sale",
     });
     if (!approved) return;
@@ -1623,6 +1668,12 @@ export default function BaristaPage() {
     setSavingPastSale(true);
     setPastSaleFeedback(null);
     try {
+      const pastLines = pastSaleCart.map((line) => ({ name: line.item.name, qty: line.qty }));
+      const stockResult = updateBaristaStoreStock(pastLines, "consume");
+      if (!stockResult.ok) {
+        setPastSaleFeedback(stockResult.error);
+        return;
+      }
       const activeBaristaKey = getActiveBaristaStateKey();
       const snapshot = readPosState<BaristaTicket, BaristaPaymentRecord, BaristaMenuItem>(
         activeBaristaKey,
@@ -1660,7 +1711,7 @@ export default function BaristaPage() {
       setTicketSeq(nextSeq);
       setBaristaPayments(nextPayments);
       setPastSaleCart([]);
-      setPastSaleFeedback(`Past sale ${paymentRecord.code} recorded. Current stock was not changed.`);
+      setPastSaleFeedback(`Past sale ${paymentRecord.code} recorded and stock deducted.`);
     } finally {
       setSavingPastSale(false);
     }
@@ -2182,13 +2233,13 @@ export default function BaristaPage() {
         <header>
           <h1 className="text-3xl font-black tracking-tight">Record Past Bar Sales</h1>
           <p className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
-            Backdate alcohol sales without changing the current accurate stock balance
+            Backdate alcohol sales and deduct inventory stock
           </p>
         </header>
 
         <Card className="border-amber-200 bg-amber-50/60 shadow-none">
           <CardContent className="p-4 text-xs font-black uppercase tracking-widest text-amber-800">
-            Historical entries update barista sales and financial reports only. They never deduct bottles or tots from current stock.
+            Historical entries update barista sales and financial reports, and deduct bottles and tots from current stock.
           </CardContent>
         </Card>
 
@@ -2452,7 +2503,6 @@ export default function BaristaPage() {
                   <TableRow>
                     <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Item</TableHead>
                     <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Current Stock</TableHead>
-                    <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Stock In</TableHead>
                     <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Qty Sold</TableHead>
                     <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Buying Price (Cost)</TableHead>
                     <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Selling Price (POS)</TableHead>
@@ -2466,20 +2516,15 @@ export default function BaristaPage() {
                       <TableCell className="font-bold">
                         {item.stock} {item.unit}
                       </TableCell>
-                      <TableCell className="font-bold">
-                        <div className="flex items-center gap-1">
-                          <Input
-                            type="number"
-                            min="0"
-                            value={managerPricingDrafts[item.id]?.stockIn ?? ""}
-                            placeholder="0"
-                            className="h-9 w-20"
-                            onChange={(event) => updateManagerPricingDraft(item, "stockIn", event.target.value)}
-                          />
-                          {item.unit ? (
-                            <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">{item.unit}</span>
-                          ) : null}
-                        </div>
+                      <TableCell>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openRestockDialog(item)}
+                          className="font-black uppercase tracking-widest text-[10px] gap-1"
+                        >
+                          Restock
+                        </Button>
                       </TableCell>
                       <TableCell className="font-bold">{item.quantitySold}</TableCell>
                       <TableCell className="font-bold">
@@ -2530,7 +2575,7 @@ export default function BaristaPage() {
                             ) : savingBaristaItemId === item.id ? (
                               "Saving..."
                             ) : (
-                              managerPricingDrafts[item.id]?.stockIn ? "Stock In / Save" : "Save"
+                              "Save Price"
                             )}
                           </Button>
                           {isBaristaRestock && (
@@ -2561,6 +2606,59 @@ export default function BaristaPage() {
             </CardContent>
           </Card>
         )}
+
+      {/* Restock Dialog */}
+      <Dialog open={restockDialogOpen} onOpenChange={(open) => { if (!open) setRestockDialogOpen(false); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-black uppercase tracking-tight">
+              Restock — {restockTargetItem?.name}
+            </DialogTitle>
+            <DialogDescription>
+              Enter the quantity received and the buying price for this restock batch.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="space-y-1">
+              <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                Quantity to Add ({restockTargetItem?.unit || "units"})
+              </label>
+              <Input
+                type="number"
+                min="1"
+                value={restockQtyInput}
+                onChange={(e) => setRestockQtyInput(e.target.value)}
+                placeholder="0"
+                className="h-11"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                Buying Price per {restockTargetItem?.unit || "unit"} (TSh)
+              </label>
+              <Input
+                type="number"
+                min="0"
+                value={restockBuyingPriceInput}
+                onChange={(e) => setRestockBuyingPriceInput(e.target.value)}
+                placeholder="0"
+                className="h-11"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRestockDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void handleConfirmRestock()}
+              className="font-black uppercase tracking-widest"
+            >
+              Confirm Restock
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       </div>
     );
   }
@@ -2923,19 +3021,19 @@ export default function BaristaPage() {
                           type="button"
                           onClick={() => addToCart(item)}
                           disabled={!stockStatus.available || isDirector}
-                          className="h-9 flex-1 gap-1 font-black uppercase text-[10px] tracking-widest"
+                          className="h-9 w-full gap-1 font-black uppercase text-[10px] tracking-widest"
                         >
                           <Plus className="w-4 h-4" /> Add
                         </Button>
-                        <Button
+                        {false && (<Button
                           type="button"
                           variant="outline"
                           onClick={() => void recordWaste(item)}
                           disabled={isDirector}
                           className="h-9 gap-1 font-black uppercase text-[10px] tracking-widest text-red-600 hover:text-red-700 hover:border-red-300"
                         >
-                          <Trash2 className="w-4 h-4" /> Waste
-                        </Button>
+
+                        </Button>)}
                       </div>
                   </div>
                 )})}

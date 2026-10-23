@@ -5,6 +5,7 @@ export type LaundryPaymentMethod = "cash" | "card" | "mobile-money" | "credit";
 
 export interface LaundryRecord {
   id: string;
+  roomNumber?: string;
   clientName: string;
   itemCount: number;
   totalAmount: number;

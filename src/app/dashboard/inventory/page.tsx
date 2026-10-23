@@ -1,5 +1,5 @@
-import { InventoryControlView } from "@/components/dashboard/inventory-control-view";
+import { redirect } from "next/navigation";
 
 export default function InventoryPage() {
-  return <InventoryControlView initialTab="kitchen-stock" visibleTabs={["kitchen-stock", "barista-stock"]} />;
+  redirect("/dashboard/inventory/kitchen-stock");
 }
