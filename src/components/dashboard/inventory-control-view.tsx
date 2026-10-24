@@ -38,6 +38,7 @@ import { useIsDirector } from "@/hooks/use-is-director";
 import { useConfirmDialog } from "@/hooks/use-confirm-dialog";
 import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
 import { KitchenSessionManager } from "@/components/dashboard/kitchen-session-manager";
+import { BAR_CATEGORIES } from "@/app/lib/bar-catalog";
 
 export type InventoryTab =
   | "kitchen-stock"
@@ -90,6 +91,7 @@ const KITCHEN_CATEGORY_OPTIONS = [
 ] as const;
 
 const BARISTA_CATEGORY_OPTIONS = [
+  ...BAR_CATEGORIES,
   "Coffee",
   "Tea",
   "Soda",

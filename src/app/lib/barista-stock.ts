@@ -31,12 +31,16 @@ export function getMenuBaseLabel(menuName: string): string {
 }
 
 export function getTotLimit(item: Pick<MainStoreItem, "name" | "size" | "totLimit">): number {
-  if (typeof item.totLimit === "number" && item.totLimit > 0) return item.totLimit;
+  if (typeof item.totLimit === "number") return Math.max(0, item.totLimit);
   const label = getBaristaStoreLabel(item);
+  const legacyLimit = TOT_LIMITS_BY_LABEL[getMenuBaseLabel(label)];
+  if (legacyLimit) return legacyLimit;
+  if (!isTotTrackedMenuItem(label)) return 0;
   const size = item.size ?? "";
   if (/700\s*ml/i.test(size) || /700\s*ml/i.test(label)) return 28;
   if (/750\s*ml/i.test(size) || /750\s*ml/i.test(label)) return 30;
-  return TOT_LIMITS_BY_LABEL[getMenuBaseLabel(label)] ?? 0;
+  if (/(?:1000\s*ml|1\s*ltr)/i.test(label)) return 40;
+  return 0;
 }
 
 export function isTotTrackedMenuItem(menuName: string): boolean {
@@ -47,7 +51,7 @@ export function getRemainingTots(item: Pick<MainStoreItem, "name" | "size" | "st
   const limit = getTotLimit(item);
   if (limit <= 0) return 0;
   const sold = typeof item.totSold === "number" ? item.totSold : 0;
-  return Math.max(0, item.stock * limit + (limit - sold));
+  return Math.max(0, item.stock * limit - sold);
 }
 
 export function formatTotStatus(item: Pick<MainStoreItem, "name" | "size" | "stock" | "totLimit" | "totSold">): string {
@@ -85,7 +89,7 @@ export function normalizeBaristaMenuItems<
     }
 
     const expectedName = getTotLimit(matchedStoreItem) > 0
-      ? `${getBaristaStoreLabel(matchedStoreItem)} (TOTS)`
+      ? `${getMenuBaseLabel(getBaristaStoreLabel(matchedStoreItem))} (TOTS)`
       : getBaristaStoreLabel(matchedStoreItem);
 
     if (item.name === expectedName) return item;

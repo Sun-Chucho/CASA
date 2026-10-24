@@ -7,6 +7,8 @@ import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey, transactSyn
 import { getStoreItemLabel, MainStoreItem, normalizeBaristaProductTarget, STORAGE_INVENTORY_ITEMS, STORAGE_MAIN_STORE_ITEMS } from "@/app/lib/inventory-transfer";
 import { InventoryItem } from "@/app/lib/mock-data";
 import { readJson, readPosState, STORAGE_BARISTA_STATE } from "@/app/lib/storage";
+import { BAR_CATEGORIES, buyingPriceUnit, syncBarCatalogToPos } from "@/app/lib/bar-catalog";
+import { getRemainingTots, getTotLimit } from "@/app/lib/barista-stock";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -14,7 +16,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 const STOCK_IN_HISTORY_KEY = "orange-hotel-barista-stock-in-history";
-const CATEGORIES = ["beer", "wine", "spirits", "cider", "soft-drinks", "water-juice", "energy-drinks", "malt", "coffee", "tea", "cold", "snacks"] as const;
+const CATEGORIES = [...BAR_CATEGORIES, "beer", "wine", "spirits", "cider", "soft-drinks", "water-juice", "energy-drinks", "malt", "coffee", "tea", "cold", "snacks"] as const;
 type DrinkCategory = typeof CATEGORIES[number];
 type StockMode = "new" | "addition";
 type StockMenuItem = { id: string; name: string; price: number; buyingPrice?: number; category: DrinkCategory; prepMinutes: number; updatedAt?: number; deletedAt?: number };
@@ -49,7 +51,8 @@ export default function StockInPage() {
   const [name, setName] = useState("");
   const [size, setSize] = useState("");
   const [unit, setUnit] = useState("Bottle");
-  const [category, setCategory] = useState<DrinkCategory>("beer");
+  const [category, setCategory] = useState<DrinkCategory>("Local Beers");
+  const [categoryFilter, setCategoryFilter] = useState("all");
   const [quantity, setQuantity] = useState("");
   const [buyingPrice, setBuyingPrice] = useState("");
   const [sellingPrice, setSellingPrice] = useState("");
@@ -74,7 +77,7 @@ export default function StockInPage() {
       hydrateStorageKeyFromFirebase(STORAGE_INVENTORY_ITEMS),
       hydrateStorageKeyFromFirebase(STORAGE_BARISTA_STATE),
       hydrateStorageKeyFromFirebase(STOCK_IN_HISTORY_KEY),
-    ]).finally(() => { reload(); if (!cancelled) setHydrated(true); });
+    ]).then(() => syncBarCatalogToPos()).catch((error) => console.error("Bar catalog sync failed", error)).finally(() => { reload(); if (!cancelled) setHydrated(true); });
     const unsubscribers = [STORAGE_MAIN_STORE_ITEMS, STORAGE_INVENTORY_ITEMS, STORAGE_BARISTA_STATE, STOCK_IN_HISTORY_KEY]
       .map((key) => subscribeToSyncedStorageKey(key, reload));
     reload();
@@ -98,10 +101,16 @@ export default function StockInPage() {
       const previous = result.get(key);
       result.set(key, { ...previous, label: previous?.label ?? menu.name, menu });
     });
-    return [...result.entries()].sort((a, b) => a[1].label.localeCompare(b[1].label));
+    return [...result.entries()].sort((a, b) => {
+      const left = a[1].store?.subCategory ?? a[1].inventory?.subCategory ?? a[1].menu?.category ?? "Other";
+      const right = b[1].store?.subCategory ?? b[1].inventory?.subCategory ?? b[1].menu?.category ?? "Other";
+      return left.localeCompare(right) || a[1].label.localeCompare(b[1].label);
+    });
   }, [stores, inventory, menus]);
 
   const selectedChoice = choices.find(([key]) => key === selected)?.[1];
+  const choiceCategory = (choice: typeof choices[number][1]) => choice.store?.subCategory ?? choice.inventory?.subCategory ?? choice.menu?.category ?? "Other";
+  const visibleChoices = choices.filter(([, choice]) => categoryFilter === "all" || choiceCategory(choice) === categoryFilter);
 
   const chooseDrink = (value: string) => {
     setSelected(value);
@@ -157,19 +166,19 @@ export default function StockInPage() {
         const itemSize = existingStore?.size ?? existingInventory?.size ?? (mode === "new" ? drinkSize : "");
         const itemLabel = itemSize && !itemName.toLowerCase().includes(itemSize.toLowerCase()) ? `${itemName} ${itemSize}` : itemName;
         const itemUnit = existingStore?.unit ?? existingInventory?.unit ?? unit.trim();
-        const rawCategory = existingMenu?.category ?? existingStore?.subCategory ?? existingInventory?.subCategory ?? (mode === "new" ? category : "cold");
+        const rawCategory = existingStore?.subCategory ?? existingInventory?.subCategory ?? existingMenu?.category ?? (mode === "new" ? category : "cold");
         const itemCategory = CATEGORIES.includes(rawCategory as DrinkCategory) ? rawCategory as DrinkCategory : "cold";
         const previousStock = (existingInventory?.updatedAt ?? 0) > (existingStore?.updatedAt ?? 0) ? existingInventory?.stock : existingStore?.stock ?? existingInventory?.stock;
         const stock = (previousStock ?? 0) + qty;
         const storeId = existingStore?.id ?? `bs-${id}`;
         const nextStore: MainStoreItem = existingStore
-          ? { ...existingStore, stock, buyingPrice: buy, sellingPrice: sell, receivedStock: (existingStore.receivedStock ?? 0) + qty, updatedAt: now }
+          ? { ...existingStore, stock, subCategory: itemCategory, buyingPrice: buy, sellingPrice: sell, receivedStock: (existingStore.receivedStock ?? 0) + qty, updatedAt: now }
           : { id: storeId, name: itemName, size: itemSize, stock, unit: itemUnit, minStock: 0, lane: "barista", subCategory: itemCategory, buyingPrice: buy, sellingPrice: sell, receivedStock: qty, updatedAt: now };
         const nextInventory: InventoryItem = existingInventory
-          ? { ...existingInventory, stock, buyingPrice: buy, sellingPrice: sell, price: sell, receivedStock: (existingInventory.receivedStock ?? 0) + qty, updatedAt: now }
+          ? { ...existingInventory, stock, subCategory: itemCategory, buyingPrice: buy, sellingPrice: sell, price: sell, receivedStock: (existingInventory.receivedStock ?? 0) + qty, updatedAt: now }
           : { id: `inv-${id}`, barcode: "", name: itemName, category: "Bar", subCategory: itemCategory, size: itemSize, stock, totSold: 0, buyingPrice: buy, sellingPrice: sell, price: sell, status: "ACTIVE", minStock: 0, unit: itemUnit, receivedStock: qty, updatedAt: now };
         const nextMenu: StockMenuItem = existingMenu
-          ? { ...existingMenu, buyingPrice: buy, price: sell, updatedAt: now }
+          ? { ...existingMenu, category: itemCategory, buyingPrice: buy, price: sell, updatedAt: now }
           : { id: `barista-${id}`, name: itemLabel, price: sell, buyingPrice: buy, category: itemCategory, prepMinutes: 2, updatedAt: now };
         const entry: StockInEntry = { id, itemId: storeId, itemName: itemLabel, kind: mode, date, quantity: qty, buyingPrice: buy, sellingPrice: sell, recordedAt: now, user: readActiveSessionUsername("manager") };
         return {
@@ -203,14 +212,14 @@ export default function StockInPage() {
         <TabsList><TabsTrigger value="new">New Item</TabsTrigger><TabsTrigger value="addition">New Additions</TabsTrigger></TabsList>
       </Tabs>
       <Card>
-        <CardHeader><CardTitle>{mode === "new" ? "Set opening stock" : "Record stock addition"}</CardTitle><CardDescription>Buying price is the cost per unit. Selling price is the POS price per unit.</CardDescription></CardHeader>
+        <CardHeader><CardTitle>{mode === "new" ? "Set opening stock" : "Record stock addition"}</CardTitle><CardDescription>Buying price is per bottle or unit, except St. Remy (per tot). Selling price is per tot for tot products and per unit otherwise.</CardDescription></CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {mode === "new" ? <>
             <div><label className={fieldLabel}>Drink name</label><Input value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Soda" /></div>
             <div><label className={fieldLabel}>Size</label><Input value={size} onChange={(event) => setSize(event.target.value)} placeholder="e.g. 350ml" /></div>
             <div><label className={fieldLabel}>Category</label><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={category} onChange={(event) => setCategory(event.target.value as DrinkCategory)}>{CATEGORIES.map((value) => <option key={value} value={value}>{value.replaceAll("-", " ")}</option>)}</select></div>
             <div><label className={fieldLabel}>Unit</label><Input value={unit} onChange={(event) => setUnit(event.target.value)} placeholder="Bottle" /></div>
-          </> : <div className="md:col-span-2"><label className={fieldLabel}>Select drink</label><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={selected} onChange={(event) => chooseDrink(event.target.value)}><option value="">Select a drink</option>{choices.map(([key, choice]) => <option key={key} value={key}>{choice.label}</option>)}</select></div>}
+          </> : <div className="md:col-span-2"><label className={fieldLabel}>Select drink</label><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={selected} onChange={(event) => chooseDrink(event.target.value)}><option value="">Select a drink</option>{[...BAR_CATEGORIES, "Other"].map((group) => <optgroup key={group} label={group}>{choices.filter(([, choice]) => choiceCategory(choice) === group).map(([key, choice]) => <option key={key} value={key}>{choice.label}</option>)}</optgroup>)}</select></div>}
           <div><label className={fieldLabel}>{mode === "new" ? "Opening quantity" : "Quantity received"}</label><Input type="number" min="1" step="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} /></div>
           <div><label className={fieldLabel}>Buying price (TSh)</label><Input type="number" min="0" value={buyingPrice} onChange={(event) => setBuyingPrice(event.target.value)} /></div>
           <div><label className={fieldLabel}>Selling price (TSh)</label><Input type="number" min="0.01" value={sellingPrice} onChange={(event) => setSellingPrice(event.target.value)} /></div>
@@ -219,8 +228,8 @@ export default function StockInPage() {
         </CardContent>
       </Card>
       <Card>
-        <CardHeader><CardTitle>Current drink stock</CardTitle><CardDescription>Use Add Stock to record a new purchase for an existing drink.</CardDescription></CardHeader>
-        <CardContent className="overflow-x-auto p-0"><Table><TableHeader><TableRow><TableHead>Drink</TableHead><TableHead>Quantity</TableHead><TableHead>Unit</TableHead><TableHead>Buying price</TableHead><TableHead>Selling price</TableHead><TableHead>Action</TableHead></TableRow></TableHeader><TableBody>{choices.map(([key, choice]) => <TableRow key={key}><TableCell>{choice.label}</TableCell><TableCell>{choice.inventory?.stock ?? choice.store?.stock ?? 0}</TableCell><TableCell>{choice.store?.unit ?? choice.inventory?.unit ?? "—"}</TableCell><TableCell>TSh {(choice.store?.buyingPrice ?? choice.inventory?.buyingPrice ?? choice.menu?.buyingPrice ?? 0).toLocaleString()}</TableCell><TableCell>TSh {(choice.store?.sellingPrice ?? choice.inventory?.sellingPrice ?? choice.menu?.price ?? 0).toLocaleString()}</TableCell><TableCell><Button variant="outline" size="sm" onClick={() => { setMode("addition"); chooseDrink(key); setQuantity(""); }}>Add Stock</Button></TableCell></TableRow>)}{choices.length === 0 && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">No drinks recorded. Use New Item to set the first opening stock.</TableCell></TableRow>}</TableBody></Table></CardContent>
+        <CardHeader><CardTitle>Current drink stock</CardTitle><CardDescription>Use Add Stock to record a new purchase. Tot opening counts were converted to bottle balances; remaining tots are shown below.</CardDescription><select aria-label="Filter drink category" className="h-10 max-w-xs rounded-md border bg-background px-3 text-sm" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="all">All categories</option>{BAR_CATEGORIES.map((value) => <option key={value}>{value}</option>)}<option>Other</option></select></CardHeader>
+        <CardContent className="overflow-x-auto p-0"><Table><TableHeader><TableRow><TableHead>Drink</TableHead><TableHead>Category</TableHead><TableHead>Quantity</TableHead><TableHead>Unit</TableHead><TableHead>Buying price</TableHead><TableHead>Selling price</TableHead><TableHead>Action</TableHead></TableRow></TableHeader><TableBody>{visibleChoices.map(([key, choice]) => <TableRow key={key}><TableCell>{choice.label}</TableCell><TableCell>{choiceCategory(choice)}</TableCell><TableCell>{choice.store && getTotLimit(choice.store) > 0 ? `${getRemainingTots(choice.store)} tots (${choice.store.stock} bottles)` : choice.store?.stock ?? choice.inventory?.stock ?? 0}</TableCell><TableCell>{choice.store?.unit ?? choice.inventory?.unit ?? "—"}</TableCell><TableCell>TSh {(choice.store?.buyingPrice ?? choice.inventory?.buyingPrice ?? choice.menu?.buyingPrice ?? 0).toLocaleString()} / {buyingPriceUnit(choice.label)}</TableCell><TableCell>TSh {(choice.store?.sellingPrice ?? choice.inventory?.sellingPrice ?? choice.menu?.price ?? 0).toLocaleString()}</TableCell><TableCell><Button variant="outline" size="sm" onClick={() => { setMode("addition"); chooseDrink(key); setQuantity(""); }}>Add Stock</Button></TableCell></TableRow>)}{visibleChoices.length === 0 && <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">No drinks in this category.</TableCell></TableRow>}</TableBody></Table></CardContent>
       </Card>
       <Card>
         <CardHeader><CardTitle>Recent additions</CardTitle><CardDescription>Recorded stock entries and their purchase dates.</CardDescription></CardHeader>

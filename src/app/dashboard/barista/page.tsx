@@ -21,6 +21,7 @@ import { findStoreItemForMenuName, formatTotStatus, getMenuStockStatus, getRemai
 import { printDepartmentReceipt } from "@/app/lib/receipt-print";
 import { getActiveBaristaStateKey, readJson, readPosState, writeJson, writePosState } from "@/app/lib/storage";
 import { BARISTA_INVENTORY_SEED } from "@/app/lib/seed-barista-data";
+import { BAR_CATEGORIES, BarCategory, buyingPriceUnit, syncBarCatalogToPos } from "@/app/lib/bar-catalog";
 import { useIsDirector } from "@/hooks/use-is-director";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +40,7 @@ import { DEFAULT_LOGIN_PASSWORD, getProfilePassword, readActiveSessionUsername, 
 
 type BaristaCategory =
   | "all"
+  | BarCategory
   | "espresso"
   | "coffee"
   | "tea"
@@ -64,6 +66,7 @@ type BaristaManagerPricingRow = {
   buyingPrice: number;
   sellingPrice: number;
   stock: number;
+  availableTots?: number;
   unit: string;
   quantitySold: number;
 };
@@ -152,6 +155,7 @@ const STORAGE_WASTE = "orange-hotel-barista-waste";
 
 const BARISTA_CATEGORIES: Array<{ value: BaristaCategory; label: string }> = [
   { value: "all", label: "All" },
+  ...BAR_CATEGORIES.map((category) => ({ value: category, label: category })),
   { value: "beer", label: "Beer" },
   { value: "wine", label: "Wine" },
   { value: "spirits", label: "Spirits" },
@@ -207,6 +211,8 @@ function getBaristaPaymentRoomNumber(payment: Pick<BaristaPaymentRecord, "mode" 
 const normalizeCategory = (value: string, itemName = ""): Exclude<BaristaCategory, "all"> => {
   const normalizedValue = value.trim().toLowerCase();
   const normalizedName = itemName.trim().toLowerCase();
+  const catalogCategory = BAR_CATEGORIES.find((category) => category.toLowerCase() === normalizedValue);
+  if (catalogCategory) return catalogCategory;
 
   if (
     normalizedValue === "espresso" ||
@@ -348,6 +354,7 @@ export default function BaristaPage() {
   const [savedBaristaItemId, setSavedBaristaItemId] = useState("");
   const [deletingBaristaItemId, setDeletingBaristaItemId] = useState("");
   const [restockSearch, setRestockSearch] = useState("");
+  const [managerCategoryFilter, setManagerCategoryFilter] = useState("all");
   const [directorTab, setDirectorTab] = useState<"inventory" | "finance" | "purchases" | "sales">("finance");
   const [directorSalesDateFilter, setDirectorSalesDateFilter] = useState<SalesDateFilter>("day");
   const [category, setCategory] = useState<BaristaCategory>("all");
@@ -461,6 +468,7 @@ export default function BaristaPage() {
         hydrateStorageKeyFromFirebase(STORAGE_INVENTORY_ITEMS).catch(() => undefined),
         hydrateStorageKeyFromFirebase(STORAGE_MAIN_STORE_ITEMS).catch(() => undefined),
       ]);
+      await syncBarCatalogToPos().catch((error) => console.error("Bar catalog sync failed", error));
     };
 
     void bootstrapBarista().finally(applyBaristaSnapshot);
@@ -900,9 +908,12 @@ export default function BaristaPage() {
                 ? inventoryMatch.price
                 : 0;
         const quantitySold = baristaSalesByItem.get(normalizeBaristaTarget(getStoreItemLabel(item))) ?? 0;
-        const capital = item.stock * buyingPrice;
+        const totLimit = getTotLimit(item);
+        const costPerSale = totLimit > 0 && buyingPriceUnit(getStoreItemLabel(item)) !== "tot" ? buyingPrice / totLimit : buyingPrice;
+        const capital = totLimit > 0 ? getRemainingTots(item) * costPerSale : item.stock * buyingPrice;
         const revenue = quantitySold * sellingPrice;
-        const profitLoss = revenue - capital;
+        const costOfGoods = quantitySold * costPerSale;
+        const profitLoss = revenue - costOfGoods;
 
         return {
           ...item,
@@ -911,6 +922,7 @@ export default function BaristaPage() {
           sellingPrice,
           quantitySold,
           capital,
+          costOfGoods,
           revenue,
           profitLoss,
         };
@@ -954,6 +966,7 @@ export default function BaristaPage() {
           buyingPrice,
           sellingPrice,
           stock,
+          availableTots: storeMatch && getTotLimit(storeMatch) > 0 ? getRemainingTots(storeMatch) : undefined,
           unit,
           quantitySold,
         };
@@ -962,13 +975,13 @@ export default function BaristaPage() {
   );
   const filteredBaristaManagerPricingRows = useMemo(() => {
     const tokens = normalizeStockName(restockSearch).split(" ").filter(Boolean);
-    if (tokens.length === 0) return baristaManagerPricingRows;
     return baristaManagerPricingRows.filter((item) => {
+      if (managerCategoryFilter !== "all" && item.category !== managerCategoryFilter) return false;
       const categoryLabel = BARISTA_CATEGORIES.find((entry) => entry.value === item.category)?.label ?? item.category;
       const haystack = normalizeStockName(`${item.name} ${categoryLabel} ${item.unit}`);
       return tokens.every((token) => haystack.includes(token));
-    });
-  }, [baristaManagerPricingRows, restockSearch]);
+    }).sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+  }, [baristaManagerPricingRows, managerCategoryFilter, restockSearch]);
 
   const updateManagerPricingDraft = (
     item: BaristaManagerPricingRow,
@@ -1294,8 +1307,8 @@ export default function BaristaPage() {
     [baristaInventoryRows, baristaPayments],
   );
   const baristaProfitLoss = useMemo(
-    () => totalBaristaRevenue - baristaCapitalTotal,
-    [baristaCapitalTotal, totalBaristaRevenue],
+    () => totalBaristaRevenue - baristaInventoryRows.reduce((sum, item) => sum + item.costOfGoods, 0),
+    [baristaInventoryRows, totalBaristaRevenue],
   );
   const filteredDirectorSalesPayments = useMemo(
     () =>
@@ -1362,7 +1375,7 @@ export default function BaristaPage() {
       <CardHeader>
         <CardTitle className="text-xl font-black uppercase tracking-tight">Barista Finance</CardTitle>
         <CardDescription>
-          Capital = quantity in stock x buying price. Revenue = quantity sold x selling price. Profit/Loss = revenue - capital.
+          Capital values current stock. Profit/Loss subtracts cost of sold units; bottle cost is apportioned across tots for tot sales.
         </CardDescription>
       </CardHeader>
       <CardContent className="p-0">
@@ -1386,7 +1399,7 @@ export default function BaristaPage() {
                 <TableCell className="font-bold">{item.stock} {item.unit}</TableCell>
                 <TableCell className="font-bold">{item.quantitySold}</TableCell>
                 <TableCell className="font-bold">
-                  {item.buyingPrice > 0 ? `TSh ${item.buyingPrice.toLocaleString()}` : "-"}
+                  {item.buyingPrice > 0 ? `TSh ${item.buyingPrice.toLocaleString()} / ${buyingPriceUnit(item.displayName)}` : "-"}
                 </TableCell>
                 <TableCell className="font-bold">TSh {item.capital.toLocaleString()}</TableCell>
                 <TableCell className="font-bold">
@@ -2443,8 +2456,9 @@ export default function BaristaPage() {
               <CardDescription>
                 Enter newly received stock to add it to the current balance, adjust prices if needed, then press Save.
               </CardDescription>
-              {isBaristaRestock && (
-                <div className="relative max-w-md">
+              <div className="flex flex-wrap gap-3">
+                <select aria-label="Filter inventory category" className="h-11 rounded-md border bg-background px-3 text-sm" value={managerCategoryFilter} onChange={(event) => setManagerCategoryFilter(event.target.value)}><option value="all">All categories</option>{BAR_CATEGORIES.map((value) => <option key={value}>{value}</option>)}</select>
+                <div className="relative max-w-md flex-1">
                   <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     value={restockSearch}
@@ -2453,14 +2467,16 @@ export default function BaristaPage() {
                     className="h-11 pl-10"
                   />
                 </div>
-              )}
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               <Table>
                 <TableHeader className="bg-muted/10">
                   <TableRow>
                     <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Item</TableHead>
+                    <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Category</TableHead>
                     <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Current Stock</TableHead>
+                    <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Stock In</TableHead>
                     <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Qty Sold</TableHead>
                     <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Buying Price (Cost)</TableHead>
                     <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Selling Price (POS)</TableHead>
@@ -2471,8 +2487,9 @@ export default function BaristaPage() {
                   {filteredBaristaManagerPricingRows.map((item) => (
                     <TableRow key={item.id}>
                       <TableCell className="font-bold">{item.name}</TableCell>
+                      <TableCell>{item.category}</TableCell>
                       <TableCell className="font-bold">
-                        {item.stock} {item.unit}
+                        {item.availableTots !== undefined ? `${item.availableTots} tots (${item.stock} bottles)` : `${item.stock} ${item.unit}`}
                       </TableCell>
                       <TableCell>
                         <Button
@@ -2499,6 +2516,7 @@ export default function BaristaPage() {
                             className="h-9 w-28"
                             onChange={(event) => updateManagerPricingDraft(item, "buyingPrice", event.target.value)}
                           />
+                          <span className="text-xs text-muted-foreground">/{buyingPriceUnit(item.name)}</span>
                         </div>
                       </TableCell>
                       <TableCell className="font-bold">
@@ -2554,7 +2572,7 @@ export default function BaristaPage() {
                   ))}
                   {filteredBaristaManagerPricingRows.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={7} className="py-10 text-center font-black uppercase text-[10px] tracking-widest text-muted-foreground">
+                      <TableCell colSpan={8} className="py-10 text-center font-black uppercase text-[10px] tracking-widest text-muted-foreground">
                         {restockSearch.trim() ? "No matching barista items" : "No barista menu items yet"}
                       </TableCell>
                     </TableRow>
