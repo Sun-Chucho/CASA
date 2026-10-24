@@ -3,13 +3,17 @@ export type KitchenMenuCategory =
   | "soup"
   | "snacks"
   | "beef"
+  | "chicken"
   | "fish"
+  | "meat"
   | "pork"
   | "local-food"
   | "pizza"
   | "burger"
   | "sandwich"
   | "pasta"
+  | "indian"
+  | "sides"
   | "dessert"
   | "drinks";
 
@@ -28,13 +32,17 @@ export const KITCHEN_CATEGORY_OPTIONS: Array<{ value: KitchenMenuCategory; label
   { value: "soup", label: "Soups" },
   { value: "snacks", label: "Snacks" },
   { value: "beef", label: "Beef" },
+  { value: "chicken", label: "Chicken" },
   { value: "fish", label: "Fish" },
+  { value: "meat", label: "Meat" },
   { value: "pork", label: "Pork" },
   { value: "local-food", label: "Local Food" },
   { value: "pizza", label: "Pizza" },
   { value: "burger", label: "Burgers" },
   { value: "sandwich", label: "Sandwiches" },
   { value: "pasta", label: "Pasta" },
+  { value: "indian", label: "Indian Dishes" },
+  { value: "sides", label: "Side Dishes" },
   { value: "dessert", label: "Desserts" },
   { value: "drinks", label: "Drinks" },
 ];
@@ -43,7 +51,80 @@ export const KITCHEN_CATEGORY_LABELS: Record<KitchenMenuCategory, string> = Obje
   KITCHEN_CATEGORY_OPTIONS.map((option) => [option.value, option.label]),
 ) as Record<KitchenMenuCategory, string>;
 
-export const DEFAULT_KITCHEN_MENU: KitchenMenuItem[] = [];
+// Stable IDs let manager edits survive future catalog updates and sync merges.
+const CASSA_FOOD_ITEMS: Array<[string, number, KitchenMenuCategory]> = [
+  ["Tomato Soup", 10000, "soup"],
+  ["Pumpkin Soup", 10000, "soup"],
+  ["Vegetable Soup", 10000, "soup"],
+  ["Cream of Mushroom Soup", 10000, "soup"],
+  ["Cream Chicken Soup", 10000, "soup"],
+  ["Vegetable Salad", 15000, "salad"],
+  ["Avocado Salad", 12000, "salad"],
+  ["Green Salad", 10000, "salad"],
+  ["Chicken Salad", 15000, "salad"],
+  ["Chicken Caesar Salad", 15000, "salad"],
+  ["Kuku Paka", 25000, "chicken"],
+  ["Beef Stew", 20000, "beef"],
+  ["Roasted Beef", 20000, "beef"],
+  ["Roasted Lamb", 25000, "meat"],
+  ["Beef Fillet", 25000, "beef"],
+  ["Grilled Chicken", 20000, "chicken"],
+  ["Fish Fillet", 30000, "fish"],
+  ["Coconut Tilapia", 30000, "fish"],
+  ["Grilled Fish Skewers", 25000, "fish"],
+  ["Pepper Steak", 25000, "beef"],
+  ["Chicken Schnitzel", 20000, "chicken"],
+  ["Chicken Burger", 20000, "burger"],
+  ["Beef Burger", 20000, "burger"],
+  ["Vegetable Burger", 15000, "burger"],
+  ["Vegetable Sandwich", 15000, "sandwich"],
+  ["Chicken Club Sandwich", 20000, "sandwich"],
+  ["Chicken Crisp Sandwich", 20000, "sandwich"],
+  ["Chicken Sandwich", 20000, "sandwich"],
+  ["Chicken Wings (6 pieces)", 20000, "snacks"],
+  ["Chicken Lollipops (6 pieces)", 15000, "snacks"],
+  ["Chicken Spring Rolls (4 pieces)", 15000, "snacks"],
+  ["Vegetable Spring Rolls (4 pieces)", 15000, "snacks"],
+  ["Beef Samosa (4 pieces)", 10000, "snacks"],
+  ["Vegetable Samosa (4 pieces)", 6000, "snacks"],
+  ["Spaghetti Marinara", 20000, "pasta"],
+  ["Spaghetti Arrabbiata", 20000, "pasta"],
+  ["Spaghetti Alfredo", 25000, "pasta"],
+  ["Chicken Parmesan Spaghetti", 25000, "pasta"],
+  ["Aubergine Parmesan", 20000, "pasta"],
+  ["Vegetable Spaghetti", 15000, "pasta"],
+  ["Chicken Tikka Masala", 30000, "indian"],
+  ["Chicken Makhan", 30000, "indian"],
+  ["Dal Makhan", 25000, "indian"],
+  ["Mutton Rogan Josh", 25000, "indian"],
+  ["Chicken Biryani", 30000, "indian"],
+  ["Vegetable Biryani", 25000, "indian"],
+  ["Hawaiian Pizza", 25000, "pizza"],
+  ["Chicken Pizza", 30000, "pizza"],
+  ["Beef Pizza", 30000, "pizza"],
+  ["Margherita Pizza", 20000, "pizza"],
+  ["Cassa Modern Pizza", 30000, "pizza"],
+  ["Rice", 5000, "sides"],
+  ["Mashed Potatoes", 5000, "sides"],
+  ["Ugali", 5000, "sides"],
+  ["Chapati", 5000, "sides"],
+  ["Chips", 5000, "sides"],
+  ["Chips Mayai", 8000, "sides"],
+  ["Ndizi (Bananas)", 5000, "sides"],
+  ["Ice Cream", 10000, "dessert"],
+  ["Pineapple Crumble", 10000, "dessert"],
+  ["Apple Crumble", 10000, "dessert"],
+  ["Muffins Cake", 10000, "dessert"],
+  ["Fruit Salad", 10000, "dessert"],
+];
+
+export const DEFAULT_KITCHEN_MENU: KitchenMenuItem[] = CASSA_FOOD_ITEMS.map(([name, price, category]) => ({
+  id: `km-cassa-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-$/, "")}`,
+  name,
+  price,
+  category,
+  prepMinutes: category === "sides" || category === "dessert" ? 10 : 20,
+}));
 
 function isKitchenMenuCategory(value: unknown): value is KitchenMenuCategory {
   return KITCHEN_CATEGORY_OPTIONS.some((option) => option.value === value);
@@ -76,6 +157,7 @@ const DEFAULT_KITCHEN_MENU_SIGNATURES = new Map(
   DEFAULT_KITCHEN_MENU.map((item) => [item.id, buildKitchenMenuSignature(item)]),
 );
 const DEFAULT_KITCHEN_MENU_BY_ID = new Map(DEFAULT_KITCHEN_MENU.map((item) => [item.id, item]));
+const DEFAULT_KITCHEN_MENU_BY_NAME = new Map(DEFAULT_KITCHEN_MENU.map((item) => [item.name.toLowerCase(), item]));
 const OBSOLETE_DEFAULT_KITCHEN_MENU_IDS = new Set(["km-dessert-2", "km-dessert-3"]);
 const APPROVED_KITCHEN_MENU_NAME_ALIASES: Record<string, string> = {
   "fresh garden salad": "km-salad-1",
@@ -151,6 +233,9 @@ function normalizeKitchenMenuName(value: string) {
 function getApprovedKitchenMenuItem(item: KitchenMenuItem) {
   const byId = DEFAULT_KITCHEN_MENU_BY_ID.get(item.id);
   if (byId) return byId;
+
+  const byName = DEFAULT_KITCHEN_MENU_BY_NAME.get(normalizeKitchenMenuName(item.name));
+  if (byName) return byName;
 
   const aliasId = APPROVED_KITCHEN_MENU_NAME_ALIASES[normalizeKitchenMenuName(item.name)];
   return aliasId ? DEFAULT_KITCHEN_MENU_BY_ID.get(aliasId) : undefined;

@@ -526,7 +526,7 @@ export function MenuCreateView() {
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
                 <div>
                   <CardTitle className="text-xl font-black uppercase tracking-tight">Kitchen Menu</CardTitle>
-                  <CardDescription>Current kitchen menu items and selling prices.</CardDescription>
+                  <CardDescription>Current kitchen menu items and selling prices. Pasta choices: Penne, Fusilli or Spaghetti.</CardDescription>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="relative w-48 md:w-64">

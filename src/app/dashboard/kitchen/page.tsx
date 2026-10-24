@@ -1387,6 +1387,10 @@ export default function KitchenPage() {
                 </TabsList>
               </Tabs>
 
+              {category === "pasta" && (
+                <p className="text-xs text-muted-foreground">Pasta choices: Penne, Fusilli or Spaghetti.</p>
+              )}
+
               <Tabs value={serviceMode} onValueChange={(value) => setServiceMode(value as ServiceMode)}>
                 <TabsList className="w-full grid grid-cols-3 h-11 bg-muted/30 rounded-xl">
                   <TabsTrigger value="restaurant" className="font-black uppercase text-[10px] tracking-widest">Restaurant</TabsTrigger>
