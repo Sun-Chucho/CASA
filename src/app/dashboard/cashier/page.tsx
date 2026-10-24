@@ -149,10 +149,10 @@ function matchesBookingDateFilter(createdAt: number, filter: BookingDateFilter) 
   return createdDate.getFullYear() === now.getFullYear() && createdDate.getMonth() === now.getMonth();
 }
 
-function isOverstay(record: BookingRecord): boolean {
+function isOverstay(record: BookingRecord, now = Date.now()): boolean {
   if (record.status === "checked-out") return false;
   const checkoutAt = new Date(`${record.checkOutDate}T${record.checkOutTime || "00:00"}:00`);
-  return Date.now() > checkoutAt.getTime();
+  return now > checkoutAt.getTime();
 }
 
 function toAccountingCurrency(currency: BookingCurrency): BookingCurrency {
@@ -177,6 +177,7 @@ export default function BookingPage() {
 
   const [transactionTab, setTransactionTab] = useState<TransactionTab>("completed");
   const [bookingDateFilter, setBookingDateFilter] = useState<BookingDateFilter>("all");
+  const [bookingClock, setBookingClock] = useState(() => Date.now());
   const [roomType, setRoomType] = useState<RoomType>("standard");
   const [roomPickerOpen, setRoomPickerOpen] = useState(false);
 
@@ -251,6 +252,11 @@ export default function BookingPage() {
     }
   }, []);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => setBookingClock(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const nights = useMemo(() => daysBetween(checkInDate, checkOutDate), [checkInDate, checkOutDate]);
   const packageConfig = selectedPackage === "none" ? null : SPECIAL_PACKAGES[selectedPackage];
   const selectedRoom = useMemo(
@@ -307,6 +313,17 @@ export default function BookingPage() {
     const source = transactionTab === "completed" ? completedTransactions : creditTransactions;
     return source.filter((tx) => matchesBookingDateFilter(tx.createdAt, bookingDateFilter));
   }, [bookingDateFilter, completedTransactions, creditTransactions, transactionTab]);
+  const activeBookings = useMemo(
+    () => transactions
+      .filter(isBookingStillActive)
+      .sort((a, b) => {
+        const aCheckout = getDateTimeMs(a.checkOutDate, a.checkOutTime);
+        const bCheckout = getDateTimeMs(b.checkOutDate, b.checkOutTime);
+        return aCheckout - bCheckout;
+      }),
+    [transactions],
+  );
+  const overstayCount = activeBookings.filter((booking) => isOverstay(booking, bookingClock)).length;
   const activeBookedRoomNumbers = useMemo(
     () =>
       new Set(
@@ -682,7 +699,10 @@ export default function BookingPage() {
             Guest booking capture and payment processing
           </p>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full lg:w-auto">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 w-full lg:w-auto">
+          <a href="#active-stays" className="flex h-10 items-center justify-center rounded-md border border-red-300 bg-red-50 px-4 text-[10px] font-black uppercase tracking-widest text-red-800">
+            {activeBookings.length} Checked In · {overstayCount} Overstay
+          </a>
           <Badge variant="outline" className="h-10 px-4 justify-center border-primary text-primary font-black uppercase text-[10px] tracking-widest">
             {totalTransactions} Transactions
           </Badge>
@@ -833,6 +853,59 @@ export default function BookingPage() {
         </CardContent>
       </Card>
       )}
+
+      <Card id="active-stays" className="border-none shadow-sm">
+        <CardHeader>
+          <CardTitle className="text-xl font-black uppercase tracking-tight">Guests Still Checked In</CardTitle>
+          <CardDescription>
+            {activeBookings.length} active booking{activeBookings.length === 1 ? "" : "s"}; {overstayCount} overstay{overstayCount === 1 ? "" : "s"}. All active guests appear here regardless of booking date or payment type.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader className="bg-muted/10">
+              <TableRow>
+                <TableHead>Room #</TableHead>
+                <TableHead>Guest Name</TableHead>
+                <TableHead>Check-In</TableHead>
+                <TableHead>Expected Check-Out</TableHead>
+                <TableHead>Payment</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Action</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {activeBookings.map((booking) => (
+                <TableRow key={booking.id}>
+                  <TableCell className="font-black">{booking.roomNumber}</TableCell>
+                  <TableCell className="font-bold">{booking.guestName}</TableCell>
+                  <TableCell>{booking.checkInDate}</TableCell>
+                  <TableCell>{booking.checkOutDate} {booking.checkOutTime}</TableCell>
+                  <TableCell>{booking.status === "credit" ? "Credit" : "Paid"}</TableCell>
+                  <TableCell>
+                    <Badge className={isOverstay(booking, bookingClock) ? "bg-red-600 text-white hover:bg-red-600" : "bg-green-600 text-white hover:bg-green-600"}>
+                      {isOverstay(booking, bookingClock) ? "Overstay" : "Occupied"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {!isDirector && (
+                      <div className="flex justify-end gap-2">
+                        <Button size="sm" variant="outline" onClick={() => openExtendStay(booking)}>Extend Stay</Button>
+                        <Button size="sm" onClick={() => checkoutBooking(booking)}>Check Out</Button>
+                      </div>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+              {activeBookings.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={7} className="py-10 text-center text-sm text-muted-foreground">No guests are currently checked in.</TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
 
       <Card id="booked-rooms" className="border-none shadow-sm">
         <CardHeader>

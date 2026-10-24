@@ -121,22 +121,19 @@ export function sanitizeCasaHistory<T>(key: string, value: T): T {
           const booking = record as Record<string, unknown>;
           const idMatch = /^tx-(\d+)$/.exec(String(booking.id ?? ""));
           const explicitEnteredAt = Number(booking.enteredAt);
-          const enteredAt = Number.isFinite(explicitEnteredAt)
+          const enteredAt = Number.isFinite(explicitEnteredAt) && explicitEnteredAt > 0
             ? explicitEnteredAt
             : idMatch
               ? Number(idMatch[1])
               : null;
           const roomNumber = String(booking.roomNumber ?? "");
-          const roomRateMatches =
-            CASA_ROOM_PRICES[roomNumber] === Number(booking.ratePerNight) ||
-            (booking.specialPackage === "resident-with-breakfast" && Number(booking.ratePerNight) === 70000) ||
-            (booking.specialPackage === "ninety-day-special" && Number(booking.ratePerNight) === 70000) ||
-            (booking.specialPackage === "non-resident-with-breakfast" && Number(booking.ratePerNight) === 150000);
+          // A booking keeps the rate agreed when it was made. Room prices and
+          // package prices change, so comparing old bookings with today's rate
+          // silently deletes real guests, including stays still in progress.
           return (
             enteredAt !== null &&
             enteredAt >= CASA_DATA_START_MS &&
-            roomNumber in CASA_ROOM_PRICES &&
-            roomRateMatches
+            roomNumber in CASA_ROOM_PRICES
           )
             ? [{ ...booking, enteredAt }]
             : [];
