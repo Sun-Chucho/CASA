@@ -5,6 +5,7 @@ import {
   writeServerSyncedStorageValue,
 } from "@/app/lib/firebase-server";
 import { sanitizeCasaHistory } from "@/app/lib/casa-history";
+import { chooseCashierBookingRecord } from "@/app/lib/cashier-booking-merge";
 
 type RouteContext = {
   params: Promise<{
@@ -131,7 +132,11 @@ function sortByCreatedAtDesc(records: unknown[]) {
   });
 }
 
-function mergeRecordsByIdPreservingIncomingChanges(currentRecords: unknown[], incomingRecords: unknown[]) {
+function mergeRecordsByIdPreservingIncomingChanges(
+  currentRecords: unknown[],
+  incomingRecords: unknown[],
+  chooseRecord = chooseRecordBySettlementPriority,
+) {
   const mergedById = new Map<string, unknown>();
   const recordsWithoutId: unknown[] = [];
 
@@ -148,7 +153,7 @@ function mergeRecordsByIdPreservingIncomingChanges(currentRecords: unknown[], in
     const id = getRecordId(record);
     if (id) {
       const existingRecord = mergedById.get(id);
-      mergedById.set(id, existingRecord ? chooseRecordBySettlementPriority(existingRecord, record) : record);
+      mergedById.set(id, existingRecord ? chooseRecord(existingRecord, record) : record);
     } else {
       recordsWithoutId.push(record);
     }
@@ -167,13 +172,9 @@ function protectIncomingSyncedValue(key: string, incomingValue: unknown, current
     const currentSeq = getCashierReceiptSeq(currentValue);
     const incomingSeq = getCashierReceiptSeq(incomingValue);
 
-    if (currentTransactions.length > 0 && incomingTransactions.length < currentTransactions.length && incomingSeq <= currentSeq) {
-      return currentValue;
-    }
-
     return {
       ...(typeof incomingValue === "object" && incomingValue !== null ? incomingValue : {}),
-      transactions: mergeRecordsByIdPreservingIncomingChanges(currentTransactions, incomingTransactions),
+      transactions: mergeRecordsByIdPreservingIncomingChanges(currentTransactions, incomingTransactions, chooseCashierBookingRecord),
       receiptSeq: Math.max(currentSeq, incomingSeq),
     };
   }

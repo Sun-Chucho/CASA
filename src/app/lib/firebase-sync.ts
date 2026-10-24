@@ -6,6 +6,7 @@ import { getDefaultRooms, type InventoryItem } from "@/app/lib/mock-data";
 import { DEFAULT_HARDWARE_SETTINGS } from "@/app/lib/hardware-settings";
 import { sanitizeForStorage } from "@/app/lib/storage-sanitize";
 import { sanitizeCasaHistory } from "@/app/lib/casa-history";
+import { chooseCashierBookingRecord } from "@/app/lib/cashier-booking-merge";
 
 // ── Connectivity monitoring ─────────────────────────────────────────────────
 let _isConnected = false;
@@ -638,7 +639,7 @@ function mergeCashierStateForSync(localValue: unknown, remoteValue: unknown) {
     const id = getRecordId(transaction);
     if (id) {
       const existingRecord = mergedById.get(id);
-      mergedById.set(id, existingRecord ? chooseRecordBySettlementPriority(existingRecord, transaction) : transaction);
+      mergedById.set(id, existingRecord ? chooseCashierBookingRecord(existingRecord, transaction) : transaction);
     }
   }
 
@@ -646,7 +647,7 @@ function mergeCashierStateForSync(localValue: unknown, remoteValue: unknown) {
     const id = getRecordId(transaction);
     if (id) {
       const existingRecord = mergedById.get(id);
-      mergedById.set(id, existingRecord ? chooseRecordBySettlementPriority(existingRecord, transaction) : transaction);
+      mergedById.set(id, existingRecord ? chooseCashierBookingRecord(existingRecord, transaction) : transaction);
     }
   }
 
@@ -776,7 +777,11 @@ function mergeRecordsById(localRecords: unknown[], remoteRecords: unknown[]) {
   });
 }
 
-function mergeRecordsByIdWithRemoteWins(localRecords: unknown[], remoteRecords: unknown[]) {
+function mergeRecordsByIdWithRemoteWins(
+  localRecords: unknown[],
+  remoteRecords: unknown[],
+  chooseRecord = chooseRecordBySettlementPriority,
+) {
   const mergedById = new Map<string, unknown>();
   const recordsWithoutId: unknown[] = [];
 
@@ -784,7 +789,7 @@ function mergeRecordsByIdWithRemoteWins(localRecords: unknown[], remoteRecords: 
     const id = getRecordId(record);
     if (id) {
       const existingRecord = mergedById.get(id);
-      mergedById.set(id, existingRecord ? chooseRecordBySettlementPriority(existingRecord, record) : record);
+      mergedById.set(id, existingRecord ? chooseRecord(existingRecord, record) : record);
     } else {
       recordsWithoutId.push(record);
     }
@@ -794,7 +799,7 @@ function mergeRecordsByIdWithRemoteWins(localRecords: unknown[], remoteRecords: 
     const id = getRecordId(record);
     if (id) {
       const existingRecord = mergedById.get(id);
-      mergedById.set(id, existingRecord ? chooseRecordBySettlementPriority(existingRecord, record) : record);
+      mergedById.set(id, existingRecord ? chooseRecord(existingRecord, record) : record);
     } else {
       recordsWithoutId.push(record);
     }
@@ -850,7 +855,7 @@ function mergeCashierStateForRemoteApply(localValue: unknown, remoteValue: unkno
   return {
     ...localSnapshot,
     ...remoteSnapshot,
-    transactions: mergeRecordsByIdWithRemoteWins(localSnapshot.transactions, remoteSnapshot.transactions),
+    transactions: mergeRecordsByIdWithRemoteWins(localSnapshot.transactions, remoteSnapshot.transactions, chooseCashierBookingRecord),
     receiptSeq: Math.max(
       Number.isFinite(localSnapshot.receiptSeq) ? Number(localSnapshot.receiptSeq) : 0,
       Number.isFinite(remoteSnapshot.receiptSeq) ? Number(remoteSnapshot.receiptSeq) : 0,

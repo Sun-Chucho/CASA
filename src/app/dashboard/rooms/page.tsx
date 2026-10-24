@@ -132,7 +132,7 @@ export default function RoomsPage() {
       if (activeBooking) {
         const nextTransactions = cashierSnapshot.transactions.map((booking) =>
           booking.id === activeBooking.id
-            ? { ...booking, status: "checked-out" as const }
+            ? { ...booking, status: "checked-out" as const, checkedOutAt: Date.now(), updatedAt: Date.now() }
             : booking,
         );
         writeCashierState(nextTransactions, cashierSnapshot.receiptSeq);

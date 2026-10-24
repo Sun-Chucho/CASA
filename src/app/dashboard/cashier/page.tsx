@@ -8,7 +8,7 @@ import {
   getCasaRoomPrice,
 } from "@/app/lib/mock-data";
 import { readStoredRole } from "@/app/lib/auth";
-import { readCashierState, writeCashierState, getActiveCashierStateKey } from "@/app/lib/storage";
+import { readCashierState, writeCashierState, getActiveCashierStateKey, STORAGE_CASHIER_STATE } from "@/app/lib/storage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -26,7 +26,7 @@ import { Clock, Phone, Receipt, User } from "lucide-react";
 import { useIsDirector } from "@/hooks/use-is-director";
 import { useConfirmDialog } from "@/hooks/use-confirm-dialog";
 import { isBookingStillActive, readRoomsState, syncRoomsStateFromBookings, updateRoomStatusByNumber } from "@/app/lib/rooms-storage";
-import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
+import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey, transactSyncedStorageValue } from "@/app/lib/firebase-sync";
 import { getScopedStorageKey } from "@/app/lib/storage";
 
 type PaymentMethod = "cash" | "card" | "mobile-money" | "credit";
@@ -64,6 +64,9 @@ interface BookingRecord {
   extensionPaymentMethod?: PaymentMethod;
   extensionAmount?: number;
   lastExtendedAt?: number;
+  paymentMethodEditedAt?: number;
+  updatedAt?: number;
+  checkedOutAt?: number;
 }
 
 function getFallbackRoomRate(): number {
@@ -109,9 +112,9 @@ function daysBetween(checkIn: string, checkOut: string): number {
 }
 
 function addDays(dateText: string, days: number): string {
-  const baseDate = new Date(`${dateText}T00:00:00`);
+  const baseDate = new Date(`${dateText}T00:00:00Z`);
   if (!Number.isFinite(baseDate.getTime())) return dateText;
-  baseDate.setDate(baseDate.getDate() + days);
+  baseDate.setUTCDate(baseDate.getUTCDate() + days);
   return baseDate.toISOString().slice(0, 10);
 }
 
@@ -198,6 +201,8 @@ export default function BookingPage() {
   const [extendCheckOutDate, setExtendCheckOutDate] = useState("");
   const [extendCheckOutTime, setExtendCheckOutTime] = useState("12:00");
   const [showExtendPaymentPopup, setShowExtendPaymentPopup] = useState(false);
+  const [savingExtension, setSavingExtension] = useState(false);
+  const [extensionFeedback, setExtensionFeedback] = useState<string | null>(null);
 
   const [rooms, setRooms] = useState<Room[]>(readRoomsState());
   const [transactions, setTransactions] = useState<BookingRecord[]>([]);
@@ -500,6 +505,7 @@ export default function BookingPage() {
               total,
               status,
               checkedBy: localStorage.getItem("orange-hotel-username") || "Reception",
+              updatedAt: Date.now(),
             }
           : entry,
       );
@@ -602,6 +608,7 @@ export default function BookingPage() {
     setExtendCheckOutDate(addDays(booking.checkOutDate, 1));
     setExtendCheckOutTime(booking.checkOutTime || "12:00");
     setShowExtendPaymentPopup(false);
+    setExtensionFeedback(null);
   };
 
   const closeExtendStayDialog = () => {
@@ -609,6 +616,7 @@ export default function BookingPage() {
     setExtendCheckOutDate("");
     setExtendCheckOutTime("12:00");
     setShowExtendPaymentPopup(false);
+    setExtensionFeedback(null);
   };
 
   const openExtendPaymentDialog = async () => {
@@ -629,8 +637,8 @@ export default function BookingPage() {
     setShowExtendPaymentPopup(true);
   };
 
-  const applyExtendStay = (paymentMethod: PaymentMethod) => {
-    if (!selectedExtendBookingId || !extendCheckOutDate || !extendCheckOutTime) return;
+  const applyExtendStay = async (paymentMethod: PaymentMethod) => {
+    if (savingExtension || !selectedExtendBookingId || !extendCheckOutDate || !extendCheckOutTime) return;
 
     const booking = selectedExtendBooking;
     if (!booking) return;
@@ -638,33 +646,75 @@ export default function BookingPage() {
     const nextNights = extendNights;
     if (!extendCheckoutIsLater || nextNights < 1) return;
 
-    const nextStatus: TransactionStatus =
-      paymentMethod === "credit"
-        ? "credit"
-        : booking.status === "credit"
-          ? "credit"
-          : "completed";
-
-    const nextTransactions = transactions.map((entry) =>
-      entry.id === selectedExtendBookingId
-        ? {
-            ...entry,
+    setSavingExtension(true);
+    setExtensionFeedback(null);
+    try {
+      const committed = await transactSyncedStorageValue<{ transactions: BookingRecord[]; receiptSeq: number }>(
+        STORAGE_CASHIER_STATE,
+        (current) => {
+          const snapshot = current ?? { transactions, receiptSeq };
+          const remoteBookings = Array.isArray(snapshot.transactions) ? snapshot.transactions : [];
+          const remoteIds = new Set(remoteBookings.map((entry) => entry.id));
+          const preservedLocalBookings = transactions.filter((entry) => !remoteIds.has(entry.id));
+          const latestBooking = remoteBookings.find((entry) => entry.id === selectedExtendBookingId) ?? booking;
+          if (latestBooking.status === "checked-out") {
+            throw new Error("This guest has already checked out. Refresh the bookings and try again.");
+          }
+          const latestCheckout = getDateTimeMs(latestBooking.checkOutDate, latestBooking.checkOutTime);
+          const originalCheckout = getDateTimeMs(booking.checkOutDate, booking.checkOutTime);
+          if (latestCheckout === getDateTimeMs(extendCheckOutDate, extendCheckOutTime)) return snapshot;
+          if (latestCheckout !== originalCheckout) {
+            throw new Error("This booking changed on another device. Refresh it before extending the stay.");
+          }
+          const addedNights = daysBetween(latestBooking.checkOutDate, extendCheckOutDate);
+          if (addedNights < 1) throw new Error("The new check-out date must be later than the current date.");
+          const extendedAt = Math.max(
+            Date.now(),
+            Number(latestBooking.updatedAt ?? 0) + 1,
+            Number(latestBooking.lastExtendedAt ?? 0) + 1,
+            Number(latestBooking.paymentMethodEditedAt ?? 0) + 1,
+          );
+          const nextStatus: TransactionStatus = paymentMethod === "credit" || latestBooking.status === "credit"
+            ? "credit"
+            : "completed";
+          const nextBooking: BookingRecord = {
+            ...latestBooking,
             checkOutDate: extendCheckOutDate,
             checkOutTime: extendCheckOutTime,
-            nights: nextNights,
-            total: extendTotal,
+            nights: daysBetween(latestBooking.checkInDate, extendCheckOutDate),
+            total: latestBooking.total + addedNights * (latestBooking.ratePerNight ?? 0),
             status: nextStatus,
             extensionPaymentMethod: paymentMethod,
-            extensionAmount: extendIncrement,
-            lastExtendedAt: Date.now(),
-          }
-        : entry,
-    );
-
-    setTransactions(nextTransactions);
-    writeCashierState(nextTransactions, receiptSeq);
-    setTransactionTab(nextStatus === "credit" ? "credit" : "completed");
-    closeExtendStayDialog();
+            extensionAmount: addedNights * (latestBooking.ratePerNight ?? 0),
+            lastExtendedAt: extendedAt,
+            updatedAt: extendedAt,
+          };
+          return {
+            ...snapshot,
+            transactions: [
+              ...(remoteBookings.some((entry) => entry.id === selectedExtendBookingId)
+                ? remoteBookings.map((entry) => entry.id === selectedExtendBookingId ? nextBooking : entry)
+                : [nextBooking, ...remoteBookings]),
+              ...preservedLocalBookings.filter((entry) => entry.id !== selectedExtendBookingId),
+            ],
+          };
+        },
+      );
+      const savedBooking = committed.transactions.find((entry) => entry.id === selectedExtendBookingId);
+      if (savedBooking?.checkOutDate !== extendCheckOutDate || savedBooking?.checkOutTime !== extendCheckOutTime) {
+        setExtensionFeedback("The extension could not be confirmed. Please try again.");
+        return;
+      }
+      setTransactions(committed.transactions);
+      setReceiptSeq(committed.receiptSeq);
+      setTransactionTab(savedBooking.status === "credit" ? "credit" : "completed");
+      closeExtendStayDialog();
+    } catch (error) {
+      setExtensionFeedback(error instanceof Error ? error.message : "The extension could not be saved. Check the connection and try again.");
+      return;
+    } finally {
+      setSavingExtension(false);
+    }
   };
 
   const checkoutBooking = async (booking: BookingRecord) => {
@@ -678,7 +728,7 @@ export default function BookingPage() {
     if (!approved) return;
 
     const nextTransactions = transactions.map((entry) =>
-      entry.id === booking.id ? { ...entry, status: "checked-out" as TransactionStatus } : entry,
+      entry.id === booking.id ? { ...entry, status: "checked-out" as TransactionStatus, checkedOutAt: Date.now(), updatedAt: Date.now() } : entry,
     );
 
     setTransactions(nextTransactions);
@@ -1173,6 +1223,7 @@ export default function BookingPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
+              {extensionFeedback && <p role="alert" className="text-sm font-semibold text-red-700">{extensionFeedback}</p>}
               <div className="rounded-lg border bg-muted/20 p-3">
                 <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-muted-foreground">
                   <span>Added Nights</span>
@@ -1183,21 +1234,22 @@ export default function BookingPage() {
                   <span>{selectedExtendBooking.currency ?? "TSh"} {extendIncrement.toLocaleString()}</span>
                 </div>
               </div>
-              <Button onClick={() => applyExtendStay("cash")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
+              <Button onClick={() => void applyExtendStay("cash")} disabled={savingExtension} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
                 Cash
               </Button>
-              <Button onClick={() => applyExtendStay("card")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
+              <Button onClick={() => void applyExtendStay("card")} disabled={savingExtension} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
                 Card
               </Button>
-              <Button onClick={() => applyExtendStay("mobile-money")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
+              <Button onClick={() => void applyExtendStay("mobile-money")} disabled={savingExtension} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
                 Mobile Money
               </Button>
-              <Button onClick={() => applyExtendStay("credit")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest bg-red-600 hover:bg-red-600/90 text-white">
+              <Button onClick={() => void applyExtendStay("credit")} disabled={savingExtension} className="w-full h-11 font-black uppercase text-[10px] tracking-widest bg-red-600 hover:bg-red-600/90 text-white">
                 Credit
               </Button>
               <Button
                 variant="outline"
                 onClick={() => setShowExtendPaymentPopup(false)}
+                disabled={savingExtension}
                 className="w-full h-10 font-black uppercase text-[10px] tracking-widest"
               >
                 Back
