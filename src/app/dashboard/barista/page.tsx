@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { readStoredRole } from "@/app/lib/auth";
 import { InventoryItem, ROOMS, Role } from "@/app/lib/mock-data";
@@ -22,6 +22,7 @@ import { printDepartmentReceipt } from "@/app/lib/receipt-print";
 import { getActiveBaristaStateKey, readJson, readPosState, writeJson, writePosState } from "@/app/lib/storage";
 import { BARISTA_INVENTORY_SEED } from "@/app/lib/seed-barista-data";
 import { BAR_CATEGORIES, BarCategory, buyingPriceUnit, syncBarCatalogToPos } from "@/app/lib/bar-catalog";
+import { STOCK_IN_HISTORY_KEY, StockInEntry } from "@/app/lib/bar-stock-history";
 import { useIsDirector } from "@/hooks/use-is-director";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -34,7 +35,7 @@ import { SyncStatusIndicator } from "@/components/sync-status-indicator";
 import { KitchenSessionManager } from "@/components/dashboard/kitchen-session-manager";
 import { CheckCircle2, Coffee, Lock, Minus, Pencil, Plus, Receipt, Search, Trash2, User, XCircle } from "lucide-react";
 import { useConfirmDialog } from "@/hooks/use-confirm-dialog";
-import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
+import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey, transactSyncedStorageKeys } from "@/app/lib/firebase-sync";
 import { reconcileCartWithMenu } from "@/app/lib/pos-menu";
 import { DEFAULT_LOGIN_PASSWORD, getProfilePassword, readActiveSessionUsername, readLocalLoginProfiles, saveLoginProfileToServer, STORAGE_LOGIN_PROFILES, subscribeToSessionIdentity, upsertProfileUser } from "@/app/lib/login-profiles";
 
@@ -67,6 +68,7 @@ type BaristaManagerPricingRow = {
   sellingPrice: number;
   stock: number;
   availableTots?: number;
+  totsPerBottle?: number;
   unit: string;
   quantitySold: number;
 };
@@ -336,6 +338,9 @@ export default function BaristaPage() {
   const [managerTab, setManagerTab] = useState<"inventory" | "finance" | "sales" | "drinks">("inventory");
   const [restockDialogOpen, setRestockDialogOpen] = useState(false);
   const [restockTargetItem, setRestockTargetItem] = useState<BaristaManagerPricingRow | null>(null);
+  const managerSaveBusy = useRef(false);
+  const restockOperationId = useRef("");
+  const restockOperationItemId = useRef("");
   const [restockQtyInput, setRestockQtyInput] = useState("");
   const [restockBuyingPriceInput, setRestockBuyingPriceInput] = useState("");
   const [isAddItemDialogOpen, setIsAddItemDialogOpen] = useState(false);
@@ -967,6 +972,7 @@ export default function BaristaPage() {
           sellingPrice,
           stock,
           availableTots: storeMatch && getTotLimit(storeMatch) > 0 ? getRemainingTots(storeMatch) : undefined,
+          totsPerBottle: storeMatch ? getTotLimit(storeMatch) : undefined,
           unit,
           quantitySold,
         };
@@ -1005,8 +1011,9 @@ export default function BaristaPage() {
   // refresh or a new login cannot reintroduce an older value from another key.
   const saveBaristaManagerItem = async (
     item: BaristaManagerPricingRow,
-    customValues?: { stockIn?: number; buyingPrice?: number; sellingPrice?: number },
+    customValues?: { stockIn?: number; buyingPrice?: number; sellingPrice?: number; operationId?: string },
   ) => {
+    if (managerSaveBusy.current) return false;
     const draft = managerPricingDrafts[item.id] ?? {
       stockIn: "",
       buyingPrice: String(item.buyingPrice),
@@ -1015,7 +1022,6 @@ export default function BaristaPage() {
     const stockIn = customValues?.stockIn !== undefined
       ? customValues.stockIn
       : draft.stockIn.trim() === "" ? 0 : Number(draft.stockIn);
-    let stock = item.stock + stockIn;
     const buyingPrice = customValues?.buyingPrice !== undefined
       ? customValues.buyingPrice
       : Number(draft.buyingPrice);
@@ -1023,7 +1029,7 @@ export default function BaristaPage() {
       ? customValues.sellingPrice
       : Number(draft.sellingPrice);
     if (
-      !Number.isFinite(stockIn) ||
+      !Number.isInteger(stockIn) ||
       stockIn < 0 ||
       !Number.isFinite(buyingPrice) ||
       buyingPrice < 0 ||
@@ -1031,144 +1037,63 @@ export default function BaristaPage() {
       sellingPrice < 0
     ) {
       window.alert("Enter valid non-negative stock-in, buying price and selling price values.");
-      return;
+      return false;
     }
 
+    managerSaveBusy.current = true;
     const updatedAt = Date.now();
     setSavingBaristaItemId(item.id);
     setSavedBaristaItemId("");
     const activeBaristaKey = getActiveBaristaStateKey();
-    const snapshot = readPosState<BaristaTicket, BaristaPaymentRecord, BaristaMenuItem>(
-      activeBaristaKey, STORAGE_TICKETS, STORAGE_SEQ, STORAGE_PAYMENTS, STORAGE_MENU, 490,
-    );
     const target = normalizeBaristaTarget(item.name);
-    let matchedMenu = false;
-    const nextMenuItems = snapshot.menuItems.map((menuItem) => {
-      if (normalizeBaristaTarget(menuItem.name) !== target) return menuItem;
-      matchedMenu = true;
-      return { ...menuItem, buyingPrice, price: sellingPrice, updatedAt };
-    });
-    if (!matchedMenu) {
-      const menuReference = menuItems.find((menuItem) => normalizeBaristaTarget(menuItem.name) === target);
-      if (menuReference) {
-        nextMenuItems.push({ ...menuReference, buyingPrice, price: sellingPrice, updatedAt });
-      }
-    }
-
-    const allStoreItems = readJson<Array<MainStoreItem & { lane?: "kitchen" | "barista" }>>(STORAGE_MAIN_STORE_ITEMS) ?? [];
-    const index = allStoreItems.findIndex(
-      (entry) => entry.lane === "barista" && !entry.deletedAt && normalizeBaristaTarget(getStoreItemLabel(entry)) === target,
-    );
-    let nextStoreItems: Array<MainStoreItem & { lane?: "kitchen" | "barista" }>;
-    if (index >= 0) {
-      // Add to the freshest persisted balance so a late sync cannot turn Stock In
-      // into an accidental stock overwrite.
-      stock = allStoreItems[index].stock + stockIn;
-      nextStoreItems = allStoreItems.map((entry, idx) =>
-        idx === index ? { ...entry, stock, buyingPrice, sellingPrice, updatedAt } : entry,
-      );
-    } else {
-      const seedRef = BARISTA_INVENTORY_SEED.find(
-        (seed) =>
-          normalizeBaristaTarget(getBaristaInventoryLabel({ name: seed.name ?? "", size: seed.size ?? "" })) === target,
-      );
-      const newStoreItem: MainStoreItem & { lane: "barista" } = {
-        id: `bs-${updatedAt}`,
-        name: seedRef?.name ?? item.name,
-        subCategory: seedRef?.category ?? item.category ?? "Bar",
-        size: seedRef?.size ?? "",
-        stock,
-        unit: seedRef?.unit ?? "Bottle",
-        minStock: seedRef?.minStock ?? 0,
-        lane: "barista",
-        buyingPrice,
-        sellingPrice,
-        updatedAt,
-      };
-      nextStoreItems = [...allStoreItems, newStoreItem];
-    }
-
-    const allInventoryItems = readJson<InventoryItem[]>(STORAGE_INVENTORY_ITEMS) ?? [];
-    let matchedInventory = false;
-    const nextInventoryItems = allInventoryItems.map((inventoryItem) => {
-      if (inventoryItem.category.trim().toLowerCase() === "kitchen" || inventoryItem.status === "INACTIVE") return inventoryItem;
-      const inventoryTargets = [
-        inventoryItem.name,
-        inventoryItem.size ? `${inventoryItem.name} ${inventoryItem.size}` : inventoryItem.name,
-      ].map((value) => normalizeBaristaTarget(value));
-      if (!inventoryTargets.includes(target)) return inventoryItem;
-      matchedInventory = true;
-      return {
-        ...inventoryItem,
-        stock,
-        buyingPrice,
-        sellingPrice,
-        price: sellingPrice,
-        updatedAt,
-      };
-    });
-    if (!matchedInventory) {
-      const storeItem = nextStoreItems.find(
-        (entry) => entry.lane === "barista" && normalizeBaristaTarget(getStoreItemLabel(entry)) === target,
-      );
-      nextInventoryItems.unshift({
-        id: `inv-manager-${updatedAt}`,
-        barcode: "",
-        name: storeItem?.name ?? item.name,
-        category: "Bar",
-        subCategory: storeItem?.subCategory ?? item.category,
-        size: storeItem?.size ?? "",
-        stock,
-        totSold: 0,
-        buyingPrice,
-        sellingPrice,
-        price: sellingPrice,
-        status: "ACTIVE",
-        minStock: storeItem?.minStock ?? 0,
-        unit: storeItem?.unit ?? "Bottle",
-        updatedAt,
-      });
-    }
-
-    const writes = [
-      writeJson(activeBaristaKey, {
-        tickets: snapshot.tickets,
-        ticketSeq: snapshot.ticketSeq,
-        payments: snapshot.payments,
-        menuItems: nextMenuItems,
-      }),
-      writeJson(STORAGE_MAIN_STORE_ITEMS, nextStoreItems),
-      writeJson(STORAGE_INVENTORY_ITEMS, nextInventoryItems),
-    ];
-    // writeJson updates the device before its cloud promise resolves. Reflect and
-    // clear the intake immediately so retrying a failed sync cannot add it twice.
-    setStoredMenuItems(nextMenuItems.filter(isActiveBaristaMenuItem));
-    setBaristaStoreItems(nextStoreItems.filter((entry) => entry.lane === "barista" && !entry.deletedAt));
-    setInventoryItems(nextInventoryItems);
-    setManagerPricingDrafts((current) => {
-      const nextDrafts = { ...current };
-      delete nextDrafts[item.id];
-      return nextDrafts;
-    });
-
+    const operationId = customValues?.operationId ?? crypto.randomUUID();
     try {
-      const results = await Promise.all(writes);
-      if (results.some((result) => result === false)) {
-        window.alert("The values were saved on this device and are queued for POS synchronization when the connection recovers.");
-        return;
-      }
+      const committed = await transactSyncedStorageKeys([activeBaristaKey, STORAGE_MAIN_STORE_ITEMS, STORAGE_INVENTORY_ITEMS, STOCK_IN_HISTORY_KEY], (current) => {
+        const snapshot = (current[activeBaristaKey] as ReturnType<typeof readPosState<BaristaTicket, BaristaPaymentRecord, BaristaMenuItem>> | null) ?? { tickets: [], ticketSeq: 490, payments: [], menuItems: [] };
+        const stores = [...((current[STORAGE_MAIN_STORE_ITEMS] as MainStoreItem[] | null) ?? [])];
+        const inventory = [...((current[STORAGE_INVENTORY_ITEMS] as InventoryItem[] | null) ?? [])];
+        const history = (current[STOCK_IN_HISTORY_KEY] as StockInEntry[] | null) ?? [];
+        if (stockIn > 0 && history.some((entry) => entry.id === operationId)) return current;
+        const storeIndex = stores.findIndex((entry) => entry.lane === "barista" && !entry.deletedAt && normalizeBaristaTarget(getStoreItemLabel(entry)) === target);
+        const existingStore = stores[storeIndex];
+        const nextStore: MainStoreItem = existingStore
+          ? { ...existingStore, stock: existingStore.stock + stockIn, buyingPrice, sellingPrice, receivedStock: (existingStore.receivedStock ?? 0) + stockIn, updatedAt }
+          : { id: `bs-manager-${updatedAt}`, name: item.name, size: "", stock: stockIn, unit: item.unit || "Bottle", minStock: 0, lane: "barista", subCategory: item.category, buyingPrice, sellingPrice, totLimit: getTotLimit({ name: item.name, size: "", totLimit: undefined }), totSold: 0, receivedStock: stockIn, updatedAt };
+        if (storeIndex >= 0) stores[storeIndex] = nextStore; else stores.push(nextStore);
+        const inventoryIndex = inventory.findIndex((entry) => entry.category.trim().toLowerCase() === "bar" && entry.status !== "INACTIVE" && normalizeBaristaTarget(entry.size ? `${entry.name} ${entry.size}` : entry.name) === target);
+        if (inventoryIndex >= 0) inventory[inventoryIndex] = { ...inventory[inventoryIndex], stock: nextStore.stock, totSold: nextStore.totSold ?? 0, totPerBottle: getTotLimit(nextStore) || undefined, buyingPrice, sellingPrice, price: sellingPrice, receivedStock: (inventory[inventoryIndex].receivedStock ?? 0) + stockIn, updatedAt };
+        else inventory.push({ id: `inv-manager-${updatedAt}`, barcode: "", name: nextStore.name, category: "Bar", subCategory: nextStore.subCategory, size: nextStore.size ?? "", stock: nextStore.stock, totSold: nextStore.totSold ?? 0, totPerBottle: getTotLimit(nextStore) || undefined, buyingPrice, sellingPrice, price: sellingPrice, status: "ACTIVE", minStock: nextStore.minStock, unit: nextStore.unit, receivedStock: stockIn, updatedAt });
+        let matchedMenu = false;
+        const nextMenuItems = snapshot.menuItems.map((menuItem) => {
+          if (menuItem.deletedAt || normalizeBaristaTarget(menuItem.name) !== target) return menuItem;
+          matchedMenu = true;
+          return { ...menuItem, buyingPrice, price: sellingPrice, updatedAt };
+        });
+        if (!matchedMenu) throw new Error("The menu item is missing. Refresh this page and try again.");
+        const entry: StockInEntry = { id: operationId, itemId: nextStore.id, itemName: item.name, kind: "addition", date: getLocalDateInputValue(), quantity: stockIn, unit: getTotLimit(nextStore) > 0 ? "bottles" : nextStore.unit, buyingPrice, sellingPrice, recordedAt: updatedAt, user: readActiveSessionUsername(readStoredRole() ?? "manager") };
+        return { [activeBaristaKey]: { ...snapshot, menuItems: nextMenuItems }, [STORAGE_MAIN_STORE_ITEMS]: stores, [STORAGE_INVENTORY_ITEMS]: inventory, [STOCK_IN_HISTORY_KEY]: stockIn > 0 ? [entry, ...history] : history };
+      });
+      const savedSnapshot = committed[activeBaristaKey] as ReturnType<typeof readPosState<BaristaTicket, BaristaPaymentRecord, BaristaMenuItem>>;
+      setStoredMenuItems(savedSnapshot.menuItems.filter(isActiveBaristaMenuItem));
+      setBaristaStoreItems(((committed[STORAGE_MAIN_STORE_ITEMS] as MainStoreItem[]) ?? []).filter((entry) => entry.lane === "barista" && !entry.deletedAt));
+      setInventoryItems((committed[STORAGE_INVENTORY_ITEMS] as InventoryItem[]) ?? []);
+      setManagerPricingDrafts((current) => { const next = { ...current }; delete next[item.id]; return next; });
       setSavedBaristaItemId(item.id);
       window.setTimeout(() => {
         setSavedBaristaItemId((current) => (current === item.id ? "" : current));
       }, 3000);
-    } catch {
-      window.alert("The values were saved on this device, but cloud synchronization did not complete. They will synchronize when the connection is restored.");
+      return true;
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Stock and prices could not be saved. Please try again.");
+      return false;
     } finally {
+      managerSaveBusy.current = false;
       setSavingBaristaItemId("");
     }
   };
 
   const openRestockDialog = (item: BaristaManagerPricingRow) => {
+    if (restockOperationItemId.current !== item.id) { restockOperationId.current = crypto.randomUUID(); restockOperationItemId.current = item.id; }
     setRestockTargetItem(item);
     setRestockQtyInput("");
     setRestockBuyingPriceInput(item.buyingPrice > 0 ? String(item.buyingPrice) : "");
@@ -1179,8 +1104,8 @@ export default function BaristaPage() {
     if (!restockTargetItem) return;
     const qty = Number(restockQtyInput);
     const buying = Number(restockBuyingPriceInput);
-    if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(buying) || buying < 0) {
-      window.alert("Please enter a valid positive quantity to add and a valid non-negative buying price.");
+    if (!Number.isInteger(qty) || qty <= 0 || !Number.isFinite(buying) || buying < 0) {
+      window.alert("Please enter a positive whole number of bottles or units and a valid non-negative buying price.");
       return;
     }
 
@@ -1188,12 +1113,15 @@ export default function BaristaPage() {
       ? Number(managerPricingDrafts[restockTargetItem.id]?.sellingPrice)
       : restockTargetItem.sellingPrice;
 
-    await saveBaristaManagerItem(restockTargetItem, {
+    const saved = await saveBaristaManagerItem(restockTargetItem, {
       stockIn: qty,
       buyingPrice: buying,
       sellingPrice: currentSelling,
+      operationId: restockOperationId.current,
     });
-
+    if (!saved) return;
+    restockOperationId.current = "";
+    restockOperationItemId.current = "";
     setRestockDialogOpen(false);
     setRestockTargetItem(null);
     setRestockQtyInput("");
@@ -2591,26 +2519,28 @@ export default function BaristaPage() {
               Restock — {restockTargetItem?.name}
             </DialogTitle>
             <DialogDescription>
-              Enter the quantity received and the buying price for this restock batch.
+              Enter bottles received. Drinks sold by tot convert each bottle into its configured number of tots.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
             <div className="space-y-1">
               <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                Quantity to Add ({restockTargetItem?.unit || "units"})
+                Quantity to Add ({restockTargetItem?.totsPerBottle ? "bottles" : restockTargetItem?.unit || "units"})
               </label>
               <Input
                 type="number"
                 min="1"
+                step="1"
                 value={restockQtyInput}
                 onChange={(e) => setRestockQtyInput(e.target.value)}
                 placeholder="0"
                 className="h-11"
               />
+              {restockTargetItem?.totsPerBottle ? <p className="text-xs text-muted-foreground">{restockQtyInput && Number.isInteger(Number(restockQtyInput)) && Number(restockQtyInput) > 0 ? `${restockQtyInput} bottles × ${restockTargetItem.totsPerBottle} tots = ${Number(restockQtyInput) * restockTargetItem.totsPerBottle} tots added. Estimated balance: ${(restockTargetItem.availableTots ?? 0) + Number(restockQtyInput) * restockTargetItem.totsPerBottle} tots.` : `1 bottle adds ${restockTargetItem.totsPerBottle} tots.`}</p> : null}
             </div>
             <div className="space-y-1">
               <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                Buying Price per {restockTargetItem?.unit || "unit"} (TSh)
+                Buying Price per {restockTargetItem ? buyingPriceUnit(restockTargetItem.name) : "unit"} (TSh)
               </label>
               <Input
                 type="number"
