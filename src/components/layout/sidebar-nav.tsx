@@ -95,7 +95,7 @@ export function SidebarNav({ role }: { role: Role }) {
       })
       .map((item) => {
         if (role !== "manager") return item;
-        if (item.href === "/dashboard/inventory/kitchen-stock") return { ...item, label: "Kitchen" };
+        if (item.href === "/dashboard/inventory/kitchen-stock") return { ...item, label: "Kitchen", href: "/dashboard/kitchen", icon: Utensils };
         if (item.href === "/dashboard/inventory/barista-stock") {
           return { ...item, label: "Bar", href: "/dashboard/barista" };
         }

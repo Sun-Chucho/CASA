@@ -128,6 +128,7 @@ export default function KitchenPage() {
   const { confirm, dialog } = useConfirmDialog();
   const [role, setRole] = useState<Role | null>(null);
   const isManager = role === "manager";
+  const [managerTab, setManagerTab] = useState<"inventory" | "entries" | "sales">("inventory");
   const [directorTab, setDirectorTab] = useState<"inventory" | "purchases" | "entries" | "sales">("inventory");
   const [directorSalesDateFilter, setDirectorSalesDateFilter] = useState<SalesDateFilter>("all");
   const [directorSalesDate, setDirectorSalesDate] = useState("");
@@ -1135,7 +1136,14 @@ export default function KitchenPage() {
             {kitchenPayments.length} Sales Records
           </Badge>
         </header>
-        <Card className="border-none shadow-sm">
+        <Tabs value={managerTab} onValueChange={(value) => setManagerTab(value as "inventory" | "entries" | "sales")}>
+          <TabsList className="h-10">
+            <TabsTrigger value="inventory" className="font-black uppercase text-[10px] tracking-widest">Inventory</TabsTrigger>
+            <TabsTrigger value="entries" className="font-black uppercase text-[10px] tracking-widest">Entries</TabsTrigger>
+            <TabsTrigger value="sales" className="font-black uppercase text-[10px] tracking-widest">Sales</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        {managerTab === "inventory" && <Card className="border-none shadow-sm">
           <CardHeader>
             <CardTitle className="text-xl font-black uppercase tracking-tight">Kitchen Inventory from Store</CardTitle>
             <CardDescription>Store additions update here immediately. Menu creation now lives in Menu Create.</CardDescription>
@@ -1171,9 +1179,9 @@ export default function KitchenPage() {
               </TableBody>
             </Table>
           </CardContent>
-        </Card>
+        </Card>}
 
-        <div className="space-y-4">
+        {managerTab === "entries" && <div className="space-y-4">
           <div>
             <h2 className="text-xl font-black uppercase tracking-tight">Kitchen Entry History</h2>
             <p className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
@@ -1181,9 +1189,9 @@ export default function KitchenPage() {
             </p>
           </div>
           <KitchenSessionManager isDirector />
-        </div>
+        </div>}
 
-        {renderDirectorSalesTable()}
+        {managerTab === "sales" && renderDirectorSalesTable()}
       </div>
     );
   }

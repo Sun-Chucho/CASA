@@ -35,7 +35,7 @@ import { SyncStatusIndicator } from "@/components/sync-status-indicator";
 import { KitchenSessionManager } from "@/components/dashboard/kitchen-session-manager";
 import { CheckCircle2, Coffee, Lock, Minus, Pencil, Plus, Receipt, Search, Trash2, User, XCircle } from "lucide-react";
 import { useConfirmDialog } from "@/hooks/use-confirm-dialog";
-import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey, transactSyncedStorageKeys } from "@/app/lib/firebase-sync";
+import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey, transactSyncedStorageKeys, transactSyncedStorageValue } from "@/app/lib/firebase-sync";
 import { reconcileCartWithMenu } from "@/app/lib/pos-menu";
 import { DEFAULT_LOGIN_PASSWORD, getProfilePassword, readActiveSessionUsername, readLocalLoginProfiles, saveLoginProfileToServer, STORAGE_LOGIN_PROFILES, subscribeToSessionIdentity, upsertProfileUser } from "@/app/lib/login-profiles";
 
@@ -154,6 +154,9 @@ const STORAGE_MENU = "orange-hotel-barista-menu";
 const STORAGE_PAYMENTS = "orange-hotel-barista-payments";
 const STORAGE_CANCELLED = "orange-hotel-cancelled-tickets";
 const STORAGE_WASTE = "orange-hotel-barista-waste";
+const STORAGE_STARTING_CAPITAL = "orange-hotel-barista-starting-capital-v1";
+
+type StartingCapitalSnapshot = { amount: number; capturedAt: number };
 
 const BARISTA_CATEGORIES: Array<{ value: BaristaCategory; label: string }> = [
   { value: "all", label: "All" },
@@ -383,6 +386,10 @@ export default function BaristaPage() {
   const [posHydrated, setPosHydrated] = useState(false);
   const [queueTab, setQueueTab] = useState<"queue" | "from-store">("queue");
   const [baristaStoreItems, setBaristaStoreItems] = useState<MainStoreItem[]>([]);
+  const [stockInHistory, setStockInHistory] = useState<StockInEntry[]>([]);
+  const [stockHistoryReady, setStockHistoryReady] = useState(false);
+  const [startingCapital, setStartingCapital] = useState<StartingCapitalSnapshot | null>(null);
+  const startingCapitalCaptureBusy = useRef(false);
   const [fromStoreEntries, setFromStoreEntries] = useState<StoreMovementLog[]>([]);
   const [usageLogs, setUsageLogs] = useState<StoreUsageLog[]>([]);
   const [useEntryId, setUseEntryId] = useState("");
@@ -507,6 +514,26 @@ export default function BaristaPage() {
       unsubscribeMovements();
       unsubscribeUsage();
     };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadFinance = () => {
+      if (cancelled) return;
+      setStockInHistory(readJson<StockInEntry[]>(STOCK_IN_HISTORY_KEY) ?? []);
+      setStartingCapital(readJson<StartingCapitalSnapshot>(STORAGE_STARTING_CAPITAL));
+    };
+    void Promise.all([
+      hydrateStorageKeyFromFirebase(STOCK_IN_HISTORY_KEY),
+      hydrateStorageKeyFromFirebase(STORAGE_STARTING_CAPITAL),
+    ]).then(() => {
+      if (cancelled) return;
+      loadFinance();
+      setStockHistoryReady(true);
+    }).catch((error) => console.error("Barista finance hydration failed", error));
+    const unsubscribeHistory = subscribeToSyncedStorageKey(STOCK_IN_HISTORY_KEY, loadFinance);
+    const unsubscribeCapital = subscribeToSyncedStorageKey(STORAGE_STARTING_CAPITAL, loadFinance);
+    return () => { cancelled = true; unsubscribeHistory(); unsubscribeCapital(); };
   }, []);
 
   useEffect(() => {
@@ -1223,6 +1250,23 @@ export default function BaristaPage() {
     () => baristaInventoryRows.reduce((sum, item) => sum + item.capital, 0),
     [baristaInventoryRows],
   );
+  const restockCapital = useMemo(
+    () => stockInHistory.reduce((sum, entry) => sum + entry.quantity * entry.buyingPrice, 0),
+    [stockInHistory],
+  );
+
+  useEffect(() => {
+    if (!stockHistoryReady || !posHydrated || startingCapital || startingCapitalCaptureBusy.current || baristaInventoryRows.length === 0 || (role !== "manager" && role !== "director")) return;
+    // Existing installations have no original CSV ledger. Reconstruct the opening
+    // investment from stock value plus sold cost, less every recorded stock-in,
+    // then store it once so sales, restocks and price edits cannot change it.
+    const openingAmount = Math.max(0, baristaInventoryRows.reduce((sum, item) => sum + item.capital + item.costOfGoods, 0) - restockCapital);
+    startingCapitalCaptureBusy.current = true;
+    void transactSyncedStorageValue<StartingCapitalSnapshot>(STORAGE_STARTING_CAPITAL, (current) => current ?? { amount: openingAmount, capturedAt: Date.now() })
+      .then(setStartingCapital)
+      .catch((error) => console.error("Starting capital could not be saved", error))
+      .finally(() => { startingCapitalCaptureBusy.current = false; });
+  }, [baristaInventoryRows, posHydrated, restockCapital, role, startingCapital, stockHistoryReady]);
   const totalBaristaRevenue = useMemo(
     () => {
       const itemizedRevenue = baristaInventoryRows.reduce((sum, item) => sum + item.revenue, 0);
@@ -1299,11 +1343,12 @@ export default function BaristaPage() {
   );
 
   const renderFinanceTable = () => (
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_17rem]">
     <Card className="border-none shadow-sm">
       <CardHeader>
         <CardTitle className="text-xl font-black uppercase tracking-tight">Barista Finance</CardTitle>
         <CardDescription>
-          Capital values current stock. Profit/Loss subtracts cost of sold units; bottle cost is apportioned across tots for tot sales.
+          Current stock value changes with sales and restocks. Profit/Loss subtracts the cost of sold units.
         </CardDescription>
       </CardHeader>
       <CardContent className="p-0">
@@ -1314,7 +1359,7 @@ export default function BaristaPage() {
               <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Stock Qty</TableHead>
               <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Qty Sold</TableHead>
               <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Buying Price</TableHead>
-              <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Capital</TableHead>
+              <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Current Stock Value</TableHead>
               <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Selling Price</TableHead>
               <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Revenue</TableHead>
               <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Profit/Loss</TableHead>
@@ -1350,6 +1395,21 @@ export default function BaristaPage() {
         </Table>
       </CardContent>
     </Card>
+    <aside className="space-y-4" aria-label="Barista capital summary">
+      <Card className="border-none shadow-sm">
+        <CardHeader><CardTitle className="text-sm font-black uppercase tracking-widest">Starting Capital</CardTitle><CardDescription>Opening inventory investment, fixed when first recorded.</CardDescription></CardHeader>
+        <CardContent className="text-2xl font-black">{startingCapital ? `TSh ${startingCapital.amount.toLocaleString()}` : "Loading…"}</CardContent>
+      </Card>
+      <Card className="border-none shadow-sm">
+        <CardHeader><CardTitle className="text-sm font-black uppercase tracking-widest">Restock Capital</CardTitle><CardDescription>Total cost of stock added after the opening inventory.</CardDescription></CardHeader>
+        <CardContent className="text-2xl font-black">TSh {restockCapital.toLocaleString()}</CardContent>
+      </Card>
+      <Card className="border-none shadow-sm">
+        <CardHeader><CardTitle className="text-sm font-black uppercase tracking-widest">Current Stock Value</CardTitle></CardHeader>
+        <CardContent className="text-2xl font-black">TSh {baristaCapitalTotal.toLocaleString()}</CardContent>
+      </Card>
+    </aside>
+    </div>
   );
 
   const renderDirectorSalesTable = () => (
@@ -2346,8 +2406,8 @@ export default function BaristaPage() {
         {isManager && <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <Card className="border-none shadow-sm">
             <CardContent className="p-4">
-              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Barista Capital</p>
-              <p className="mt-2 text-2xl font-black">TSh {baristaCapitalTotal.toLocaleString()}</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Starting Capital</p>
+              <p className="mt-2 text-2xl font-black">{startingCapital ? `TSh ${startingCapital.amount.toLocaleString()}` : "Loading…"}</p>
             </CardContent>
           </Card>
           <Card className="border-none shadow-sm">
@@ -2591,8 +2651,8 @@ export default function BaristaPage() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <Card className="border-none shadow-sm">
             <CardContent className="p-4">
-              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Barista Capital</p>
-              <p className="mt-2 text-2xl font-black">TSh {baristaCapitalTotal.toLocaleString()}</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Starting Capital</p>
+              <p className="mt-2 text-2xl font-black">{startingCapital ? `TSh ${startingCapital.amount.toLocaleString()}` : "Loading…"}</p>
             </CardContent>
           </Card>
           <Card className="border-none shadow-sm">
