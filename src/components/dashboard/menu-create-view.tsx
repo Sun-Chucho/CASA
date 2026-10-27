@@ -102,6 +102,8 @@ export function MenuCreateView() {
   const [tab, setTab] = useState<"kitchen" | "barista">("kitchen");
   const [sessionRole, setSessionRole] = useState<Role | null>(null);
   const [changedBy, setChangedBy] = useState("manager");
+  const [menuReady, setMenuReady] = useState(false);
+  const [savingMenuItem, setSavingMenuItem] = useState(false);
 
   const [kitchenMenuItems, setKitchenMenuItems] = useState<KitchenMenuItem[]>([]);
   const [kitchenName, setKitchenName] = useState("");
@@ -172,7 +174,11 @@ export function MenuCreateView() {
     void Promise.all([
       hydrateStorageKeyFromFirebase(STORAGE_KITCHEN_STATE, true),
       hydrateStorageKeyFromFirebase(STORAGE_BARISTA_STATE, true),
-    ]).finally(() => applyMenuSnapshots());
+    ]).finally(() => {
+      if (cancelled) return;
+      applyMenuSnapshots();
+      setMenuReady(true);
+    });
 
     const unsubscribeKitchen = subscribeToSyncedStorageKey(STORAGE_KITCHEN_STATE, () => applyMenuSnapshots());
     const unsubscribeBarista = subscribeToSyncedStorageKey(STORAGE_BARISTA_STATE, () => applyMenuSnapshots());
@@ -249,10 +255,13 @@ export function MenuCreateView() {
   };
 
   const addKitchenMenuItem = async () => {
-    if (isDirector) return;
+    if (isDirector || !menuReady || savingMenuItem) return;
     const price = Number(kitchenPrice);
     const prepMinutes = Number(kitchenPrepMinutes);
-    if (!kitchenName.trim() || Number.isNaN(price) || price <= 0 || Number.isNaN(prepMinutes) || prepMinutes <= 0) return;
+    if (!kitchenName.trim() || !Number.isFinite(price) || price <= 0 || !Number.isFinite(prepMinutes) || prepMinutes <= 0) {
+      toast({ title: "Check the menu item", description: "Enter a name, a price above zero, and a preparation time above zero.", variant: "destructive" });
+      return;
+    }
     const approved = await confirm({
       title: "Create Kitchen Menu Item",
       description: `Are you sure you want to add ${kitchenName.trim()} at TSh ${price.toLocaleString()}?`,
@@ -260,10 +269,19 @@ export function MenuCreateView() {
     });
     if (!approved) return;
 
+    setSavingMenuItem(true);
     const updatedAt = Date.now();
+    const latestSnapshot = readPosState<QueueTicket, PaymentRecord, KitchenMenuItem>(
+      STORAGE_KITCHEN_STATE,
+      KITCHEN_LEGACY.tickets,
+      KITCHEN_LEGACY.seq,
+      KITCHEN_LEGACY.payments,
+      KITCHEN_LEGACY.menu,
+      KITCHEN_LEGACY.defaultSeq,
+    );
     const nextMenuItems = [
       {
-        id: `km-${updatedAt}`,
+        id: `km-${crypto.randomUUID()}`,
         name: kitchenName.trim(),
         price,
         prepMinutes,
@@ -271,15 +289,26 @@ export function MenuCreateView() {
         createdAt: updatedAt,
         updatedAt,
       },
-      ...kitchenMenuItems,
+      ...mergeKitchenMenuItems(latestSnapshot.menuItems),
     ];
-    setKitchenMenuItems(nextMenuItems);
-    const synced = await allWritesSynced([persistKitchenMenu(nextMenuItems)]);
-    showMenuSyncResult(synced, kitchenName.trim(), "created");
-    setKitchenName("");
-    setKitchenPrice("");
-    setKitchenPrepMinutes("15");
-    setKitchenCategory("salad");
+    try {
+      setKitchenMenuItems(nextMenuItems);
+      const synced = await allWritesSynced([persistKitchenMenu(nextMenuItems)]);
+      showMenuSyncResult(synced, kitchenName.trim(), "created");
+      setKitchenName("");
+      setKitchenPrice("");
+      setKitchenPrepMinutes("15");
+      setKitchenCategory("salad");
+    } catch (error) {
+      console.error("Could not save kitchen menu item", error);
+      setKitchenMenuItems(mergeKitchenMenuItems(readPosState<QueueTicket, PaymentRecord, KitchenMenuItem>(
+        STORAGE_KITCHEN_STATE, KITCHEN_LEGACY.tickets, KITCHEN_LEGACY.seq,
+        KITCHEN_LEGACY.payments, KITCHEN_LEGACY.menu, KITCHEN_LEGACY.defaultSeq,
+      ).menuItems));
+      toast({ title: "Menu item was not saved", description: "Please try again.", variant: "destructive" });
+    } finally {
+      setSavingMenuItem(false);
+    }
   };
 
   const startKitchenEdit = (item: KitchenMenuItem) => {
@@ -336,10 +365,13 @@ export function MenuCreateView() {
   };
 
   const addBaristaMenuItem = async () => {
-    if (isDirector) return;
+    if (isDirector || !menuReady || savingMenuItem) return;
     const price = Number(baristaPrice);
     const prepMinutes = Number(baristaPrepMinutes);
-    if (!baristaName.trim() || Number.isNaN(price) || price <= 0 || Number.isNaN(prepMinutes) || prepMinutes <= 0) return;
+    if (!baristaName.trim() || !Number.isFinite(price) || price <= 0 || !Number.isFinite(prepMinutes) || prepMinutes <= 0) {
+      toast({ title: "Check the menu item", description: "Enter a name, a price above zero, and a preparation time above zero.", variant: "destructive" });
+      return;
+    }
     const approved = await confirm({
       title: "Create Barista Menu Item",
       description: `Are you sure you want to add ${baristaName.trim()} at TSh ${price.toLocaleString()}?`,
@@ -347,6 +379,7 @@ export function MenuCreateView() {
     });
     if (!approved) return;
 
+    setSavingMenuItem(true);
     const updatedAt = Date.now();
     const latestSnapshot = readPosState<QueueTicket, PaymentRecord, BaristaMenuItem>(
       STORAGE_BARISTA_STATE,
@@ -362,7 +395,7 @@ export function MenuCreateView() {
     const deletedMenuItems = latestSnapshot.menuItems.filter((item) => item.deletedAt);
     const nextMenuItems = [
       {
-        id: `bm-${updatedAt}`,
+        id: `bm-${crypto.randomUUID()}`,
         name: baristaName.trim(),
         price,
         prepMinutes,
@@ -372,13 +405,24 @@ export function MenuCreateView() {
       },
       ...activeMenuItems,
     ];
-    setBaristaMenuItems(nextMenuItems);
-    const synced = await allWritesSynced([persistBaristaMenu([...nextMenuItems, ...deletedMenuItems])]);
-    showMenuSyncResult(synced, baristaName.trim(), "created");
-    setBaristaName("");
-    setBaristaPrice("");
-    setBaristaPrepMinutes("10");
-    setBaristaCategory("coffee");
+    try {
+      setBaristaMenuItems(nextMenuItems);
+      const synced = await allWritesSynced([persistBaristaMenu([...nextMenuItems, ...deletedMenuItems])]);
+      showMenuSyncResult(synced, baristaName.trim(), "created");
+      setBaristaName("");
+      setBaristaPrice("");
+      setBaristaPrepMinutes("10");
+      setBaristaCategory("coffee");
+    } catch (error) {
+      console.error("Could not save barista menu item", error);
+      setBaristaMenuItems(readPosState<QueueTicket, PaymentRecord, BaristaMenuItem>(
+        STORAGE_BARISTA_STATE, BARISTA_LEGACY.tickets, BARISTA_LEGACY.seq,
+        BARISTA_LEGACY.payments, BARISTA_LEGACY.menu, BARISTA_LEGACY.defaultSeq,
+      ).menuItems.filter((item) => !item.deletedAt));
+      toast({ title: "Menu item was not saved", description: "Please try again.", variant: "destructive" });
+    } finally {
+      setSavingMenuItem(false);
+    }
   };
 
   const startBaristaEdit = (item: BaristaMenuItem) => {
@@ -514,8 +558,8 @@ export function MenuCreateView() {
                 <Input type="number" min="1" value={kitchenPrice} onChange={(event) => setKitchenPrice(event.target.value)} placeholder="15000" disabled={isDirector} />
               </div>
               <div className="md:col-span-4 pt-1">
-                <Button className="h-10 font-black uppercase text-[10px] tracking-widest px-6" onClick={addKitchenMenuItem} disabled={isDirector}>
-                  Add Menu Item
+                <Button className="h-10 font-black uppercase text-[10px] tracking-widest px-6" onClick={addKitchenMenuItem} disabled={isDirector || !menuReady || savingMenuItem}>
+                  {!menuReady ? "Loading Menu..." : savingMenuItem ? "Saving..." : "Add Menu Item"}
                 </Button>
               </div>
             </CardContent>
@@ -635,8 +679,8 @@ export function MenuCreateView() {
               <Input type="number" min="1" value={baristaPrepMinutes} onChange={(event) => setBaristaPrepMinutes(event.target.value)} placeholder="Prep minutes" disabled={isDirector} />
               <Input type="number" min="1" value={baristaPrice} onChange={(event) => setBaristaPrice(event.target.value)} placeholder="Price" disabled={isDirector} />
               <div className="md:col-span-4">
-                <Button className="h-10 font-black uppercase text-[10px] tracking-widest" onClick={addBaristaMenuItem} disabled={isDirector}>
-                  Add Menu Item
+                <Button className="h-10 font-black uppercase text-[10px] tracking-widest" onClick={addBaristaMenuItem} disabled={isDirector || !menuReady || savingMenuItem}>
+                  {!menuReady ? "Loading Menu..." : savingMenuItem ? "Saving..." : "Add Menu Item"}
                 </Button>
               </div>
             </CardContent>
