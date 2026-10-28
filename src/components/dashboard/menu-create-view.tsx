@@ -588,7 +588,7 @@ export function MenuCreateView() {
                     className="h-9 rounded-md border border-input bg-background px-3 py-1 text-xs font-semibold"
                   >
                     <option value="all">All Categories</option>
-                    {KITCHEN_CATEGORY_OPTIONS.map((opt) => (
+                    {KITCHEN_CATEGORY_OPTIONS.filter((opt) => kitchenMenuItems.some((item) => item.category === opt.value)).map((opt) => (
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
                   </select>

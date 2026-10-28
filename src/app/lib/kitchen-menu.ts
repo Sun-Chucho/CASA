@@ -58,47 +58,61 @@ const CASSA_FOOD_ITEMS: Array<[string, number, KitchenMenuCategory]> = [
   ["Vegetable Soup", 10000, "soup"],
   ["Cream of Mushroom Soup", 10000, "soup"],
   ["Cream Chicken Soup", 10000, "soup"],
+  ["Fish Sato Clear Soup", 25000, "soup"],
+  ["Fish Changu Clear Soup", 30000, "soup"],
+  ["Chicken Broiler Clear Soup", 15000, "soup"],
+  ["Local Chicken Clear Soup", 20000, "soup"],
   ["Vegetable Salad", 15000, "salad"],
   ["Avocado Salad", 12000, "salad"],
   ["Green Salad", 10000, "salad"],
   ["Chicken Salad", 15000, "salad"],
   ["Chicken Caesar Salad", 15000, "salad"],
-  ["Kuku Paka", 25000, "chicken"],
-  ["Beef Stew", 20000, "beef"],
-  ["Roasted Beef", 20000, "beef"],
-  ["Roasted Lamb", 25000, "meat"],
-  ["Beef Fillet", 25000, "beef"],
-  ["Grilled Chicken", 20000, "chicken"],
-  ["Fish Fillet", 30000, "fish"],
-  ["Coconut Tilapia", 30000, "fish"],
-  ["Grilled Fish Skewers", 25000, "fish"],
-  ["Pepper Steak", 25000, "beef"],
-  ["Chicken Schnitzel", 20000, "chicken"],
-  ["Chicken Burger", 20000, "burger"],
-  ["Beef Burger", 20000, "burger"],
+  ["Kuku Paka", 20000, "chicken"],
+  ["Beef Stew", 15000, "beef"],
+  ["Roasted Beef", 15000, "beef"],
+  ["Roasted Lamb", 20000, "meat"],
+  ["Beef Fillet", 20000, "beef"],
+  ["Grilled Chicken", 15000, "chicken"],
+  ["Fish Fillet", 25000, "fish"],
+  ["Coconut Tilapia", 25000, "fish"],
+  ["Grilled Fish Skewers", 20000, "fish"],
+  ["Pepper Steak", 20000, "beef"],
+  ["Chicken Schnitzel", 15000, "chicken"],
+  ["Chicken Broiler Fried", 15000, "chicken"],
+  ["Chicken Makange", 15000, "chicken"],
+  ["Local Chicken Fried", 20000, "chicken"],
+  ["Local Chicken Makange", 20000, "chicken"],
+  ["Beef Makange", 15000, "beef"],
+  ["Fish Sato Fried", 25000, "fish"],
+  ["Fish Makange", 25000, "fish"],
+  ["Fish Changu Fried", 30000, "fish"],
+  ["Fish Changu Makange", 30000, "fish"],
+  ["Chicken Burger", 15000, "burger"],
+  ["Beef Burger", 15000, "burger"],
   ["Vegetable Burger", 15000, "burger"],
   ["Vegetable Sandwich", 15000, "sandwich"],
   ["Chicken Club Sandwich", 20000, "sandwich"],
-  ["Chicken Crisp Sandwich", 20000, "sandwich"],
-  ["Chicken Sandwich", 20000, "sandwich"],
-  ["Chicken Wings (6 pieces)", 20000, "snacks"],
+  ["Chicken Crisp Sandwich", 15000, "sandwich"],
+  ["Chicken Sandwich", 15000, "sandwich"],
+  ["Chicken Wings (6 pieces)", 15000, "snacks"],
   ["Chicken Lollipops (6 pieces)", 15000, "snacks"],
   ["Chicken Spring Rolls (4 pieces)", 15000, "snacks"],
   ["Vegetable Spring Rolls (4 pieces)", 15000, "snacks"],
   ["Beef Samosa (4 pieces)", 10000, "snacks"],
   ["Vegetable Samosa (4 pieces)", 6000, "snacks"],
   ["Spaghetti Marinara", 20000, "pasta"],
+  ["Spaghetti Bolognese", 20000, "pasta"],
   ["Spaghetti Arrabbiata", 20000, "pasta"],
   ["Spaghetti Alfredo", 25000, "pasta"],
   ["Chicken Parmesan Spaghetti", 25000, "pasta"],
   ["Aubergine Parmesan", 20000, "pasta"],
   ["Vegetable Spaghetti", 15000, "pasta"],
-  ["Chicken Tikka Masala", 30000, "indian"],
-  ["Chicken Makhan", 30000, "indian"],
-  ["Dal Makhan", 25000, "indian"],
-  ["Mutton Rogan Josh", 25000, "indian"],
-  ["Chicken Biryani", 30000, "indian"],
-  ["Vegetable Biryani", 25000, "indian"],
+  ["Chicken Tikka Masala", 25000, "indian"],
+  ["Chicken Makhan", 25000, "indian"],
+  ["Dal Makhan", 20000, "indian"],
+  ["Mutton Rogan Josh", 20000, "indian"],
+  ["Chicken Biryani", 25000, "indian"],
+  ["Vegetable Biryani", 20000, "indian"],
   ["Hawaiian Pizza", 25000, "pizza"],
   ["Chicken Pizza", 30000, "pizza"],
   ["Beef Pizza", 30000, "pizza"],
@@ -158,6 +172,17 @@ const DEFAULT_KITCHEN_MENU_SIGNATURES = new Map(
 );
 const DEFAULT_KITCHEN_MENU_BY_ID = new Map(DEFAULT_KITCHEN_MENU.map((item) => [item.id, item]));
 const DEFAULT_KITCHEN_MENU_BY_NAME = new Map(DEFAULT_KITCHEN_MENU.map((item) => [item.name.toLowerCase(), item]));
+// Only the listed built-in dishes changed price. Older saved catalog rows have
+// no edit timestamp; manager-edited rows do, and must keep their chosen price.
+const REDUCED_KITCHEN_MENU_NAMES = new Set([
+  "Kuku Paka", "Beef Stew", "Roasted Beef", "Roasted Lamb", "Beef Fillet",
+  "Grilled Chicken", "Fish Fillet", "Coconut Tilapia", "Grilled Fish Skewers",
+  "Pepper Steak", "Chicken Schnitzel", "Chicken Burger", "Beef Burger",
+  "Chicken Crisp Sandwich", "Chicken Sandwich", "Chicken Wings (6 pieces)",
+  "Chicken Tikka Masala", "Chicken Makhan", "Dal Makhan", "Mutton Rogan Josh",
+  "Chicken Biryani", "Vegetable Biryani",
+]);
+const KITCHEN_PRICE_REVISION = Date.parse("2026-10-28T00:00:00Z");
 const OBSOLETE_DEFAULT_KITCHEN_MENU_IDS = new Set(["km-dessert-2", "km-dessert-3"]);
 const APPROVED_KITCHEN_MENU_NAME_ALIASES: Record<string, string> = {
   "fresh garden salad": "km-salad-1",
@@ -269,9 +294,17 @@ export function mergeKitchenMenuItems(
     // Historical menu aliases are canonicalized to the stable default ID, but
     // the persisted values remain authoritative. Replacing the whole record
     // here used to erase every manager name/price edit to a built-in dish.
-    const normalizedItem = approvedItem && approvedItem.id !== item.id
+    const canonicalItem = approvedItem && approvedItem.id !== item.id
       ? { ...item, id: approvedItem.id }
       : item;
+    const normalizedItem = approvedItem &&
+      item.id === approvedItem.id &&
+      REDUCED_KITCHEN_MENU_NAMES.has(approvedItem.name) &&
+      normalizeKitchenMenuName(canonicalItem.name) === normalizeKitchenMenuName(approvedItem.name) &&
+      !canonicalItem.updatedAt &&
+      canonicalItem.price === approvedItem.price + 5000
+      ? { ...canonicalItem, price: approvedItem.price, updatedAt: KITCHEN_PRICE_REVISION }
+      : canonicalItem;
     const existingItem = merged.get(normalizedItem.id);
     if (!existingItem || getKitchenMenuRevision(normalizedItem) > getKitchenMenuRevision(existingItem)) {
       merged.set(normalizedItem.id, normalizedItem);

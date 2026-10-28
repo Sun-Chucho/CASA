@@ -1387,7 +1387,7 @@ export default function KitchenPage() {
               <Tabs value={category} onValueChange={(value) => setCategory(value as KitchenCategory)}>
                 <TabsList className="w-full h-auto flex flex-wrap gap-1 bg-muted/30 p-1.5 rounded-xl">
                   <TabsTrigger value="all" className="font-black uppercase text-[10px] tracking-widest rounded-lg">All</TabsTrigger>
-                  {KITCHEN_CATEGORY_OPTIONS.map((option) => (
+                  {KITCHEN_CATEGORY_OPTIONS.filter((option) => menuItems.some((item) => item.category === option.value)).map((option) => (
                     <TabsTrigger key={option.value} value={option.value} className="font-black uppercase text-[10px] tracking-widest rounded-lg">
                       {option.label}
                     </TabsTrigger>
