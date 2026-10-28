@@ -172,8 +172,8 @@ const DEFAULT_KITCHEN_MENU_SIGNATURES = new Map(
 );
 const DEFAULT_KITCHEN_MENU_BY_ID = new Map(DEFAULT_KITCHEN_MENU.map((item) => [item.id, item]));
 const DEFAULT_KITCHEN_MENU_BY_NAME = new Map(DEFAULT_KITCHEN_MENU.map((item) => [item.name.toLowerCase(), item]));
-// Only the listed built-in dishes changed price. Older saved catalog rows have
-// no edit timestamp; manager-edited rows do, and must keep their chosen price.
+// Apply the requested price change once to saved built-in dishes, including
+// rows that were edited before this correction. Later manager edits still win.
 const REDUCED_KITCHEN_MENU_NAMES = new Set([
   "Kuku Paka", "Beef Stew", "Roasted Beef", "Roasted Lamb", "Beef Fillet",
   "Grilled Chicken", "Fish Fillet", "Coconut Tilapia", "Grilled Fish Skewers",
@@ -182,7 +182,7 @@ const REDUCED_KITCHEN_MENU_NAMES = new Set([
   "Chicken Tikka Masala", "Chicken Makhan", "Dal Makhan", "Mutton Rogan Josh",
   "Chicken Biryani", "Vegetable Biryani",
 ]);
-const KITCHEN_PRICE_REVISION = Date.parse("2026-10-28T00:00:00Z");
+const KITCHEN_PRICE_REVISION = Date.parse("2026-10-28T13:52:00Z");
 const OBSOLETE_DEFAULT_KITCHEN_MENU_IDS = new Set(["km-dessert-2", "km-dessert-3"]);
 const APPROVED_KITCHEN_MENU_NAME_ALIASES: Record<string, string> = {
   "fresh garden salad": "km-salad-1",
@@ -301,7 +301,7 @@ export function mergeKitchenMenuItems(
       item.id === approvedItem.id &&
       REDUCED_KITCHEN_MENU_NAMES.has(approvedItem.name) &&
       normalizeKitchenMenuName(canonicalItem.name) === normalizeKitchenMenuName(approvedItem.name) &&
-      !canonicalItem.updatedAt &&
+      getKitchenMenuRevision(canonicalItem) < KITCHEN_PRICE_REVISION &&
       canonicalItem.price === approvedItem.price + 5000
       ? { ...canonicalItem, price: approvedItem.price, updatedAt: KITCHEN_PRICE_REVISION }
       : canonicalItem;

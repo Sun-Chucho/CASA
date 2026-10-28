@@ -46,14 +46,18 @@ test("requested prices and new dishes are present while salads retain their pric
 
 test("saved old catalog prices migrate once without overwriting manager edits", () => {
   const oldKukuPaka = { ...byName.get("Kuku Paka"), price: 25000 };
+  const oldEditedBeefStew = { ...byName.get("Beef Stew"), price: 20000, updatedAt: Date.parse("2026-10-28T13:19:09Z") };
   const editedBeefStew = { ...byName.get("Beef Stew"), price: 22000, updatedAt: 1000 };
   const oldSalad = { ...byName.get("Vegetable Salad") };
-  const merged = mergeKitchenMenuItems([oldKukuPaka, editedBeefStew, oldSalad]);
+  const merged = mergeKitchenMenuItems([oldKukuPaka, oldEditedBeefStew, editedBeefStew, oldSalad]);
   const menu = new Map(merged.map((item) => [item.name, item]));
   assert.equal(menu.get("Kuku Paka").price, 20000);
   assert.ok(menu.get("Kuku Paka").updatedAt > 0);
-  assert.equal(menu.get("Beef Stew").price, 22000);
+  assert.equal(menu.get("Beef Stew").price, 15000);
   assert.equal(menu.get("Vegetable Salad").price, 15000);
   assert.equal(menu.get("Fish Sato Fried").price, 25000);
   assert.deepEqual(mergeKitchenMenuItems(merged), merged);
+  assert.equal(mergeKitchenMenuItems([editedBeefStew]).find((item) => item.name === "Beef Stew").price, 22000);
+  const laterEdit = { ...byName.get("Beef Stew"), price: 20000, updatedAt: Date.parse("2026-10-28T13:53:00Z") };
+  assert.equal(mergeKitchenMenuItems([laterEdit]).find((item) => item.name === "Beef Stew").price, 20000);
 });
