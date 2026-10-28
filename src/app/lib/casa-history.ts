@@ -86,6 +86,37 @@ function filterHistoryArray(value: unknown) {
   return Array.isArray(value) ? value.filter(keepCasaHistoryRecord) : value;
 }
 
+// This duplicate Chips line was entered in the 25 October historical sale.
+// Keep the other item on the same payment and prevent an offline snapshot from
+// restoring the removed line during a later sync.
+function removeDuplicateHistoricalChipsLine(value: unknown) {
+  if (!Array.isArray(value)) return value;
+  return value.map((record) => {
+    if (typeof record !== "object" || record === null) return record;
+    const payment = record as Record<string, unknown>;
+    const lines = payment.lines;
+    if (
+      payment.id !== "kp-history-1793101935061" ||
+      payment.code !== "K-H-302" ||
+      payment.createdAt !== 1792918800000 ||
+      payment.historical !== true ||
+      payment.destination !== "Historical Kitchen Payment" ||
+      payment.total !== 20000 ||
+      !Array.isArray(lines) ||
+      lines.length !== 2 ||
+      !lines.some((line) => line?.name === "Chicken Lollipops (6 pieces)" && line?.qty === 1) ||
+      !lines.some((line) => line?.name === "Chips" && line?.qty === 1)
+    ) return record;
+
+    return {
+      ...payment,
+      lines: lines.filter((line) => line?.name !== "Chips"),
+      total: 15000,
+      updatedAt: Math.max(Number(payment.updatedAt) || 0, Date.parse("2026-10-28T00:00:00+03:00")),
+    };
+  });
+}
+
 export function sanitizeCasaHistory<T>(key: string, value: T): T {
   if (value === null || value === undefined) return value;
 
@@ -151,8 +182,14 @@ export function sanitizeCasaHistory<T>(key: string, value: T): T {
     return {
       ...snapshot,
       tickets: filterHistoryArray(snapshot.tickets),
-      payments: filterHistoryArray(snapshot.payments),
+      payments: key === "orange-hotel-kitchen-state"
+        ? removeDuplicateHistoricalChipsLine(filterHistoryArray(snapshot.payments))
+        : filterHistoryArray(snapshot.payments),
     } as T;
+  }
+
+  if (key === "orange-hotel-kitchen-payments") {
+    return removeDuplicateHistoricalChipsLine(filterHistoryArray(value)) as T;
   }
 
   if (key === "orange-hotel-expenses") {
