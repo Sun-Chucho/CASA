@@ -11,7 +11,7 @@ import {
   KitchenMenuItem,
   mergeKitchenMenuItems,
 } from "@/app/lib/kitchen-menu";
-import { InventoryItem, ROOMS, Role } from "@/app/lib/mock-data";
+import { InventoryItem, Role } from "@/app/lib/mock-data";
 import {
   adjustInventoryQuantity,
   MainStoreItem,
@@ -85,7 +85,6 @@ interface KitchenPaymentRecord {
 interface PendingOrder {
   mode: ServiceMode;
   destination: string;
-  roomNumber?: string;
   lines: Array<{ name: string; qty: number }>;
   total: number;
 }
@@ -135,8 +134,6 @@ export default function KitchenPage() {
   const [category, setCategory] = useState<KitchenCategory>("all");
   const [serviceMode, setServiceMode] = useState<ServiceMode>("restaurant");
   const [searchTerm, setSearchTerm] = useState("");
-  const [tableNumber, setTableNumber] = useState("");
-  const [roomNumber, setRoomNumber] = useState("");
 
   const [cart, setCart] = useState<CartLine[]>([]);
   const [tickets, setTickets] = useState<KitchenTicket[]>([]);
@@ -152,24 +149,18 @@ export default function KitchenPage() {
   const [useQty, setUseQty] = useState("1");
 
   const [pendingOrder, setPendingOrder] = useState<PendingOrder | null>(null);
-  const [showSettlementPopup, setShowSettlementPopup] = useState(false);
   const [showPayNowPopup, setShowPayNowPopup] = useState(false);
   const [pastPaymentDate, setPastPaymentDate] = useState("");
   const [pastPaymentSearch, setPastPaymentSearch] = useState("");
   const [pastPaymentCart, setPastPaymentCart] = useState<CartLine[]>([]);
-  const [pastPaymentMethod, setPastPaymentMethod] = useState<KitchenPaymentMethod>("cash");
+  const [pastPaymentMethod, setPastPaymentMethod] = useState<Exclude<KitchenPaymentMethod, "credit">>("cash");
   const [pastPaymentFeedback, setPastPaymentFeedback] = useState("");
   const [savingPastPayment, setSavingPastPayment] = useState(false);
   const [editingPastPaymentId, setEditingPastPaymentId] = useState<string | null>(null);
-  const [pastPaymentMethodDraft, setPastPaymentMethodDraft] = useState<KitchenPaymentMethod>("cash");
+  const [pastPaymentMethodDraft, setPastPaymentMethodDraft] = useState<Exclude<KitchenPaymentMethod, "credit">>("cash");
   const [updatingPastPaymentId, setUpdatingPastPaymentId] = useState<string | null>(null);
   const [pastPaymentUpdateFeedback, setPastPaymentUpdateFeedback] = useState("");
 
-  const roomSuggestions = useMemo(() => ROOMS.map((room) => room.number), []);
-  const tableSuggestions = useMemo(
-    () => Array.from({ length: 30 }, (_, index) => String(index + 1)),
-    [],
-  );
 
   useEffect(() => {
     const savedRole = readStoredRole();
@@ -250,19 +241,6 @@ export default function KitchenPage() {
     if (queueTab === "from-store") loadFromStoreData();
   }, [queueTab]);
 
-  useEffect(() => {
-    if (serviceMode === "restaurant") {
-      setRoomNumber("");
-      return;
-    }
-    if (serviceMode === "room-service") {
-      setTableNumber("");
-      return;
-    }
-    setRoomNumber("");
-    setTableNumber("");
-  }, [serviceMode]);
-
   const getUsedQty = (movementId: string) =>
     usageLogs.filter((entry) => entry.movementId === movementId).reduce((sum, entry) => sum + entry.quantityUsed, 0);
 
@@ -311,10 +289,6 @@ export default function KitchenPage() {
   const subtotal = useMemo(() => cart.reduce((sum, line) => sum + line.item.price * line.qty, 0), [cart]);
   const completedSalesTotal = useMemo(
     () => kitchenPayments.filter((payment) => payment.status !== "credit").reduce((sum, payment) => sum + payment.total, 0),
-    [kitchenPayments],
-  );
-  const creditSalesTotal = useMemo(
-    () => kitchenPayments.filter((payment) => payment.status === "credit").reduce((sum, payment) => sum + payment.total, 0),
     [kitchenPayments],
   );
   const recentSales = useMemo(
@@ -546,35 +520,18 @@ export default function KitchenPage() {
     if (isDirector) return;
     if (cart.length === 0) return;
 
-    const destination =
-      serviceMode === "room-service"
-        ? `Room ${roomNumber.trim()}`
-        : serviceMode === "restaurant"
-        ? `Table ${tableNumber.trim()}`
-        : "Take Away";
-
-    if (serviceMode === "room-service" && !roomNumber.trim()) {
-      window.alert("Enter the room number for room service.");
-      return;
-    }
-
-    if (serviceMode === "restaurant" && !tableNumber.trim()) {
-      window.alert("Enter the table number for restaurant service.");
-      return;
-    }
+    const destination = serviceMode === "room-service" ? "Room Service" : serviceMode === "restaurant" ? "Restaurant" : "Take Away";
 
       setPendingOrder({
         mode: serviceMode,
         destination,
-        roomNumber: serviceMode === "room-service" ? roomNumber.trim() : undefined,
         lines: cart.map((line) => ({ name: line.item.name, qty: line.qty })),
         total: subtotal,
       });
-      setShowPayNowPopup(false);
-      setShowSettlementPopup(true);
+      setShowPayNowPopup(true);
     };
 
-  const finalizeOrder = async (status: KitchenPaymentStatus, method: KitchenPaymentMethod) => {
+  const finalizeOrder = async (method: Exclude<KitchenPaymentMethod, "credit">) => {
     if (isDirector) return;
     if (!pendingOrder) return;
 
@@ -591,7 +548,6 @@ export default function KitchenPage() {
       createdAt,
       mode: pendingOrder.mode,
       destination: pendingOrder.destination,
-      roomNumber: pendingOrder.roomNumber,
       lines: pendingOrder.lines,
       total: pendingOrder.total,
     };
@@ -603,10 +559,9 @@ export default function KitchenPage() {
       createdAt,
       mode: pendingOrder.mode,
       destination: pendingOrder.destination,
-      roomNumber: pendingOrder.roomNumber,
       lines: pendingOrder.lines,
       total: pendingOrder.total,
-      status,
+      status: "completed",
       method,
     };
 
@@ -618,7 +573,6 @@ export default function KitchenPage() {
 
     setCart([]);
     setPendingOrder(null);
-    setShowSettlementPopup(false);
     setShowPayNowPopup(false);
 
     const printResult = await printDepartmentReceipt({
@@ -757,7 +711,7 @@ export default function KitchenPage() {
         mode: "take-away",
         destination: "Historical Kitchen Payment",
         total: pastPaymentTotal,
-        status: pastPaymentMethod === "credit" ? "credit" : "completed",
+        status: "completed",
         method: pastPaymentMethod,
         lines: pastPaymentCart.map((line) => ({ name: line.item.name, qty: line.qty })),
         historical: true,
@@ -785,7 +739,7 @@ export default function KitchenPage() {
     }
   };
 
-  const updatePastPaymentMethod = async (paymentId: string, method: KitchenPaymentMethod) => {
+  const updatePastPaymentMethod = async (paymentId: string, method: Exclude<KitchenPaymentMethod, "credit">) => {
     const currentPayment = kitchenPayments.find((payment) => payment.id === paymentId && payment.historical);
     if (!currentPayment) return;
     if (currentPayment.method === method) {
@@ -811,7 +765,7 @@ export default function KitchenPage() {
           ? {
               ...payment,
               method,
-              status: method === "credit" ? "credit" as const : "completed" as const,
+              status: "completed" as const,
               paymentMethodEditedAt,
               updatedAt: paymentMethodEditedAt,
             }
@@ -989,13 +943,12 @@ export default function KitchenPage() {
               <select
                 id="past-kitchen-payment-method"
                 value={pastPaymentMethod}
-                onChange={(event) => setPastPaymentMethod(event.target.value as KitchenPaymentMethod)}
+                onChange={(event) => setPastPaymentMethod(event.target.value as Exclude<KitchenPaymentMethod, "credit">)}
                 className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm sm:max-w-xs"
               >
                 <option value="cash">Cash</option>
                 <option value="card">Card</option>
                 <option value="mobile">Mobile Money</option>
-                <option value="credit">Credit</option>
               </select>
             </div>
             <div className="flex justify-between border-t pt-4 text-lg font-black">
@@ -1046,13 +999,12 @@ export default function KitchenPage() {
                           aria-label={`Payment method for ${payment.code}`}
                           value={pastPaymentMethodDraft}
                           disabled={updatingPastPaymentId === payment.id}
-                          onChange={(event) => setPastPaymentMethodDraft(event.target.value as KitchenPaymentMethod)}
+                          onChange={(event) => setPastPaymentMethodDraft(event.target.value as Exclude<KitchenPaymentMethod, "credit">)}
                           className="h-9 min-w-32 rounded-md border border-input bg-background px-2 py-1 text-xs font-black uppercase tracking-wider disabled:cursor-wait disabled:opacity-60"
                         >
                           <option value="cash">Cash</option>
                           <option value="card">Card</option>
                           <option value="mobile">Mobile Money</option>
-                          <option value="credit">Credit</option>
                         </select>
                       ) : (
                         <span className="font-black uppercase text-[10px] tracking-widest">
@@ -1091,7 +1043,7 @@ export default function KitchenPage() {
                           variant="outline"
                           onClick={() => {
                             setEditingPastPaymentId(payment.id);
-                            setPastPaymentMethodDraft(payment.method);
+                            setPastPaymentMethodDraft(payment.method === "credit" ? "cash" : payment.method);
                             setPastPaymentUpdateFeedback("");
                           }}
                           className="font-black uppercase text-[10px] tracking-widest"
@@ -1311,17 +1263,11 @@ export default function KitchenPage() {
         </Card>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card className="border-none shadow-sm">
           <CardContent className="p-4">
             <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Completed Sales</p>
             <p className="mt-2 text-2xl font-black">TSh {completedSalesTotal.toLocaleString()}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-none shadow-sm">
-          <CardContent className="p-4">
-            <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Credit Sales</p>
-            <p className="mt-2 text-2xl font-black">TSh {creditSalesTotal.toLocaleString()}</p>
           </CardContent>
         </Card>
         <Card className="border-none shadow-sm">
@@ -1335,7 +1281,7 @@ export default function KitchenPage() {
       <Card className="border-none shadow-sm">
         <CardHeader>
           <CardTitle className="text-xl font-black uppercase tracking-tight">Recent Kitchen Sales</CardTitle>
-          <CardDescription>Live completed and credit sales captured from the kitchen POS</CardDescription>
+          <CardDescription>Kitchen POS sales records</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
@@ -1607,42 +1553,10 @@ export default function KitchenPage() {
             <CardDescription>Prepare and place a kitchen order</CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
-            {serviceMode === "room-service" ? (
-              <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Room Number</label>
-                <Input
-                  list="kitchen-room-numbers"
-                  value={roomNumber}
-                  onChange={(event) => setRoomNumber(event.target.value)}
-                  placeholder="Enter room number"
-                />
-                <datalist id="kitchen-room-numbers">
-                  {roomSuggestions.map((room) => (
-                    <option key={room} value={room} />
-                  ))}
-                </datalist>
-              </div>
-            ) : serviceMode === "restaurant" ? (
-              <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Table Number</label>
-                <Input
-                  list="kitchen-table-numbers"
-                  value={tableNumber}
-                  onChange={(event) => setTableNumber(event.target.value)}
-                  placeholder="Enter table number"
-                />
-                <datalist id="kitchen-table-numbers">
-                  {tableSuggestions.map((table) => (
-                    <option key={table} value={table} />
-                  ))}
-                </datalist>
-              </div>
-            ) : (
-              <div className="rounded-xl border p-3 bg-muted/20">
-                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Service Type</p>
-                <p className="font-bold">Take Away</p>
-              </div>
-            )}
+            <div className="rounded-xl border p-3 bg-muted/20">
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Service Type</p>
+              <p className="font-bold">{serviceMode === "room-service" ? "Room Service" : serviceMode === "restaurant" ? "Restaurant" : "Take Away"}</p>
+            </div>
 
             {cart.length === 0 ? (
               <div className="h-44 rounded-xl border border-dashed flex flex-col items-center justify-center text-center opacity-40">
@@ -1704,44 +1618,6 @@ export default function KitchenPage() {
         </Card>
       </div>
 
-      {!isDirector && showSettlementPopup && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-          <Card className="w-full max-w-md">
-            <CardHeader>
-              <CardTitle className="text-xl font-black uppercase tracking-tight">Select Settlement</CardTitle>
-              <CardDescription>Choose Pay Now or Credit</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <Button
-                onClick={() => {
-                  setShowSettlementPopup(false);
-                  setShowPayNowPopup(true);
-                }}
-                className="w-full h-11 font-black uppercase text-[10px] tracking-widest"
-              >
-                Paid Now
-              </Button>
-              <Button
-                onClick={() => finalizeOrder("credit", "credit")}
-                className="w-full h-11 font-black uppercase text-[10px] tracking-widest bg-red-600 hover:bg-red-600/90 text-white"
-              >
-                Credit
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setShowSettlementPopup(false);
-                  setShowPayNowPopup(false);
-                }}
-                className="w-full h-10 font-black uppercase text-[10px] tracking-widest"
-              >
-                Close
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
       {!isDirector && showPayNowPopup && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <Card className="w-full max-w-md">
@@ -1750,24 +1626,23 @@ export default function KitchenPage() {
               <CardDescription>Select cash, card, or mobile</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <Button onClick={() => finalizeOrder("completed", "cash")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
+              <Button onClick={() => finalizeOrder("cash")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
                 Cash
               </Button>
-              <Button onClick={() => finalizeOrder("completed", "card")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
+              <Button onClick={() => finalizeOrder("card")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
                 Card
               </Button>
-              <Button onClick={() => finalizeOrder("completed", "mobile")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
+              <Button onClick={() => finalizeOrder("mobile")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
                 Mobile
               </Button>
               <Button
                 variant="outline"
                 onClick={() => {
                   setShowPayNowPopup(false);
-                  setShowSettlementPopup(true);
                 }}
                 className="w-full h-10 font-black uppercase text-[10px] tracking-widest"
               >
-                Back
+                Close
               </Button>
             </CardContent>
           </Card>

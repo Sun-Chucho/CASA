@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { readStoredRole } from "@/app/lib/auth";
-import { InventoryItem, ROOMS, Role } from "@/app/lib/mock-data";
+import { InventoryItem, Role } from "@/app/lib/mock-data";
 import {
   adjustInventoryQuantity,
   MainStoreItem,
@@ -141,7 +141,6 @@ interface CancelledBaristaTicket extends BaristaTicket {
 interface PendingOrder {
   mode: ServiceMode;
   destination: string;
-  roomNumber?: string;
   lines: BaristaOrderLine[];
   total: number;
 }
@@ -370,12 +369,10 @@ export default function BaristaPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [pastSaleDate, setPastSaleDate] = useState(getLocalDateInputValue);
   const [pastSaleSearch, setPastSaleSearch] = useState("");
-  const [pastSaleMethod, setPastSaleMethod] = useState<BaristaPaymentMethod>("cash");
+  const [pastSaleMethod, setPastSaleMethod] = useState<Exclude<BaristaPaymentMethod, "credit">>("cash");
   const [pastSaleCart, setPastSaleCart] = useState<CartLine[]>([]);
   const [pastSaleFeedback, setPastSaleFeedback] = useState<string | null>(null);
   const [savingPastSale, setSavingPastSale] = useState(false);
-  const [tableNumber, setTableNumber] = useState("");
-  const [roomNumber, setRoomNumber] = useState("");
 
   const [cart, setCart] = useState<CartLine[]>([]);
   const [tickets, setTickets] = useState<BaristaTicket[]>([]);
@@ -396,7 +393,6 @@ export default function BaristaPage() {
   const [useQty, setUseQty] = useState("1");
 
   const [pendingOrder, setPendingOrder] = useState<PendingOrder | null>(null);
-  const [showSettlementPopup, setShowSettlementPopup] = useState(false);
   const [showPayNowPopup, setShowPayNowPopup] = useState(false);
   const [accountTab, setAccountTab] = useState<"session" | "password">("session");
   const [activeUsername, setActiveUsername] = useState("");
@@ -406,11 +402,6 @@ export default function BaristaPage() {
   const [passwordFeedback, setPasswordFeedback] = useState<{ type: "error" | "success"; message: string } | null>(null);
   const [deliveringTicketId, setDeliveringTicketId] = useState<string | null>(null);
 
-  const roomSuggestions = useMemo(() => ROOMS.map((room) => room.number), []);
-  const tableSuggestions = useMemo(
-    () => Array.from({ length: 30 }, (_, index) => String(index + 1)),
-    [],
-  );
 
   useEffect(() => {
     const savedRole = readStoredRole();
@@ -562,19 +553,6 @@ export default function BaristaPage() {
       setStoredMenuItems(syncedMenuItems);
     }
   }, [inventoryItems, baristaStoreItems]);
-
-  useEffect(() => {
-    if (serviceMode === "restaurant") {
-      setRoomNumber("");
-      return;
-    }
-    if (serviceMode === "room-service") {
-      setTableNumber("");
-      return;
-    }
-    setRoomNumber("");
-    setTableNumber("");
-  }, [serviceMode]);
 
   const getUsedQty = (movementId: string) =>
     usageLogs.filter((entry) => entry.movementId === movementId).reduce((sum, entry) => sum + entry.quantityUsed, 0);
@@ -833,10 +811,6 @@ export default function BaristaPage() {
   const subtotal = useMemo(() => cart.reduce((sum, line) => sum + line.item.price * line.qty, 0), [cart]);
   const completedSalesTotal = useMemo(
     () => baristaPayments.filter((payment) => payment.status !== "credit").reduce((sum, payment) => sum + payment.total, 0),
-    [baristaPayments],
-  );
-  const creditSalesTotal = useMemo(
-    () => baristaPayments.filter((payment) => payment.status === "credit").reduce((sum, payment) => sum + payment.total, 0),
     [baristaPayments],
   );
   const recentSales = useMemo(
@@ -1652,7 +1626,7 @@ export default function BaristaPage() {
         mode: "take-away",
         destination: "Historical Bar Sale",
         total: pastSaleTotal,
-        status: pastSaleMethod === "credit" ? "credit" : "completed",
+        status: "completed",
         method: pastSaleMethod,
         lines: pastSaleCart.map((line) => ({ name: line.item.name, qty: line.qty })),
         historical: true,
@@ -1696,35 +1670,18 @@ export default function BaristaPage() {
     if (isDirector) return;
     if (cart.length === 0) return;
 
-    const destination =
-      serviceMode === "room-service"
-        ? `Room ${roomNumber.trim()}`
-        : serviceMode === "restaurant"
-        ? `Table ${tableNumber.trim()}`
-        : "Take Away";
-
-    if (serviceMode === "room-service" && !roomNumber.trim()) {
-      window.alert("Enter the room number for room service.");
-      return;
-    }
-
-    if (serviceMode === "restaurant" && !tableNumber.trim()) {
-      window.alert("Enter the table number for restaurant service.");
-      return;
-    }
+    const destination = serviceMode === "room-service" ? "Room Service" : serviceMode === "restaurant" ? "Restaurant" : "Take Away";
 
       setPendingOrder({
         mode: serviceMode,
         destination,
-        roomNumber: serviceMode === "room-service" ? roomNumber.trim() : undefined,
         lines: cart.map((line) => ({ name: line.item.name, qty: line.qty })),
         total: subtotal,
       });
-      setShowPayNowPopup(false);
-      setShowSettlementPopup(true);
+      setShowPayNowPopup(true);
     };
 
-  const finalizeOrder = async (status: BaristaPaymentStatus, method: BaristaPaymentMethod) => {
+  const finalizeOrder = async (method: Exclude<BaristaPaymentMethod, "credit">) => {
     if (isDirector) return;
     if (!pendingOrder) return;
 
@@ -1747,7 +1704,6 @@ export default function BaristaPage() {
       createdAt,
       mode: pendingOrder.mode,
       destination: pendingOrder.destination,
-      roomNumber: pendingOrder.roomNumber,
       lines: pendingOrder.lines,
       total: pendingOrder.total,
     };
@@ -1759,9 +1715,8 @@ export default function BaristaPage() {
       createdAt,
       mode: pendingOrder.mode,
       destination: pendingOrder.destination,
-      roomNumber: pendingOrder.roomNumber,
       total: pendingOrder.total,
-      status,
+      status: "completed",
       method,
       lines: pendingOrder.lines,
     };
@@ -1774,7 +1729,6 @@ export default function BaristaPage() {
 
     setCart([]);
     setPendingOrder(null);
-    setShowSettlementPopup(false);
     setShowPayNowPopup(false);
 
     const printResult = await printDepartmentReceipt({
@@ -2299,13 +2253,12 @@ export default function BaristaPage() {
                 <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Payment Method</p>
                 <select
                   value={pastSaleMethod}
-                  onChange={(event) => setPastSaleMethod(event.target.value as BaristaPaymentMethod)}
+                  onChange={(event) => setPastSaleMethod(event.target.value as Exclude<BaristaPaymentMethod, "credit">)}
                   className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm font-bold"
                 >
                   <option value="cash">Cash</option>
                   <option value="card">Card</option>
                   <option value="mobile">Mobile Money</option>
-                  <option value="credit">Credit</option>
                 </select>
               </div>
 
@@ -2744,7 +2697,7 @@ export default function BaristaPage() {
             <Card className="border-none shadow-sm">
               <CardHeader>
                 <CardTitle className="text-xl font-black uppercase tracking-tight">Payment Records</CardTitle>
-                <CardDescription>Completed and credit sales records from barista settlements</CardDescription>
+                <CardDescription>Barista settlement records</CardDescription>
               </CardHeader>
               <CardContent className="p-0">
                 <Table>
@@ -2899,17 +2852,11 @@ export default function BaristaPage() {
         </Card>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card className="border-none shadow-sm">
           <CardContent className="p-4">
             <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Completed Sales</p>
             <p className="mt-2 text-2xl font-black">TSh {completedSalesTotal.toLocaleString()}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-none shadow-sm">
-          <CardContent className="p-4">
-            <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Credit Sales</p>
-            <p className="mt-2 text-2xl font-black">TSh {creditSalesTotal.toLocaleString()}</p>
           </CardContent>
         </Card>
         <Card className="border-none shadow-sm">
@@ -3194,42 +3141,10 @@ export default function BaristaPage() {
             <CardDescription>Prepare and place a barista order</CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
-            {serviceMode === "room-service" ? (
-              <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Room Number</label>
-                <Input
-                  list="barista-room-numbers"
-                  value={roomNumber}
-                  onChange={(event) => setRoomNumber(event.target.value)}
-                  placeholder="Enter room number"
-                />
-                <datalist id="barista-room-numbers">
-                  {roomSuggestions.map((room) => (
-                    <option key={room} value={room} />
-                  ))}
-                </datalist>
-              </div>
-            ) : serviceMode === "restaurant" ? (
-              <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Table Number</label>
-                <Input
-                  list="barista-table-numbers"
-                  value={tableNumber}
-                  onChange={(event) => setTableNumber(event.target.value)}
-                  placeholder="Enter table number"
-                />
-                <datalist id="barista-table-numbers">
-                  {tableSuggestions.map((table) => (
-                    <option key={table} value={table} />
-                  ))}
-                </datalist>
-              </div>
-            ) : (
-              <div className="rounded-xl border p-3 bg-muted/20">
-                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Service Type</p>
-                <p className="font-bold">Take Away</p>
-              </div>
-            )}
+            <div className="rounded-xl border p-3 bg-muted/20">
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Service Type</p>
+              <p className="font-bold">{serviceMode === "room-service" ? "Room Service" : serviceMode === "restaurant" ? "Restaurant" : "Take Away"}</p>
+            </div>
 
             {cart.length === 0 ? (
               <div className="h-44 rounded-xl border border-dashed flex flex-col items-center justify-center text-center opacity-40">
@@ -3294,7 +3209,7 @@ export default function BaristaPage() {
       <Card className="border-none shadow-sm">
         <CardHeader>
           <CardTitle className="text-xl font-black uppercase tracking-tight">Recent Barista Sales</CardTitle>
-          <CardDescription>Live completed and credit sales captured from the barista POS</CardDescription>
+          <CardDescription>Barista POS sales records</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
@@ -3329,44 +3244,6 @@ export default function BaristaPage() {
         </CardContent>
       </Card>
 
-      {!isDirector && showSettlementPopup && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-          <Card className="w-full max-w-md">
-            <CardHeader>
-              <CardTitle className="text-xl font-black uppercase tracking-tight">Select Settlement</CardTitle>
-              <CardDescription>Choose Pay Now or Credit</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <Button
-                onClick={() => {
-                  setShowSettlementPopup(false);
-                  setShowPayNowPopup(true);
-                }}
-                className="w-full h-11 font-black uppercase text-[10px] tracking-widest"
-              >
-                Paid Now
-              </Button>
-              <Button
-                onClick={() => finalizeOrder("credit", "credit")}
-                className="w-full h-11 font-black uppercase text-[10px] tracking-widest bg-red-600 hover:bg-red-600/90 text-white"
-              >
-                Credit
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setShowSettlementPopup(false);
-                  setShowPayNowPopup(false);
-                }}
-                className="w-full h-10 font-black uppercase text-[10px] tracking-widest"
-              >
-                Close
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
       {!isDirector && showPayNowPopup && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <Card className="w-full max-w-md">
@@ -3375,24 +3252,23 @@ export default function BaristaPage() {
               <CardDescription>Select cash, card, or mobile</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <Button onClick={() => finalizeOrder("completed", "cash")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
+              <Button onClick={() => finalizeOrder("cash")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
                 Cash
               </Button>
-              <Button onClick={() => finalizeOrder("completed", "card")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
+              <Button onClick={() => finalizeOrder("card")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
                 Card
               </Button>
-              <Button onClick={() => finalizeOrder("completed", "mobile")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
+              <Button onClick={() => finalizeOrder("mobile")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
                 Mobile
               </Button>
               <Button
                 variant="outline"
                 onClick={() => {
                   setShowPayNowPopup(false);
-                  setShowSettlementPopup(true);
                 }}
                 className="w-full h-10 font-black uppercase text-[10px] tracking-widest"
               >
-                Back
+                Close
               </Button>
             </CardContent>
           </Card>
