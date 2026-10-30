@@ -1,4 +1,4 @@
-const CACHE_NAME = "cassa-hotel-shell-v2";
+const CACHE_NAME = "cassa-hotel-shell-v3";
 
 async function cacheFirst(request) {
   const cache = await caches.open(CACHE_NAME);
@@ -15,7 +15,7 @@ async function cacheFirst(request) {
 async function networkFirst(request) {
   const cache = await caches.open(CACHE_NAME);
   try {
-    const response = await fetch(request);
+    const response = await fetch(request, { cache: "no-store" });
     if (response.ok) {
       await cache.put(request, response.clone());
     }
@@ -45,6 +45,12 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // Next.js router responses contain live page data. The old cache-first rule
+  // kept serving outdated stock and capital values to installed PWAs.
+  if (url.searchParams.has("_rsc") || request.headers.get("RSC") === "1") {
+    return;
+  }
+
   // Next static files are content-hashed. Cache-first is safe and prevents the
   // same JavaScript, CSS, fonts, and optimized images from consuming CDN data
   // again on every visit.
@@ -67,7 +73,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  event.respondWith(cacheFirst(request));
+  event.respondWith(networkFirst(request));
 });
 
 self.addEventListener("install", (event) => {

@@ -39,12 +39,15 @@ export function registerPwaServiceWorker() {
 
   if (!serviceWorkerRegistration) {
     serviceWorkerRegistration = navigator.serviceWorker
-      .register("/sw.js", { scope: "/" })
+      .register("/sw.js", { scope: "/", updateViaCache: "none" })
       .then(() => navigator.serviceWorker.ready)
       .catch(() => null);
   }
 
-  return serviceWorkerRegistration;
+  return serviceWorkerRegistration.then((registration) => {
+    void registration?.update().catch(() => undefined);
+    return registration;
+  });
 }
 
 export function usePwaInstall(registerServiceWorker = false) {

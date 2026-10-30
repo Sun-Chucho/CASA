@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { registerPwaServiceWorker } from "@/hooks/use-pwa-install";
 import { SyncStatusIndicator } from "@/components/sync-status-indicator";
 import { MANAGER_SESSION_VERSION, STORAGE_MANAGER_SESSION_VERSION, readActiveSessionUsername, readLocalLoginProfiles, renameProfileUser, saveLoginProfileToServer, writeActiveSessionUsername } from "@/app/lib/login-profiles";
 
@@ -1123,6 +1124,16 @@ export default function DashboardLayout({
       cancelled = true;
     };
   }, [router]);
+
+  useEffect(() => {
+    if (!window.matchMedia("(display-mode: standalone)").matches) return;
+    const checkForUpdate = () => {
+      if (document.visibilityState === "visible") void registerPwaServiceWorker();
+    };
+    checkForUpdate();
+    document.addEventListener("visibilitychange", checkForUpdate);
+    return () => document.removeEventListener("visibilitychange", checkForUpdate);
+  }, []);
 
 
 
