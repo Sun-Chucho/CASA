@@ -56,7 +56,8 @@ type BaristaCategory =
   | "cold"
   | "snacks";
 type ServiceMode = "restaurant" | "room-service" | "take-away";
-type BaristaPaymentMethod = "cash" | "card" | "mobile" | "credit";
+type BaristaPaymentMethod = "cash" | "mobile" | "bank" | "card" | "credit";
+type PaidBaristaPaymentMethod = "cash" | "mobile" | "bank";
 type BaristaPaymentStatus = "completed" | "credit";
 type BaristaOrderLine = { name: string; qty: number };
 type SalesDateFilter = "day" | "week" | "month" | "all";
@@ -369,7 +370,7 @@ export default function BaristaPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [pastSaleDate, setPastSaleDate] = useState(getLocalDateInputValue);
   const [pastSaleSearch, setPastSaleSearch] = useState("");
-  const [pastSaleMethod, setPastSaleMethod] = useState<Exclude<BaristaPaymentMethod, "credit">>("cash");
+  const [pastSaleMethod, setPastSaleMethod] = useState<PaidBaristaPaymentMethod>("cash");
   const [pastSaleCart, setPastSaleCart] = useState<CartLine[]>([]);
   const [pastSaleFeedback, setPastSaleFeedback] = useState<string | null>(null);
   const [savingPastSale, setSavingPastSale] = useState(false);
@@ -1672,16 +1673,16 @@ export default function BaristaPage() {
 
     const destination = serviceMode === "room-service" ? "Room Service" : serviceMode === "restaurant" ? "Restaurant" : "Take Away";
 
-      setPendingOrder({
-        mode: serviceMode,
-        destination,
-        lines: cart.map((line) => ({ name: line.item.name, qty: line.qty })),
-        total: subtotal,
-      });
-      setShowPayNowPopup(true);
-    };
+    setPendingOrder({
+      mode: serviceMode,
+      destination,
+      lines: cart.map((line) => ({ name: line.item.name, qty: line.qty })),
+      total: subtotal,
+    });
+    setShowPayNowPopup(true);
+  };
 
-  const finalizeOrder = async (method: Exclude<BaristaPaymentMethod, "credit">) => {
+  const finalizeOrder = async (method: PaidBaristaPaymentMethod) => {
     if (isDirector) return;
     if (!pendingOrder) return;
 
@@ -2253,12 +2254,12 @@ export default function BaristaPage() {
                 <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Payment Method</p>
                 <select
                   value={pastSaleMethod}
-                  onChange={(event) => setPastSaleMethod(event.target.value as Exclude<BaristaPaymentMethod, "credit">)}
+                  onChange={(event) => setPastSaleMethod(event.target.value as PaidBaristaPaymentMethod)}
                   className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm font-bold"
                 >
                   <option value="cash">Cash</option>
-                  <option value="card">Card</option>
                   <option value="mobile">Mobile Money</option>
+                  <option value="bank">Bank</option>
                 </select>
               </div>
 
@@ -3249,17 +3250,17 @@ export default function BaristaPage() {
           <Card className="w-full max-w-md">
             <CardHeader>
               <CardTitle className="text-xl font-black uppercase tracking-tight">Pay Now Method</CardTitle>
-              <CardDescription>Select cash, card, or mobile</CardDescription>
+              <CardDescription>Select cash, mobile, or bank</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <Button onClick={() => finalizeOrder("cash")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
                 Cash
               </Button>
-              <Button onClick={() => finalizeOrder("card")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
-                Card
-              </Button>
               <Button onClick={() => finalizeOrder("mobile")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
                 Mobile
+              </Button>
+              <Button onClick={() => finalizeOrder("bank")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
+                Bank
               </Button>
               <Button
                 variant="outline"

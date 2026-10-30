@@ -39,7 +39,8 @@ import { reconcileCartWithMenu } from "@/app/lib/pos-menu";
 
 type KitchenCategory = "all" | KitchenMenuCategory;
 type ServiceMode = "restaurant" | "room-service" | "take-away";
-type KitchenPaymentMethod = "cash" | "card" | "mobile" | "credit";
+type KitchenPaymentMethod = "cash" | "mobile" | "bank" | "card" | "credit";
+type PaidKitchenPaymentMethod = "cash" | "mobile" | "bank";
 type KitchenPaymentStatus = "completed" | "credit";
 type SalesDateFilter = "all" | "date";
 
@@ -153,11 +154,11 @@ export default function KitchenPage() {
   const [pastPaymentDate, setPastPaymentDate] = useState("");
   const [pastPaymentSearch, setPastPaymentSearch] = useState("");
   const [pastPaymentCart, setPastPaymentCart] = useState<CartLine[]>([]);
-  const [pastPaymentMethod, setPastPaymentMethod] = useState<Exclude<KitchenPaymentMethod, "credit">>("cash");
+  const [pastPaymentMethod, setPastPaymentMethod] = useState<PaidKitchenPaymentMethod>("cash");
   const [pastPaymentFeedback, setPastPaymentFeedback] = useState("");
   const [savingPastPayment, setSavingPastPayment] = useState(false);
   const [editingPastPaymentId, setEditingPastPaymentId] = useState<string | null>(null);
-  const [pastPaymentMethodDraft, setPastPaymentMethodDraft] = useState<Exclude<KitchenPaymentMethod, "credit">>("cash");
+  const [pastPaymentMethodDraft, setPastPaymentMethodDraft] = useState<PaidKitchenPaymentMethod>("cash");
   const [updatingPastPaymentId, setUpdatingPastPaymentId] = useState<string | null>(null);
   const [pastPaymentUpdateFeedback, setPastPaymentUpdateFeedback] = useState("");
 
@@ -522,16 +523,16 @@ export default function KitchenPage() {
 
     const destination = serviceMode === "room-service" ? "Room Service" : serviceMode === "restaurant" ? "Restaurant" : "Take Away";
 
-      setPendingOrder({
-        mode: serviceMode,
-        destination,
-        lines: cart.map((line) => ({ name: line.item.name, qty: line.qty })),
-        total: subtotal,
-      });
-      setShowPayNowPopup(true);
-    };
+    setPendingOrder({
+      mode: serviceMode,
+      destination,
+      lines: cart.map((line) => ({ name: line.item.name, qty: line.qty })),
+      total: subtotal,
+    });
+    setShowPayNowPopup(true);
+  };
 
-  const finalizeOrder = async (method: Exclude<KitchenPaymentMethod, "credit">) => {
+  const finalizeOrder = async (method: PaidKitchenPaymentMethod) => {
     if (isDirector) return;
     if (!pendingOrder) return;
 
@@ -739,10 +740,10 @@ export default function KitchenPage() {
     }
   };
 
-  const updatePastPaymentMethod = async (paymentId: string, method: Exclude<KitchenPaymentMethod, "credit">) => {
+  const updatePastPaymentMethod = async (paymentId: string, method: PaidKitchenPaymentMethod) => {
     const currentPayment = kitchenPayments.find((payment) => payment.id === paymentId && payment.historical);
     if (!currentPayment) return;
-    if (currentPayment.method === method) {
+    if (currentPayment.method === method && currentPayment.status === "completed") {
       setEditingPastPaymentId(null);
       return;
     }
@@ -943,12 +944,12 @@ export default function KitchenPage() {
               <select
                 id="past-kitchen-payment-method"
                 value={pastPaymentMethod}
-                onChange={(event) => setPastPaymentMethod(event.target.value as Exclude<KitchenPaymentMethod, "credit">)}
+                onChange={(event) => setPastPaymentMethod(event.target.value as PaidKitchenPaymentMethod)}
                 className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm sm:max-w-xs"
               >
                 <option value="cash">Cash</option>
-                <option value="card">Card</option>
                 <option value="mobile">Mobile Money</option>
+                <option value="bank">Bank</option>
               </select>
             </div>
             <div className="flex justify-between border-t pt-4 text-lg font-black">
@@ -999,12 +1000,12 @@ export default function KitchenPage() {
                           aria-label={`Payment method for ${payment.code}`}
                           value={pastPaymentMethodDraft}
                           disabled={updatingPastPaymentId === payment.id}
-                          onChange={(event) => setPastPaymentMethodDraft(event.target.value as Exclude<KitchenPaymentMethod, "credit">)}
+                          onChange={(event) => setPastPaymentMethodDraft(event.target.value as PaidKitchenPaymentMethod)}
                           className="h-9 min-w-32 rounded-md border border-input bg-background px-2 py-1 text-xs font-black uppercase tracking-wider disabled:cursor-wait disabled:opacity-60"
                         >
                           <option value="cash">Cash</option>
-                          <option value="card">Card</option>
                           <option value="mobile">Mobile Money</option>
+                          <option value="bank">Bank</option>
                         </select>
                       ) : (
                         <span className="font-black uppercase text-[10px] tracking-widest">
@@ -1043,7 +1044,7 @@ export default function KitchenPage() {
                           variant="outline"
                           onClick={() => {
                             setEditingPastPaymentId(payment.id);
-                            setPastPaymentMethodDraft(payment.method === "credit" ? "cash" : payment.method);
+                            setPastPaymentMethodDraft(payment.method === "credit" ? "cash" : payment.method === "card" ? "bank" : payment.method);
                             setPastPaymentUpdateFeedback("");
                           }}
                           className="font-black uppercase text-[10px] tracking-widest"
@@ -1623,17 +1624,17 @@ export default function KitchenPage() {
           <Card className="w-full max-w-md">
             <CardHeader>
               <CardTitle className="text-xl font-black uppercase tracking-tight">Pay Now Method</CardTitle>
-              <CardDescription>Select cash, card, or mobile</CardDescription>
+              <CardDescription>Select cash, mobile, or bank</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <Button onClick={() => finalizeOrder("cash")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
                 Cash
               </Button>
-              <Button onClick={() => finalizeOrder("card")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
-                Card
-              </Button>
               <Button onClick={() => finalizeOrder("mobile")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
                 Mobile
+              </Button>
+              <Button onClick={() => finalizeOrder("bank")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
+                Bank
               </Button>
               <Button
                 variant="outline"

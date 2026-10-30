@@ -17,9 +17,9 @@ import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/ap
 
 type PaymentsTab = "reception" | "kitchen" | "barista";
 type PaymentDateFilter = "all" | "date";
-type PaymentMethod = "cash" | "card" | "mobile-money" | "credit";
-type KitchenPaymentMethod = "cash" | "card" | "mobile" | "credit";
-type BaristaPaymentMethod = "cash" | "card" | "mobile" | "credit";
+type PaymentMethod = "cash" | "card" | "mobile-money" | "bank" | "credit";
+type KitchenPaymentMethod = "cash" | "card" | "mobile" | "bank" | "credit";
+type BaristaPaymentMethod = "cash" | "card" | "mobile" | "bank" | "credit";
 type TransactionStatus = "completed" | "credit" | "checked-out";
 type KitchenPaymentStatus = "completed" | "credit";
 type BaristaPaymentStatus = "completed" | "credit";
@@ -448,7 +448,7 @@ export default function PaymentsPage() {
     }
   };
 
-  const applyPaidMethod = async (method: "cash" | "card" | "mobile") => {
+  const applyPaidMethod = async (method: "cash" | "card" | "mobile" | "bank") => {
     if (!selectedCredit || savingCreditPayment) return;
 
     const updatedAt = Date.now();
@@ -784,12 +784,18 @@ export default function PaymentsPage() {
               <Button disabled={savingCreditPayment} onClick={() => void applyPaidMethod("cash")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
                 {savingCreditPayment ? "Saving..." : "Cash"}
               </Button>
-              <Button disabled={savingCreditPayment} onClick={() => void applyPaidMethod("card")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
-                Card
-              </Button>
               <Button disabled={savingCreditPayment} onClick={() => void applyPaidMethod("mobile")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
                 Mobile
               </Button>
+              {selectedCredit?.source === "booking" ? (
+                <Button disabled={savingCreditPayment} onClick={() => void applyPaidMethod("card")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
+                  Card
+                </Button>
+              ) : (
+                <Button disabled={savingCreditPayment} onClick={() => void applyPaidMethod("bank")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
+                  Bank
+                </Button>
+              )}
               {creditPaymentFeedback && (
                 <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs font-bold text-amber-800">
                   {creditPaymentFeedback}
