@@ -339,6 +339,7 @@ export default function BaristaPage() {
   const isBaristaRestock = role === "barista" && initialView === "restock";
   const isBaristaPastSales = role === "barista" && initialView === "past-sales";
   const [managerTab, setManagerTab] = useState<"inventory" | "finance" | "sales" | "drinks">("inventory");
+  const [showManagerItemEditor, setShowManagerItemEditor] = useState(false);
   const [restockDialogOpen, setRestockDialogOpen] = useState(false);
   const [restockTargetItem, setRestockTargetItem] = useState<BaristaManagerPricingRow | null>(null);
   const managerSaveBusy = useRef(false);
@@ -346,7 +347,6 @@ export default function BaristaPage() {
   const restockOperationItemId = useRef("");
   const [restockQtyInput, setRestockQtyInput] = useState("");
   const [restockBuyingPriceInput, setRestockBuyingPriceInput] = useState("");
-  const [isAddItemDialogOpen, setIsAddItemDialogOpen] = useState(false);
   const [drinkEditId, setDrinkEditId] = useState<string | null>(null);
   const [drinkName, setDrinkName] = useState("");
   const [drinkPrice, setDrinkPrice] = useState("");
@@ -1229,6 +1229,15 @@ export default function BaristaPage() {
     () => stockInHistory.reduce((sum, entry) => sum + entry.quantity * entry.buyingPrice, 0),
     [stockInHistory],
   );
+  const restockedQuantityByItem = useMemo(() => {
+    const quantities = new Map<string, number>();
+    for (const entry of stockInHistory) {
+      if (entry.quantity <= 0) continue;
+      const target = entry.itemId || normalizeBaristaTarget(entry.itemName);
+      quantities.set(target, (quantities.get(target) ?? 0) + entry.quantity);
+    }
+    return quantities;
+  }, [stockInHistory]);
 
   useEffect(() => {
     if (!stockHistoryReady || !posHydrated || startingCapital || startingCapitalCaptureBusy.current || baristaInventoryRows.length === 0 || (role !== "manager" && role !== "director")) return;
@@ -1332,6 +1341,7 @@ export default function BaristaPage() {
             <TableRow>
               <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Item</TableHead>
               <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Stock Qty</TableHead>
+              <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Restocked Qty</TableHead>
               <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Qty Sold</TableHead>
               <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Buying Price</TableHead>
               <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Current Stock Value</TableHead>
@@ -1345,6 +1355,7 @@ export default function BaristaPage() {
               <TableRow key={item.id}>
                 <TableCell className="font-bold">{item.displayName}</TableCell>
                 <TableCell className="font-bold">{item.stock} {item.unit}</TableCell>
+                <TableCell className="font-bold">{restockedQuantityByItem.get(item.id) ?? restockedQuantityByItem.get(normalizeBaristaTarget(item.displayName)) ?? 0} {getTotLimit(item) > 0 ? "bottles" : item.unit}</TableCell>
                 <TableCell className="font-bold">{item.quantitySold}</TableCell>
                 <TableCell className="font-bold">
                   {item.buyingPrice > 0 ? `TSh ${item.buyingPrice.toLocaleString()} / ${buyingPriceUnit(item.displayName)}` : "-"}
@@ -1361,7 +1372,7 @@ export default function BaristaPage() {
             ))}
             {baristaInventoryRows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={8} className="py-10 text-center font-black uppercase text-[10px] tracking-widest text-muted-foreground">
+                <TableCell colSpan={9} className="py-10 text-center font-black uppercase text-[10px] tracking-widest text-muted-foreground">
                   No barista finance records
                 </TableCell>
               </TableRow>
@@ -2349,7 +2360,8 @@ export default function BaristaPage() {
           <Button
             onClick={() => {
               resetDrinkForm();
-              setManagerTab("drinks");
+              if (isManager) setShowManagerItemEditor(true);
+              else setManagerTab("drinks");
             }}
             className="gap-2 font-black uppercase tracking-widest"
           >
@@ -2379,19 +2391,18 @@ export default function BaristaPage() {
             </CardContent>
           </Card>
         </div>}
-        <Tabs value={managerTab} onValueChange={(value) => setManagerTab(value as "inventory" | "finance" | "sales" | "drinks")}>
+        <Tabs value={managerTab} onValueChange={(value) => { setShowManagerItemEditor(false); setManagerTab(value as "inventory" | "finance" | "sales" | "drinks"); }}>
           <TabsList className={isBaristaRestock ? "grid h-10 w-full grid-cols-2 md:w-[360px]" : "h-10"}>
             {isManager && <TabsTrigger value="finance" className="font-black uppercase text-[10px] tracking-widest">Finance</TabsTrigger>}
             <TabsTrigger value="inventory" className="font-black uppercase text-[10px] tracking-widest">
               {isBaristaRestock ? "Restock / Stock In" : "Inventory"}
             </TabsTrigger>
             {isManager && <TabsTrigger value="sales" className="font-black uppercase text-[10px] tracking-widest">Sales</TabsTrigger>}
-            <TabsTrigger value="drinks" className="font-black uppercase text-[10px] tracking-widest">
-              {isBaristaRestock ? "Add Items" : "Items / Drinks"}
-            </TabsTrigger>
+            {isBaristaRestock && <TabsTrigger value="drinks" className="font-black uppercase text-[10px] tracking-widest">Add Items</TabsTrigger>}
           </TabsList>
         </Tabs>
-        {managerTab === "drinks" ? renderDrinksManager() : managerTab === "finance" ? renderFinanceTable() : managerTab === "sales" ? renderDirectorSalesTable() : (
+        {showManagerItemEditor && isManager && <Button variant="outline" onClick={() => setShowManagerItemEditor(false)}>Back to Bar</Button>}
+        {showManagerItemEditor || managerTab === "drinks" ? renderDrinksManager() : managerTab === "finance" ? renderFinanceTable() : managerTab === "sales" ? renderDirectorSalesTable() : (
           <Card className="border-none shadow-sm">
             <CardHeader>
               <CardTitle className="text-xl font-black uppercase tracking-tight">Barista Inventory & Pricing</CardTitle>

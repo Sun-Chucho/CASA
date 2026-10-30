@@ -8,6 +8,9 @@ export const BAR_CATEGORIES = ["Local Beers", "Imported Beers", "Soft Drinks", "
 export type BarCategory = typeof BAR_CATEGORIES[number];
 export const BAR_CATALOG = rows as Array<{ name: string; category: BarCategory; buyingPrice: number; sellingPrice: number; soldByTot: boolean; openingStock: number; buyingPriceUnit?: "tot" }>;
 const VERSION = "cassa-bar-catalog-2026-10-24-opening-counts";
+const JAGER_750_CORRECTION_VERSION = "cassa-jagermeister-750ml-one-bottle-v1";
+const STARTING_CAPITAL_KEY = "orange-hotel-barista-starting-capital-v1";
+const JAGER_750_OLD_OPENING_STOCK = 61;
 type Versioned = { catalogVersion?: string };
 type MenuItem = Versioned & { id: string; name: string; price: number; buyingPrice?: number; category: string; prepMinutes: number; deletedAt?: number; updatedAt?: number };
 type Snapshot = { tickets: unknown[]; ticketSeq: number; payments: unknown[]; menuItems: MenuItem[] };
@@ -34,13 +37,17 @@ export function openingBottleBalance(row: (typeof BAR_CATALOG)[number]) {
 // This authorized one-time baseline replaces existing counts with the supplied opening stock.
 // Later sales, purchases and manager edits survive reloads through the per-record version.
 export async function syncBarCatalogToPos() {
-  await transactSyncedStorageKeys([STORAGE_MAIN_STORE_ITEMS, STORAGE_INVENTORY_ITEMS, STORAGE_BARISTA_STATE], (current) => {
+  await transactSyncedStorageKeys([STORAGE_MAIN_STORE_ITEMS, STORAGE_INVENTORY_ITEMS, STORAGE_BARISTA_STATE, STARTING_CAPITAL_KEY], (current) => {
     const stores = [...((current[STORAGE_MAIN_STORE_ITEMS] as MainStoreItem[] | null) ?? [])];
     const inventory = [...((current[STORAGE_INVENTORY_ITEMS] as InventoryItem[] | null) ?? [])];
     const snapshot = (current[STORAGE_BARISTA_STATE] as Snapshot | null) ?? { tickets: [], ticketSeq: 490, payments: [], menuItems: [] };
     const menu = [...(snapshot.menuItems ?? [])];
+    let correctedJagerStock = false;
+    const capital = current[STARTING_CAPITAL_KEY] as { amount: number; capturedAt: number; jager750Correction?: string } | null;
     for (const row of BAR_CATALOG) {
       const target = key(row.name);
+      const isJager750 = row.name === "JAGERMEISTER 750 Mls";
+      const rowVersion = isJager750 ? JAGER_750_CORRECTION_VERSION : VERSION;
       const si = stores.findIndex((item) => item.lane === "barista" && key(getStoreItemLabel(item)) === target);
       const ii = inventory.findIndex((item) => item.category.toLowerCase() === "bar" && key(item.size ? `${item.name} ${item.size}` : item.name) === target);
       const mi = menu.findIndex((item) => key(item.name) === target);
@@ -49,13 +56,27 @@ export async function syncBarCatalogToPos() {
       const name = row.name;
       const unit = row.soldByTot ? "Bottle (sold by tot)" : row.category === "Cigarettes" ? "Packet" : "Bottle / unit";
       const balance = openingBottleBalance(row);
-      if (si < 0) stores.push({ id: `catalog-bar-${target}`, name, size: "", stock: balance.stock, unit, minStock: 0, lane: "barista", subCategory: row.category, buyingPrice: row.buyingPrice, sellingPrice: row.sellingPrice, totLimit: balance.totLimit, totSold: balance.totSold, updatedAt: now, catalogVersion: VERSION } as MainStoreItem);
-      else if ((stores[si] as MainStoreItem & Versioned).catalogVersion !== VERSION) stores[si] = { ...stores[si], ...(row.name === "SMIRNOFF GUARANA" ? { name: row.name } : {}), stock: balance.stock, totSold: balance.totSold, subCategory: row.category, buyingPrice: row.buyingPrice, sellingPrice: row.sellingPrice, totLimit: balance.totLimit, updatedAt: now, catalogVersion: VERSION } as MainStoreItem;
-      if (ii < 0) inventory.push({ id: `catalog-inv-${target}`, barcode: "", name, category: "Bar", subCategory: row.category, size: "", stock: balance.stock, totSold: balance.totSold, totPerBottle: balance.totLimit || undefined, buyingPrice: row.buyingPrice, sellingPrice: row.sellingPrice, price: row.sellingPrice, status: "ACTIVE", minStock: 0, unit, updatedAt: now, catalogVersion: VERSION } as InventoryItem);
-      else if ((inventory[ii] as InventoryItem & Versioned).catalogVersion !== VERSION) inventory[ii] = { ...inventory[ii], ...(row.name === "SMIRNOFF GUARANA" ? { name: row.name } : {}), stock: balance.stock, totSold: balance.totSold, totPerBottle: balance.totLimit || undefined, subCategory: row.category, buyingPrice: row.buyingPrice, sellingPrice: row.sellingPrice, price: row.sellingPrice, updatedAt: now, catalogVersion: VERSION } as InventoryItem;
+      const correctedStock = (stock: number) => Math.max(0, stock - (JAGER_750_OLD_OPENING_STOCK - row.openingStock));
+      if (si < 0) stores.push({ id: `catalog-bar-${target}`, name, size: "", stock: balance.stock, unit, minStock: 0, lane: "barista", subCategory: row.category, buyingPrice: row.buyingPrice, sellingPrice: row.sellingPrice, totLimit: balance.totLimit, totSold: balance.totSold, updatedAt: now, catalogVersion: rowVersion } as MainStoreItem);
+      else if ((stores[si] as MainStoreItem & Versioned).catalogVersion !== rowVersion) {
+        const old = stores[si] as MainStoreItem & Versioned;
+        const oldBaseline = isJager750 && old.catalogVersion === VERSION;
+        const needsCorrection = isJager750 && old.stock > row.openingStock && (oldBaseline || (!old.catalogVersion && old.stock === JAGER_750_OLD_OPENING_STOCK));
+        if (oldBaseline || needsCorrection) correctedJagerStock = true;
+        stores[si] = { ...old, ...(row.name === "SMIRNOFF GUARANA" ? { name: row.name } : {}), stock: isJager750 ? (needsCorrection ? correctedStock(old.stock) : old.stock) : balance.stock, totSold: balance.totSold, subCategory: row.category, buyingPrice: row.buyingPrice, sellingPrice: row.sellingPrice, totLimit: balance.totLimit, updatedAt: now, catalogVersion: rowVersion } as MainStoreItem;
+      }
+      if (ii < 0) inventory.push({ id: `catalog-inv-${target}`, barcode: "", name, category: "Bar", subCategory: row.category, size: "", stock: balance.stock, totSold: balance.totSold, totPerBottle: balance.totLimit || undefined, buyingPrice: row.buyingPrice, sellingPrice: row.sellingPrice, price: row.sellingPrice, status: "ACTIVE", minStock: 0, unit, updatedAt: now, catalogVersion: rowVersion } as InventoryItem);
+      else if ((inventory[ii] as InventoryItem & Versioned).catalogVersion !== rowVersion) {
+        const old = inventory[ii] as InventoryItem & Versioned;
+        const needsCorrection = isJager750 && old.stock > row.openingStock && (old.catalogVersion === VERSION || (!old.catalogVersion && old.stock === JAGER_750_OLD_OPENING_STOCK));
+        inventory[ii] = { ...old, ...(row.name === "SMIRNOFF GUARANA" ? { name: row.name } : {}), stock: isJager750 ? (needsCorrection ? correctedStock(old.stock) : old.stock) : balance.stock, totSold: balance.totSold, totPerBottle: balance.totLimit || undefined, subCategory: row.category, buyingPrice: row.buyingPrice, sellingPrice: row.sellingPrice, price: row.sellingPrice, updatedAt: now, catalogVersion: rowVersion } as InventoryItem;
+      }
       if (mi < 0) menu.push({ id: `catalog-menu-${target}`, name, price: row.sellingPrice, buyingPrice: row.buyingPrice, category: row.category, prepMinutes: 2, updatedAt: now, catalogVersion: VERSION });
       else if (menu[mi].catalogVersion !== VERSION) menu[mi] = { ...menu[mi], ...(row.name === "SMIRNOFF GUARANA" ? { name: row.name } : {}), category: row.category, buyingPrice: row.buyingPrice, price: row.sellingPrice, catalogVersion: VERSION };
     }
-    return { [STORAGE_MAIN_STORE_ITEMS]: stores, [STORAGE_INVENTORY_ITEMS]: inventory, [STORAGE_BARISTA_STATE]: { ...snapshot, menuItems: menu } };
+    const correctedCapital = correctedJagerStock && capital && capital.jager750Correction !== JAGER_750_CORRECTION_VERSION
+      ? { ...capital, amount: Math.max(0, capital.amount - (JAGER_750_OLD_OPENING_STOCK - 1) * (BAR_CATALOG.find((row) => row.name === "JAGERMEISTER 750 Mls")?.buyingPrice ?? 0)), jager750Correction: JAGER_750_CORRECTION_VERSION }
+      : capital;
+    return { [STORAGE_MAIN_STORE_ITEMS]: stores, [STORAGE_INVENTORY_ITEMS]: inventory, [STORAGE_BARISTA_STATE]: { ...snapshot, menuItems: menu }, [STARTING_CAPITAL_KEY]: correctedCapital };
   });
 }
