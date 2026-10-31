@@ -21,7 +21,7 @@ import { findStoreItemForMenuName, formatTotStatus, getMenuStockStatus, getRemai
 import { printDepartmentReceipt } from "@/app/lib/receipt-print";
 import { getActiveBaristaStateKey, readJson, readPosState, writeJson, writePosState } from "@/app/lib/storage";
 import { BARISTA_INVENTORY_SEED } from "@/app/lib/seed-barista-data";
-import { BAR_CATEGORIES, BarCategory, buyingPriceUnit, syncBarCatalogToPos } from "@/app/lib/bar-catalog";
+import { BAR_CATEGORIES, BarCategory, buyingPriceUnit, JAGER_750_CORRECTION_VERSION, syncBarCatalogToPos } from "@/app/lib/bar-catalog";
 import { STOCK_IN_HISTORY_KEY, StockInEntry } from "@/app/lib/bar-stock-history";
 import { useIsDirector } from "@/hooks/use-is-director";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -156,7 +156,7 @@ const STORAGE_CANCELLED = "orange-hotel-cancelled-tickets";
 const STORAGE_WASTE = "orange-hotel-barista-waste";
 const STORAGE_STARTING_CAPITAL = "orange-hotel-barista-starting-capital-v1";
 
-type StartingCapitalSnapshot = { amount: number; capturedAt: number };
+type StartingCapitalSnapshot = { amount: number; capturedAt: number; jager750Correction?: string };
 
 const BARISTA_CATEGORIES: Array<{ value: BaristaCategory; label: string }> = [
   { value: "all", label: "All" },
@@ -1246,7 +1246,7 @@ export default function BaristaPage() {
     // then store it once so sales, restocks and price edits cannot change it.
     const openingAmount = Math.max(0, baristaInventoryRows.reduce((sum, item) => sum + item.capital + item.costOfGoods, 0) - restockCapital);
     startingCapitalCaptureBusy.current = true;
-    void transactSyncedStorageValue<StartingCapitalSnapshot>(STORAGE_STARTING_CAPITAL, (current) => current ?? { amount: openingAmount, capturedAt: Date.now() })
+    void transactSyncedStorageValue<StartingCapitalSnapshot>(STORAGE_STARTING_CAPITAL, (current) => current ?? { amount: openingAmount, capturedAt: Date.now(), jager750Correction: JAGER_750_CORRECTION_VERSION })
       .then(setStartingCapital)
       .catch((error) => console.error("Starting capital could not be saved", error))
       .finally(() => { startingCapitalCaptureBusy.current = false; });

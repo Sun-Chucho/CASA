@@ -8,9 +8,11 @@ export const BAR_CATEGORIES = ["Local Beers", "Imported Beers", "Soft Drinks", "
 export type BarCategory = typeof BAR_CATEGORIES[number];
 export const BAR_CATALOG = rows as Array<{ name: string; category: BarCategory; buyingPrice: number; sellingPrice: number; soldByTot: boolean; openingStock: number; buyingPriceUnit?: "tot" }>;
 const VERSION = "cassa-bar-catalog-2026-10-24-opening-counts";
-const JAGER_750_CORRECTION_VERSION = "cassa-jagermeister-750ml-one-bottle-v1";
+export const JAGER_750_CORRECTION_VERSION = "cassa-jagermeister-750ml-one-bottle-v1";
 const STARTING_CAPITAL_KEY = "orange-hotel-barista-starting-capital-v1";
 const JAGER_750_OLD_OPENING_STOCK = 61;
+// Snapshots captured before this catalog correction contain the 60 excess bottles.
+const JAGER_750_CORRECTION_COMMITTED_AT = Date.parse("2026-10-30T08:52:09Z");
 type Versioned = { catalogVersion?: string };
 type MenuItem = Versioned & { id: string; name: string; price: number; buyingPrice?: number; category: string; prepMinutes: number; deletedAt?: number; updatedAt?: number };
 type Snapshot = { tickets: unknown[]; ticketSeq: number; payments: unknown[]; menuItems: MenuItem[] };
@@ -42,7 +44,6 @@ export async function syncBarCatalogToPos() {
     const inventory = [...((current[STORAGE_INVENTORY_ITEMS] as InventoryItem[] | null) ?? [])];
     const snapshot = (current[STORAGE_BARISTA_STATE] as Snapshot | null) ?? { tickets: [], ticketSeq: 490, payments: [], menuItems: [] };
     const menu = [...(snapshot.menuItems ?? [])];
-    let correctedJagerStock = false;
     const capital = current[STARTING_CAPITAL_KEY] as { amount: number; capturedAt: number; jager750Correction?: string } | null;
     for (const row of BAR_CATALOG) {
       const target = key(row.name);
@@ -62,7 +63,6 @@ export async function syncBarCatalogToPos() {
         const old = stores[si] as MainStoreItem & Versioned;
         const oldBaseline = isJager750 && old.catalogVersion === VERSION;
         const needsCorrection = isJager750 && old.stock > row.openingStock && (oldBaseline || (!old.catalogVersion && old.stock === JAGER_750_OLD_OPENING_STOCK));
-        if (oldBaseline || needsCorrection) correctedJagerStock = true;
         stores[si] = { ...old, ...(row.name === "SMIRNOFF GUARANA" ? { name: row.name } : {}), stock: isJager750 ? (needsCorrection ? correctedStock(old.stock) : old.stock) : balance.stock, totSold: balance.totSold, subCategory: row.category, buyingPrice: row.buyingPrice, sellingPrice: row.sellingPrice, totLimit: balance.totLimit, updatedAt: now, catalogVersion: rowVersion } as MainStoreItem;
       }
       if (ii < 0) inventory.push({ id: `catalog-inv-${target}`, barcode: "", name, category: "Bar", subCategory: row.category, size: "", stock: balance.stock, totSold: balance.totSold, totPerBottle: balance.totLimit || undefined, buyingPrice: row.buyingPrice, sellingPrice: row.sellingPrice, price: row.sellingPrice, status: "ACTIVE", minStock: 0, unit, updatedAt: now, catalogVersion: rowVersion } as InventoryItem);
@@ -74,7 +74,9 @@ export async function syncBarCatalogToPos() {
       if (mi < 0) menu.push({ id: `catalog-menu-${target}`, name, price: row.sellingPrice, buyingPrice: row.buyingPrice, category: row.category, prepMinutes: 2, updatedAt: now, catalogVersion: VERSION });
       else if (menu[mi].catalogVersion !== VERSION) menu[mi] = { ...menu[mi], ...(row.name === "SMIRNOFF GUARANA" ? { name: row.name } : {}), category: row.category, buyingPrice: row.buyingPrice, price: row.sellingPrice, catalogVersion: VERSION };
     }
-    const correctedCapital = correctedJagerStock && capital && capital.jager750Correction !== JAGER_750_CORRECTION_VERSION
+    // Stock and capital can be synced on different visits. Apply the opening
+    // correction to older snapshots even when the stock row is already updated.
+    const correctedCapital = capital && capital.capturedAt < JAGER_750_CORRECTION_COMMITTED_AT && capital.jager750Correction !== JAGER_750_CORRECTION_VERSION
       ? { ...capital, amount: Math.max(0, capital.amount - (JAGER_750_OLD_OPENING_STOCK - 1) * (BAR_CATALOG.find((row) => row.name === "JAGERMEISTER 750 Mls")?.buyingPrice ?? 0)), jager750Correction: JAGER_750_CORRECTION_VERSION }
       : capital;
     return { [STORAGE_MAIN_STORE_ITEMS]: stores, [STORAGE_INVENTORY_ITEMS]: inventory, [STORAGE_BARISTA_STATE]: { ...snapshot, menuItems: menu }, [STARTING_CAPITAL_KEY]: correctedCapital };
