@@ -47,17 +47,26 @@ export function isTotTrackedMenuItem(menuName: string): boolean {
   return /\s*\(?TOTS?\)?$/i.test(menuName);
 }
 
+/** Keep a signed tot balance in whole bottles plus a 0..limit-1 sold remainder. */
+export function adjustSignedTotBalance(stock: number, totSold: number, limit: number, deltaTots: number) {
+  if (!Number.isFinite(limit) || limit <= 0) throw new Error("A positive tot limit is required.");
+  const remaining = stock * limit - totSold + deltaTots;
+  const nextStock = Math.ceil(remaining / limit);
+  return { stock: nextStock, totSold: nextStock * limit - remaining };
+}
+
 export function getRemainingTots(item: Pick<MainStoreItem, "name" | "size" | "stock" | "totLimit" | "totSold">): number {
   const limit = getTotLimit(item);
   if (limit <= 0) return 0;
   const sold = typeof item.totSold === "number" ? item.totSold : 0;
-  return Math.max(0, item.stock * limit - sold);
+  return item.stock * limit - sold;
 }
 
 export function formatTotStatus(item: Pick<MainStoreItem, "name" | "size" | "stock" | "totLimit" | "totSold">): string {
   const limit = getTotLimit(item);
   if (limit <= 0) return "-";
-  return `${getRemainingTots(item)} tots left`;
+  const remaining = getRemainingTots(item);
+  return remaining < 0 ? `${Math.abs(remaining)} tots owed` : `${remaining} tots left`;
 }
 
 export function findStoreItemForMenuName(items: MainStoreItem[], menuName: string): MainStoreItem | undefined {
@@ -113,13 +122,15 @@ export function getMenuStockStatus(items: MainStoreItem[], menuName: string) {
   if (isTotTrackedMenuItem(menuName)) {
     const remainingTots = getRemainingTots(matchedStoreItem);
     return {
-      available: remainingTots > 0,
-      label: `${remainingTots} tots left`,
+      available: true,
+      label: remainingTots < 0 ? `${Math.abs(remainingTots)} tots owed` : `${remainingTots} tots left`,
     };
   }
 
   return {
-    available: matchedStoreItem.stock > 0,
-    label: `${matchedStoreItem.stock} ${matchedStoreItem.unit} left`,
+    available: true,
+    label: matchedStoreItem.stock < 0
+      ? `${Math.abs(matchedStoreItem.stock)} ${matchedStoreItem.unit} owed`
+      : `${matchedStoreItem.stock} ${matchedStoreItem.unit} left`,
   };
 }

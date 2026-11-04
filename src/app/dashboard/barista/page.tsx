@@ -17,7 +17,7 @@ import {
   StoreMovementLog,
   StoreUsageLog,
 } from "@/app/lib/inventory-transfer";
-import { findStoreItemForMenuName, formatTotStatus, getMenuStockStatus, getRemainingTots, getTotLimit, isTotTrackedMenuItem, normalizeBaristaMenuItems } from "@/app/lib/barista-stock";
+import { adjustSignedTotBalance, findStoreItemForMenuName, formatTotStatus, getMenuStockStatus, getRemainingTots, getTotLimit, isTotTrackedMenuItem, normalizeBaristaMenuItems } from "@/app/lib/barista-stock";
 import { printDepartmentReceipt } from "@/app/lib/receipt-print";
 import { getActiveBaristaStateKey, readJson, readPosState, writeJson, writePosState } from "@/app/lib/storage";
 import { BARISTA_INVENTORY_SEED } from "@/app/lib/seed-barista-data";
@@ -596,95 +596,83 @@ export default function BaristaPage() {
       .filter((entry) => entry.lane === "barista" && !entry.deletedAt)
       .map((entry) => ({ ...entry, lane: "barista" as const }));
     const nextBaristaItems = [...currentBaristaItems];
+    const touchedStoreIds = new Set<string>();
     let nextInventoryItems = inventoryItems;
 
     for (const line of lines) {
+      if (!Number.isFinite(line.qty) || line.qty <= 0) continue;
+      const delta = direction === "consume" ? -line.qty : line.qty;
       const matchedItem = findStoreItemForMenuName(nextBaristaItems, line.name);
       if (!matchedItem) {
         const inventoryMatch = nextInventoryItems.find((item) => {
+          if (item.category.trim().toLowerCase() !== "bar") return false;
           const itemName = item.size ? `${item.name} ${item.size}` : item.name;
           return normalizeBaristaTarget(itemName) === normalizeBaristaTarget(line.name) || normalizeBaristaTarget(item.name) === normalizeBaristaTarget(line.name);
         });
-
-        if (!inventoryMatch) continue;
-        const availableUnits = typeof inventoryMatch.stock === "number" ? inventoryMatch.stock : 0;
-        const availableTots = typeof inventoryMatch.totPerBottle === "number" && inventoryMatch.totPerBottle > 0
-          ? availableUnits * inventoryMatch.totPerBottle - (typeof inventoryMatch.totSold === "number" ? inventoryMatch.totSold : 0)
-          : availableUnits;
-
-        if (direction === "consume" && line.qty > availableTots) {
-          return { ok: false as const, error: `Not enough stock for ${line.name}.` };
+        if (!inventoryMatch) {
+          if (direction === "restore") continue;
+          const isTotSale = isTotTrackedMenuItem(line.name);
+          const totLimit = isTotSale ? getTotLimit({ name: line.name, size: "", totLimit: undefined }) || 30 : 0;
+          const balance = totLimit > 0
+            ? adjustSignedTotBalance(0, 0, totLimit, delta)
+            : { stock: delta, totSold: 0 };
+          const newId = `bs-sale-${crypto.randomUUID()}`;
+          const name = line.name.replace(/\s*\(?TOTS?\)?$/i, "").trim();
+          nextBaristaItems.push({ id: newId, name, size: "", ...balance, unit: totLimit > 0 ? "Bottle (sold by tot)" : "unit", minStock: 0, lane: "barista", totLimit, updatedAt });
+          nextInventoryItems = [...nextInventoryItems, { id: `inv-${newId}`, barcode: "", name, category: "Bar", size: "", ...balance, totPerBottle: totLimit || undefined, buyingPrice: 0, sellingPrice: 0, status: "ACTIVE", minStock: 0, unit: totLimit > 0 ? "Bottle (sold by tot)" : "unit", updatedAt }];
+          continue;
         }
-
-        nextInventoryItems = adjustInventoryQuantity(nextInventoryItems, inventoryMatch.category, line.name, direction === "consume" ? -line.qty : line.qty);
+        const totLimit = inventoryMatch.totPerBottle ?? getTotLimit({ name: inventoryMatch.name, size: inventoryMatch.size ?? "", totLimit: undefined });
+        const isTotSale = isTotTrackedMenuItem(line.name) || totLimit > 0;
+        if (isTotSale && totLimit <= 0) return { ok: false as const, error: `Missing tot limit for ${line.name}.` };
+        const balance = isTotSale
+          ? adjustSignedTotBalance(inventoryMatch.stock, inventoryMatch.totSold ?? 0, totLimit, delta)
+          : { stock: inventoryMatch.stock + delta, totSold: inventoryMatch.totSold ?? 0 };
+        nextInventoryItems = nextInventoryItems.map((item) => item.id === inventoryMatch.id
+          ? { ...item, ...balance, updatedAt }
+          : item);
         continue;
       }
 
       const itemIndex = nextBaristaItems.findIndex((entry) => entry.id === matchedItem.id);
       if (itemIndex < 0) continue;
-
       const currentItem = nextBaristaItems[itemIndex];
-      const inventoryLabel = getStoreItemLabel(currentItem);
-      if (isTotTrackedMenuItem(line.name)) {
-        const totLimit = getTotLimit(currentItem);
-        if (totLimit <= 0) {
-          return { ok: false as const, error: `Missing tot limit for ${line.name}.` };
-        }
-
-        const currentTotSold = typeof currentItem.totSold === "number" && currentItem.totSold > 0 ? currentItem.totSold : 0;
-        if (direction === "consume") {
-          const remainingTots = getRemainingTots(currentItem);
-          if (line.qty > remainingTots) {
-            return { ok: false as const, error: `Not enough tots remaining for ${line.name}.` };
-          }
-
-          const totalTotSold = currentTotSold + line.qty;
-          const bottlesConsumed = Math.floor(totalTotSold / totLimit);
-          nextBaristaItems[itemIndex] = {
-            ...currentItem,
-            stock: currentItem.stock - bottlesConsumed,
-            totLimit,
-            totSold: totalTotSold % totLimit,
-            updatedAt,
-          };
-          nextInventoryItems = adjustInventoryQuantity(nextInventoryItems, "Bar", inventoryLabel, -bottlesConsumed);
-          continue;
-        }
-
-        const totalTotSold = currentTotSold - line.qty;
-        if (totalTotSold >= 0) {
-          nextBaristaItems[itemIndex] = {
-            ...currentItem,
-            totLimit,
-            totSold: totalTotSold,
-            updatedAt,
-          };
-          continue;
-        }
-
-        const bottlesRestored = Math.ceil(Math.abs(totalTotSold) / totLimit);
+      touchedStoreIds.add(currentItem.id);
+      const totLimit = getTotLimit(currentItem);
+      if (isTotTrackedMenuItem(line.name) || totLimit > 0) {
+        if (totLimit <= 0) return { ok: false as const, error: `Missing tot limit for ${line.name}.` };
         nextBaristaItems[itemIndex] = {
           ...currentItem,
-          stock: currentItem.stock + bottlesRestored,
+          ...adjustSignedTotBalance(currentItem.stock, currentItem.totSold ?? 0, totLimit, delta),
           totLimit,
-          totSold: totalTotSold + bottlesRestored * totLimit,
           updatedAt,
         };
-        nextInventoryItems = adjustInventoryQuantity(nextInventoryItems, "Bar", inventoryLabel, bottlesRestored);
-        continue;
+      } else {
+        nextBaristaItems[itemIndex] = { ...currentItem, stock: currentItem.stock + delta, updatedAt };
       }
+    }
 
-      if (direction === "consume") {
-        if (line.qty > currentItem.stock) {
-          return { ok: false as const, error: `Not enough stock for ${line.name}.` };
-        }
-        nextBaristaItems[itemIndex] = { ...currentItem, stock: currentItem.stock - line.qty, updatedAt };
-        nextInventoryItems = adjustInventoryQuantity(nextInventoryItems, "Bar", inventoryLabel, -line.qty);
-        continue;
-      }
+    // Store and shared inventory must show the same signed balance. This also
+    // keeps tot remainders aligned when a sale crosses zero bottles.
+    nextInventoryItems = nextInventoryItems.map((item) => {
+      if (item.category.trim().toLowerCase() !== "bar" || item.status === "INACTIVE") return item;
+      const label = item.size ? `${item.name} ${item.size}` : item.name;
+      const store = nextBaristaItems.find((entry) => normalizeBaristaTarget(getStoreItemLabel(entry)) === normalizeBaristaTarget(label));
+      if (!store || !touchedStoreIds.has(store.id)) return item;
+      return { ...item, stock: store.stock, totSold: store.totSold ?? 0, updatedAt };
+    });
 
-      nextBaristaItems[itemIndex] = { ...currentItem, stock: currentItem.stock + line.qty, updatedAt };
-      nextInventoryItems = adjustInventoryQuantity(nextInventoryItems, "Bar", inventoryLabel, line.qty);
+    for (const store of nextBaristaItems) {
+      if (!touchedStoreIds.has(store.id)) continue;
+      const target = normalizeBaristaTarget(getStoreItemLabel(store));
+      if (nextInventoryItems.some((item) => item.category.trim().toLowerCase() === "bar" && item.status !== "INACTIVE" && normalizeBaristaTarget(item.size ? `${item.name} ${item.size}` : item.name) === target)) continue;
+      nextInventoryItems = [...nextInventoryItems, {
+        id: `inv-sale-${store.id}`, barcode: "", name: store.name, category: "Bar",
+        subCategory: store.subCategory, size: store.size ?? "", stock: store.stock,
+        totPerBottle: getTotLimit(store) || undefined, totSold: store.totSold ?? 0,
+        buyingPrice: store.buyingPrice ?? 0, sellingPrice: store.sellingPrice ?? 0,
+        status: "ACTIVE", minStock: store.minStock, unit: store.unit, updatedAt,
+      }];
     }
 
     const nextStoreItems = [...otherStoreItems, ...deletedBaristaItems, ...nextBaristaItems];
@@ -3109,7 +3097,7 @@ export default function BaristaPage() {
                   return (
                   <div
                     key={item.id}
-                    className={`flex flex-col text-left bg-white border rounded-2xl p-5 transition-all hover:border-primary/50 hover:shadow-md ${!stockStatus.available ? "opacity-50" : ""}`}
+                    className="flex flex-col text-left bg-white border rounded-2xl p-5 transition-all hover:border-primary/50 hover:shadow-md"
                   >
                     <div className="flex items-center justify-between mb-3">
                       <Badge variant="outline" className="uppercase text-[9px] font-black tracking-widest">
@@ -3126,7 +3114,7 @@ export default function BaristaPage() {
                         <Button
                           type="button"
                           onClick={() => addToCart(item)}
-                          disabled={!stockStatus.available || isDirector}
+                          disabled={isDirector}
                           className="h-9 w-full gap-1 font-black uppercase text-[10px] tracking-widest"
                         >
                           <Plus className="w-4 h-4" /> Add
@@ -3241,7 +3229,7 @@ export default function BaristaPage() {
                           <TableCell className="font-bold">{formatTotStatus(item)}</TableCell>
                           <TableCell className="font-bold">{item.minStock}</TableCell>
                           <TableCell className="font-black uppercase text-[10px] tracking-widest">
-                            {item.stock <= 0 ? "Out" : item.stock < item.minStock ? "Low" : "In Stock"}
+                            {item.stock < 0 || (getTotLimit(item) > 0 && getRemainingTots(item) < 0) ? "Owed" : item.stock === 0 ? "Out" : item.stock < item.minStock ? "Low" : "In Stock"}
                           </TableCell>
                         </TableRow>
                       ))}

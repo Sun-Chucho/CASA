@@ -53,6 +53,10 @@ function roundStock(value: number) {
   return Math.max(0, Number(value.toFixed(2)));
 }
 
+function roundSignedStock(value: number) {
+  return Number.isFinite(value) ? Number(value.toFixed(2)) : 0;
+}
+
 function asNumber(value: string) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -93,7 +97,7 @@ function createPurchaseLine(item?: MainStoreItem): KitchenPurchaseLine {
     itemName: item?.name ?? "",
     category: item?.subCategory ?? "",
     unit: item?.unit ?? "kg",
-    previousBalance: roundStock(item?.stock ?? 0),
+    previousBalance: roundSignedStock(item?.stock ?? 0),
     addedQty: 0,
     pricePerUnit: roundStock(item?.buyingPrice ?? 0),
   };
@@ -187,7 +191,7 @@ function getInventoryMatch(inventoryItems: InventoryItem[], storeItem: MainStore
 }
 
 function getPurchaseLineTotalBalance(line: KitchenPurchaseLine) {
-  return roundStock(line.previousBalance + line.addedQty);
+  return roundSignedStock(line.previousBalance + line.addedQty);
 }
 
 function getPurchaseEntryAmount(entry: KitchenPurchaseHistoryEntry) {
@@ -523,12 +527,19 @@ export function KitchenSessionManager({
       return;
     }
 
-    let nextKitchenStore = [...storeItems];
-    let nextInventory = [...inventoryItems];
+    // Bar purchases pay down the latest signed balance, including sales made
+    // after the purchase sheet opened. Record that actual opening balance.
+    let nextKitchenStore = (readJson<MainStoreItem[]>(STORAGE_MAIN_STORE_ITEMS) ?? []).filter((item) => item.lane === department);
+    let nextInventory = readJson<InventoryItem[]>(STORAGE_INVENTORY_ITEMS) ?? [];
+    const recordedLines = department === "barista"
+      ? validLines.map((line) => ({ ...line, previousBalance: nextKitchenStore.find((item) => item.id === line.itemId)?.stock ?? line.previousBalance }))
+      : validLines;
 
-    validLines.forEach((line) => {
-      const totalBalance = roundStock(line.previousBalance + line.addedQty);
+    recordedLines.forEach((line) => {
       const existingStore = line.itemId ? nextKitchenStore.find((item) => item.id === line.itemId) : null;
+      const totalBalance = department === "barista"
+        ? roundSignedStock(line.previousBalance + line.addedQty)
+        : roundStock(line.previousBalance + line.addedQty);
 
       if (existingStore) {
         nextKitchenStore = nextKitchenStore.map((item) =>
@@ -629,7 +640,7 @@ export function KitchenSessionManager({
     writeJson(purchaseHistoryKey, [
       {
         ...purchaseSession,
-        lines: validLines,
+        lines: recordedLines,
         closedAt,
         signoff: closeNotes,
       },
@@ -1096,9 +1107,12 @@ export function KitchenSessionManager({
                     </TableHeader>
                     <TableBody>
                       {filteredPurchaseLines.map((line) => {
-                        const totalBalance = roundStock(line.previousBalance + line.addedQty);
-                        const amount = roundStock(line.addedQty * line.pricePerUnit);
                         const lockStaticPurchaseFields = isBaristaDepartment;
+                        const liveBalance = lockStaticPurchaseFields
+                          ? storeItems.find((item) => item.id === line.itemId)?.stock ?? line.previousBalance
+                          : line.previousBalance;
+                        const totalBalance = roundSignedStock(liveBalance + line.addedQty);
+                        const amount = roundStock(line.addedQty * line.pricePerUnit);
                         return (
                           <TableRow key={line.id}>
                             <TableCell>
@@ -1111,7 +1125,7 @@ export function KitchenSessionManager({
                               <Input value={line.unit} onChange={(event) => updatePurchaseLine(line.id, "unit", event.target.value)} disabled={lockStaticPurchaseFields} />
                             </TableCell>
                             <TableCell>
-                              <NumericInput min="0" value={line.previousBalance} onChange={(event: any) => updatePurchaseLine(line.id, "previousBalance", event.target.value)} disabled={lockStaticPurchaseFields} />
+                              <NumericInput value={liveBalance} onChange={(event: any) => updatePurchaseLine(line.id, "previousBalance", event.target.value)} disabled={lockStaticPurchaseFields} />
                             </TableCell>
                             <TableCell>
                               <NumericInput min="0" value={line.addedQty} onChange={(event: any) => updatePurchaseLine(line.id, "addedQty", event.target.value)} />
