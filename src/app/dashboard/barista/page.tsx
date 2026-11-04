@@ -21,7 +21,7 @@ import { findStoreItemForMenuName, formatTotStatus, getMenuStockStatus, getRemai
 import { printDepartmentReceipt } from "@/app/lib/receipt-print";
 import { getActiveBaristaStateKey, readJson, readPosState, writeJson, writePosState } from "@/app/lib/storage";
 import { BARISTA_INVENTORY_SEED } from "@/app/lib/seed-barista-data";
-import { BAR_CATEGORIES, BarCategory, buyingPriceUnit, JAGER_750_CORRECTION_VERSION, syncBarCatalogToPos } from "@/app/lib/bar-catalog";
+import { BAR_CATEGORIES, BarCategory, buyingPriceUnit, BAR_OPENING_CAPITAL, OPENING_CAPITAL_VERSION, syncBarCatalogToPos } from "@/app/lib/bar-catalog";
 import { STOCK_IN_HISTORY_KEY, StockInEntry } from "@/app/lib/bar-stock-history";
 import { useIsDirector } from "@/hooks/use-is-director";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -134,7 +134,8 @@ interface BaristaPaymentRecord {
   recordedAt?: number;
 }
 
-interface CancelledBaristaTicket extends BaristaTicket {
+interface CancelledBaristaTicket extends Omit<BaristaTicket, "status"> {
+  status: "cancelled";
   source?: "kitchen" | "barista";
   cancelledAt: number;
 }
@@ -156,7 +157,7 @@ const STORAGE_CANCELLED = "orange-hotel-cancelled-tickets";
 const STORAGE_WASTE = "orange-hotel-barista-waste";
 const STORAGE_STARTING_CAPITAL = "orange-hotel-barista-starting-capital-v1";
 
-type StartingCapitalSnapshot = { amount: number; capturedAt: number; jager750Correction?: string };
+type StartingCapitalSnapshot = { amount: number; capturedAt: number; version?: string; jager750Correction?: string };
 
 const BARISTA_CATEGORIES: Array<{ value: BaristaCategory; label: string }> = [
   { value: "all", label: "All" },
@@ -385,7 +386,6 @@ export default function BaristaPage() {
   const [queueTab, setQueueTab] = useState<"queue" | "from-store">("queue");
   const [baristaStoreItems, setBaristaStoreItems] = useState<MainStoreItem[]>([]);
   const [stockInHistory, setStockInHistory] = useState<StockInEntry[]>([]);
-  const [stockHistoryReady, setStockHistoryReady] = useState(false);
   const [startingCapital, setStartingCapital] = useState<StartingCapitalSnapshot | null>(null);
   const startingCapitalCaptureBusy = useRef(false);
   const [fromStoreEntries, setFromStoreEntries] = useState<StoreMovementLog[]>([]);
@@ -521,7 +521,6 @@ export default function BaristaPage() {
     ]).then(() => {
       if (cancelled) return;
       loadFinance();
-      setStockHistoryReady(true);
     }).catch((error) => console.error("Barista finance hydration failed", error));
     const unsubscribeHistory = subscribeToSyncedStorageKey(STOCK_IN_HISTORY_KEY, loadFinance);
     const unsubscribeCapital = subscribeToSyncedStorageKey(STORAGE_STARTING_CAPITAL, loadFinance);
@@ -558,19 +557,20 @@ export default function BaristaPage() {
   const getUsedQty = (movementId: string) =>
     usageLogs.filter((entry) => entry.movementId === movementId).reduce((sum, entry) => sum + entry.quantityUsed, 0);
 
-  const updateBaristaStoreStock = (
+  const calculateBaristaStock = (
     lines: BaristaOrderLine[],
     direction: "consume" | "restore",
+    allStoreItems: Array<MainStoreItem & { lane?: "kitchen" | "barista" }>,
+    inventoryItems: InventoryItem[],
   ) => {
     const updatedAt = Date.now();
-    const allStoreItems = readJson<Array<MainStoreItem & { lane?: "kitchen" | "barista" }>>(STORAGE_MAIN_STORE_ITEMS) ?? [];
     const otherStoreItems = allStoreItems.filter((entry) => entry.lane !== "barista");
     const deletedBaristaItems = allStoreItems.filter((entry) => entry.lane === "barista" && entry.deletedAt);
     const currentBaristaItems = allStoreItems
       .filter((entry) => entry.lane === "barista" && !entry.deletedAt)
       .map((entry) => ({ ...entry, lane: "barista" as const }));
     const nextBaristaItems = [...currentBaristaItems];
-    let nextInventoryItems = readJson<InventoryItem[]>(STORAGE_INVENTORY_ITEMS) ?? [];
+    let nextInventoryItems = inventoryItems;
 
     for (const line of lines) {
       const matchedItem = findStoreItemForMenuName(nextBaristaItems, line.name);
@@ -662,10 +662,16 @@ export default function BaristaPage() {
     }
 
     const nextStoreItems = [...otherStoreItems, ...deletedBaristaItems, ...nextBaristaItems];
-    setBaristaStoreItems(nextBaristaItems);
-    writeJson(STORAGE_MAIN_STORE_ITEMS, nextStoreItems);
-    writeJson(STORAGE_INVENTORY_ITEMS, nextInventoryItems);
-    return { ok: true as const };
+    return { ok: true as const, stores: nextStoreItems, inventory: nextInventoryItems, baristaItems: nextBaristaItems };
+  };
+
+  const updateBaristaStoreStock = (lines: BaristaOrderLine[], direction: "consume" | "restore") => {
+    const result = calculateBaristaStock(lines, direction, readJson<MainStoreItem[]>(STORAGE_MAIN_STORE_ITEMS) ?? [], readJson<InventoryItem[]>(STORAGE_INVENTORY_ITEMS) ?? []);
+    if (!result.ok) return result;
+    setBaristaStoreItems(result.baristaItems);
+    writeJson(STORAGE_MAIN_STORE_ITEMS, result.stores);
+    writeJson(STORAGE_INVENTORY_ITEMS, result.inventory);
+    return result;
   };
 
   const addUsage = async () => {
@@ -1057,12 +1063,13 @@ export default function BaristaPage() {
         const history = (current[STOCK_IN_HISTORY_KEY] as StockInEntry[] | null) ?? [];
         if (stockIn > 0 && history.some((entry) => entry.id === operationId)) return current;
         const storeIndex = stores.findIndex((entry) => entry.lane === "barista" && !entry.deletedAt && normalizeBaristaTarget(getStoreItemLabel(entry)) === target);
+        const inventoryIndex = inventory.findIndex((entry) => entry.category.trim().toLowerCase() === "bar" && entry.status !== "INACTIVE" && normalizeBaristaTarget(entry.size ? `${entry.name} ${entry.size}` : entry.name) === target);
         const existingStore = stores[storeIndex];
+        const existingInventory = inventory[inventoryIndex];
         const nextStore: MainStoreItem = existingStore
           ? { ...existingStore, stock: existingStore.stock + stockIn, buyingPrice, sellingPrice, receivedStock: (existingStore.receivedStock ?? 0) + stockIn, updatedAt }
-          : { id: `bs-manager-${updatedAt}`, name: item.name, size: "", stock: stockIn, unit: item.unit || "Bottle", minStock: 0, lane: "barista", subCategory: item.category, buyingPrice, sellingPrice, totLimit: getTotLimit({ name: item.name, size: "", totLimit: undefined }), totSold: 0, receivedStock: stockIn, updatedAt };
+          : { id: `bs-manager-${updatedAt}`, name: item.name, size: "", stock: (existingInventory?.stock ?? 0) + stockIn, unit: existingInventory?.unit || item.unit || "Bottle", minStock: 0, lane: "barista", subCategory: item.category, buyingPrice, sellingPrice, totLimit: existingInventory?.totPerBottle ?? getTotLimit({ name: item.name, size: "", totLimit: undefined }), totSold: existingInventory?.totSold ?? 0, receivedStock: (existingInventory?.receivedStock ?? 0) + stockIn, updatedAt };
         if (storeIndex >= 0) stores[storeIndex] = nextStore; else stores.push(nextStore);
-        const inventoryIndex = inventory.findIndex((entry) => entry.category.trim().toLowerCase() === "bar" && entry.status !== "INACTIVE" && normalizeBaristaTarget(entry.size ? `${entry.name} ${entry.size}` : entry.name) === target);
         if (inventoryIndex >= 0) inventory[inventoryIndex] = { ...inventory[inventoryIndex], stock: nextStore.stock, totSold: nextStore.totSold ?? 0, totPerBottle: getTotLimit(nextStore) || undefined, buyingPrice, sellingPrice, price: sellingPrice, receivedStock: (inventory[inventoryIndex].receivedStock ?? 0) + stockIn, updatedAt };
         else inventory.push({ id: `inv-manager-${updatedAt}`, barcode: "", name: nextStore.name, category: "Bar", subCategory: nextStore.subCategory, size: nextStore.size ?? "", stock: nextStore.stock, totSold: nextStore.totSold ?? 0, totPerBottle: getTotLimit(nextStore) || undefined, buyingPrice, sellingPrice, price: sellingPrice, status: "ACTIVE", minStock: nextStore.minStock, unit: nextStore.unit, receivedStock: stockIn, updatedAt });
         let matchedMenu = false;
@@ -1240,17 +1247,14 @@ export default function BaristaPage() {
   }, [stockInHistory]);
 
   useEffect(() => {
-    if (!stockHistoryReady || !posHydrated || startingCapital || startingCapitalCaptureBusy.current || baristaInventoryRows.length === 0 || (role !== "manager" && role !== "director")) return;
-    // Existing installations have no original CSV ledger. Reconstruct the opening
-    // investment from stock value plus sold cost, less every recorded stock-in,
-    // then store it once so sales, restocks and price edits cannot change it.
-    const openingAmount = Math.max(0, baristaInventoryRows.reduce((sum, item) => sum + item.capital + item.costOfGoods, 0) - restockCapital);
+    if (!posHydrated || startingCapital || startingCapitalCaptureBusy.current || (role !== "manager" && role !== "director")) return;
+    const openingAmount = BAR_OPENING_CAPITAL;
     startingCapitalCaptureBusy.current = true;
-    void transactSyncedStorageValue<StartingCapitalSnapshot>(STORAGE_STARTING_CAPITAL, (current) => current ?? { amount: openingAmount, capturedAt: Date.now(), jager750Correction: JAGER_750_CORRECTION_VERSION })
+    void transactSyncedStorageValue<StartingCapitalSnapshot>(STORAGE_STARTING_CAPITAL, (current) => current ?? { amount: openingAmount, capturedAt: Date.now(), version: OPENING_CAPITAL_VERSION })
       .then(setStartingCapital)
       .catch((error) => console.error("Starting capital could not be saved", error))
       .finally(() => { startingCapitalCaptureBusy.current = false; });
-  }, [baristaInventoryRows, posHydrated, restockCapital, role, startingCapital, stockHistoryReady]);
+  }, [posHydrated, role, startingCapital]);
   const totalBaristaRevenue = useMemo(
     () => {
       const itemizedRevenue = baristaInventoryRows.reduce((sum, item) => sum + item.revenue, 0);
@@ -1771,27 +1775,25 @@ export default function BaristaPage() {
     setDeliveringTicketId(id);
     try {
       const activeBaristaKey = getActiveBaristaStateKey();
-      const snapshot = readPosState<BaristaTicket, BaristaPaymentRecord, BaristaMenuItem>(
+      const snapshot = await transactSyncedStorageValue<ReturnType<typeof readPosState<BaristaTicket, BaristaPaymentRecord, BaristaMenuItem>>>(
         activeBaristaKey,
-        STORAGE_TICKETS,
-        STORAGE_SEQ,
-        STORAGE_PAYMENTS,
-        STORAGE_MENU,
-        490,
+        (current) => {
+          if (!current?.tickets.some((ticket) => ticket.id === id)) throw new Error("This order is no longer active. Refresh the page and try again.");
+          const deliveredAt = Date.now();
+          return {
+            ...current,
+            tickets: current.tickets.map((ticket) => ticket.id === id
+              ? { ...ticket, status: "delivered" as const, deliveredAt, updatedAt: deliveredAt }
+              : ticket),
+          };
+        },
       );
-      const sourceTickets = snapshot.tickets.length > 0 ? snapshot.tickets : tickets;
-      const sourcePayments = snapshot.payments.length > 0 ? snapshot.payments : baristaPayments;
-      const sourceMenuItems = snapshot.menuItems.length > 0 ? snapshot.menuItems : storedMenuItems;
-      const deliveredAt = Date.now();
-      const nextTickets = sourceTickets.map((ticket) =>
-        ticket.id === id ? { ...ticket, status: "delivered" as const, deliveredAt, updatedAt: deliveredAt } : ticket,
-      );
-
-      setTickets(nextTickets);
-      setTicketSeq(snapshot.ticketSeq);
-      setBaristaPayments(sourcePayments);
-      setStoredMenuItems(sourceMenuItems.filter(isActiveBaristaMenuItem));
-      writePosState(activeBaristaKey, nextTickets, snapshot.ticketSeq, sourcePayments, sourceMenuItems);
+      if (snapshot) {
+        setTickets(snapshot.tickets);
+        setBaristaPayments(snapshot.payments);
+      }
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Delivery could not be saved. Please try again.");
     } finally {
       setDeliveringTicketId(null);
     }
@@ -1799,34 +1801,53 @@ export default function BaristaPage() {
 
   const cancelTicket = async (id: string) => {
     if (isDirector) return;
-    const ticket = tickets.find((t) => t.id === id);
+    const ticket = tickets.find((entry) => entry.id === id);
     if (!ticket) return;
-    if (ticket.status === "delivered") return;
     const approved = await confirm({
       title: "Cancel Barista Order",
-      description: "Are you sure you want to cancel this barista order?",
-      actionLabel: "Cancel Order",
+      description: `Approve cancellation of ${ticket.code}? Its payment will be reversed and its stock restored.`,
+      actionLabel: "Approve Cancellation",
     });
     if (!approved) return;
 
-    const stockResult = updateBaristaStoreStock(ticket.lines, "restore");
-    if (!stockResult.ok) {
-      window.alert(stockResult.error);
-      return;
+    const activeBaristaKey = getActiveBaristaStateKey();
+    try {
+      const committed = await transactSyncedStorageKeys(
+        [activeBaristaKey, STORAGE_MAIN_STORE_ITEMS, STORAGE_INVENTORY_ITEMS, STORAGE_CANCELLED],
+        (current) => {
+          const snapshot = (current[activeBaristaKey] as ReturnType<typeof readPosState<BaristaTicket, BaristaPaymentRecord, BaristaMenuItem>> | null)
+            ?? { tickets: [], ticketSeq: 490, payments: [], menuItems: [] };
+          const liveTicket = snapshot.tickets.find((entry) => entry.id === id);
+          if (!liveTicket) throw new Error("This order is no longer active. Refresh the page and try again.");
+          const stock = calculateBaristaStock(
+            liveTicket.lines,
+            "restore",
+            (current[STORAGE_MAIN_STORE_ITEMS] as MainStoreItem[] | null) ?? [],
+            (current[STORAGE_INVENTORY_ITEMS] as InventoryItem[] | null) ?? [],
+          );
+          if (!stock.ok) throw new Error(stock.error);
+          const cancelledAt = Date.now();
+          const cancelled = (current[STORAGE_CANCELLED] as CancelledBaristaTicket[] | null) ?? [];
+          return {
+            [activeBaristaKey]: {
+              ...snapshot,
+              tickets: snapshot.tickets.filter((entry) => entry.id !== id),
+              payments: snapshot.payments.filter((payment) => payment.ticketId !== id),
+            },
+            [STORAGE_MAIN_STORE_ITEMS]: stock.stores,
+            [STORAGE_INVENTORY_ITEMS]: stock.inventory,
+            [STORAGE_CANCELLED]: [{ ...liveTicket, status: "cancelled", deliveredAt: undefined, source: "barista", cancelledAt }, ...cancelled],
+          };
+        },
+      );
+      const snapshot = committed[activeBaristaKey] as ReturnType<typeof readPosState<BaristaTicket, BaristaPaymentRecord, BaristaMenuItem>>;
+      setTickets(snapshot.tickets);
+      setBaristaPayments(snapshot.payments);
+      setBaristaStoreItems(((committed[STORAGE_MAIN_STORE_ITEMS] as MainStoreItem[]) ?? []).filter((entry) => entry.lane === "barista" && !entry.deletedAt));
+      setInventoryItems((committed[STORAGE_INVENTORY_ITEMS] as InventoryItem[]) ?? []);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Cancellation could not be saved. Please try again.");
     }
-
-    const cancelled: CancelledBaristaTicket = {
-      ...ticket,
-      source: "barista",
-      cancelledAt: Date.now(),
-    };
-
-    const existing = readJson<CancelledBaristaTicket[]>(STORAGE_CANCELLED) ?? [];
-    writeJson(STORAGE_CANCELLED, [cancelled, ...existing]);
-
-    const nextTickets = tickets.filter((ticket) => ticket.id !== id);
-    setTickets(nextTickets);
-    writePosState(getActiveBaristaStateKey(), nextTickets, ticketSeq, baristaPayments, storedMenuItems);
   };
 
   const resetDrinkForm = () => {
@@ -3016,20 +3037,15 @@ export default function BaristaPage() {
                           </TableCell>
                           <TableCell className="font-black">TSh {ticket.total.toLocaleString()}</TableCell>
                           <TableCell className="text-right">
-                            {isDelivered ? (
-                              <Badge className="bg-green-100 text-green-800 hover:bg-green-100">
-                                <CheckCircle2 className="w-4 h-4 mr-1" /> Delivered
-                              </Badge>
-                            ) : (
-                              <div className="flex justify-end gap-2">
-                                <Button onClick={() => deliverTicket(ticket.id)} disabled={isDirector || deliveringTicketId === ticket.id} className="h-9 font-black uppercase text-[10px] tracking-widest bg-green-600 hover:bg-green-600/90">
+                            <div className="flex justify-end gap-2">
+                                {isDelivered && <Badge className="bg-green-100 text-green-800 hover:bg-green-100"><CheckCircle2 className="w-4 h-4 mr-1" /> Delivered</Badge>}
+                                {!isDelivered && <Button onClick={() => deliverTicket(ticket.id)} disabled={isDirector || deliveringTicketId === ticket.id} className="h-9 font-black uppercase text-[10px] tracking-widest bg-green-600 hover:bg-green-600/90">
                                   <CheckCircle2 className="w-4 h-4 mr-1" /> {deliveringTicketId === ticket.id ? "Saving" : "Delivered"}
-                                </Button>
+                                </Button>}
                                 <Button onClick={() => cancelTicket(ticket.id)} disabled={isDirector} className="h-9 font-black uppercase text-[10px] tracking-widest bg-red-600 hover:bg-red-600/90 text-white">
                                   <XCircle className="w-4 h-4 mr-1" /> Cancelled
                                 </Button>
                               </div>
-                            )}
                           </TableCell>
                         </TableRow>
                       );

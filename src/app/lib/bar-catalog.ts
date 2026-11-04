@@ -10,9 +10,14 @@ export const BAR_CATALOG = rows as Array<{ name: string; category: BarCategory; 
 const VERSION = "cassa-bar-catalog-2026-10-24-opening-counts";
 export const JAGER_750_CORRECTION_VERSION = "cassa-jagermeister-750ml-one-bottle-v1";
 const STARTING_CAPITAL_KEY = "orange-hotel-barista-starting-capital-v1";
+export const OPENING_CAPITAL_VERSION = "cassa-catalog-opening-capital-v2";
+export const BAR_OPENING_CAPITAL = Math.round(BAR_CATALOG.reduce((total, row) => {
+  const limit = openingBottleBalance(row).totLimit;
+  const units = row.soldByTot && row.buyingPriceUnit !== "tot" ? row.openingStock / limit : row.openingStock;
+  return total + units * row.buyingPrice;
+}, 0));
 const JAGER_750_OLD_OPENING_STOCK = 61;
 // Snapshots captured before this catalog correction contain the 60 excess bottles.
-const JAGER_750_CORRECTION_COMMITTED_AT = Date.parse("2026-10-30T08:52:09Z");
 type Versioned = { catalogVersion?: string };
 type MenuItem = Versioned & { id: string; name: string; price: number; buyingPrice?: number; category: string; prepMinutes: number; deletedAt?: number; updatedAt?: number };
 type Snapshot = { tickets: unknown[]; ticketSeq: number; payments: unknown[]; menuItems: MenuItem[] };
@@ -44,7 +49,7 @@ export async function syncBarCatalogToPos() {
     const inventory = [...((current[STORAGE_INVENTORY_ITEMS] as InventoryItem[] | null) ?? [])];
     const snapshot = (current[STORAGE_BARISTA_STATE] as Snapshot | null) ?? { tickets: [], ticketSeq: 490, payments: [], menuItems: [] };
     const menu = [...(snapshot.menuItems ?? [])];
-    const capital = current[STARTING_CAPITAL_KEY] as { amount: number; capturedAt: number; jager750Correction?: string } | null;
+    const capital = current[STARTING_CAPITAL_KEY] as { amount: number; capturedAt: number; jager750Correction?: string; version?: string } | null;
     for (const row of BAR_CATALOG) {
       const target = key(row.name);
       const isJager750 = row.name === "JAGERMEISTER 750 Mls";
@@ -74,11 +79,11 @@ export async function syncBarCatalogToPos() {
       if (mi < 0) menu.push({ id: `catalog-menu-${target}`, name, price: row.sellingPrice, buyingPrice: row.buyingPrice, category: row.category, prepMinutes: 2, updatedAt: now, catalogVersion: VERSION });
       else if (menu[mi].catalogVersion !== VERSION) menu[mi] = { ...menu[mi], ...(row.name === "SMIRNOFF GUARANA" ? { name: row.name } : {}), category: row.category, buyingPrice: row.buyingPrice, price: row.sellingPrice, catalogVersion: VERSION };
     }
-    // Stock and capital can be synced on different visits. Apply the opening
-    // correction to older snapshots even when the stock row is already updated.
-    const correctedCapital = capital && capital.capturedAt < JAGER_750_CORRECTION_COMMITTED_AT && capital.jager750Correction !== JAGER_750_CORRECTION_VERSION
-      ? { ...capital, amount: Math.max(0, capital.amount - (JAGER_750_OLD_OPENING_STOCK - 1) * (BAR_CATALOG.find((row) => row.name === "JAGERMEISTER 750 Mls")?.buyingPrice ?? 0)), jager750Correction: JAGER_750_CORRECTION_VERSION }
-      : capital;
+    // The opening inventory is defined by the approved catalog counts. A
+    // live-stock reconstruction drifts after price edits and historical sales.
+    const correctedCapital = capital?.version === OPENING_CAPITAL_VERSION
+      ? capital
+      : { amount: BAR_OPENING_CAPITAL, capturedAt: capital?.capturedAt ?? Date.now(), version: OPENING_CAPITAL_VERSION, jager750Correction: JAGER_750_CORRECTION_VERSION };
     return { [STORAGE_MAIN_STORE_ITEMS]: stores, [STORAGE_INVENTORY_ITEMS]: inventory, [STORAGE_BARISTA_STATE]: { ...snapshot, menuItems: menu }, [STARTING_CAPITAL_KEY]: correctedCapital };
   });
 }
