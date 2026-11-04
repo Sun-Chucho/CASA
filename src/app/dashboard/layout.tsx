@@ -54,6 +54,7 @@ const MANAGEMENT_SYNC_KEYS = [
   "orange-hotel-barista-state",
   "orange-hotel-barista-starting-capital-v1",
   "orange-hotel-barista-stock-in-history",
+  "orange-hotel-barista-cancel-requests",
   "orange-hotel-main-store-items",
   "orange-hotel-inventory-items",
   "orange-hotel-store-movements",

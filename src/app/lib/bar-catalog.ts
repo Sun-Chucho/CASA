@@ -79,8 +79,8 @@ export async function syncBarCatalogToPos() {
       if (mi < 0) menu.push({ id: `catalog-menu-${target}`, name, price: row.sellingPrice, buyingPrice: row.buyingPrice, category: row.category, prepMinutes: 2, updatedAt: now, catalogVersion: VERSION });
       else if (menu[mi].catalogVersion !== VERSION) menu[mi] = { ...menu[mi], ...(row.name === "SMIRNOFF GUARANA" ? { name: row.name } : {}), category: row.category, buyingPrice: row.buyingPrice, price: row.sellingPrice, catalogVersion: VERSION };
     }
-    // The opening inventory is defined by the approved catalog counts. A
-    // live-stock reconstruction drifts after price edits and historical sales.
+    // Opening capital is the value of the catalog opening counts at buying cost.
+    // Keep it separate from later sales, price edits, and restocks.
     const correctedCapital = capital?.version === OPENING_CAPITAL_VERSION
       ? capital
       : { amount: BAR_OPENING_CAPITAL, capturedAt: capital?.capturedAt ?? Date.now(), version: OPENING_CAPITAL_VERSION, jager750Correction: JAGER_750_CORRECTION_VERSION };

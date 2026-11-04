@@ -23,6 +23,7 @@ import { getActiveBaristaStateKey, readJson, readPosState, writeJson, writePosSt
 import { BARISTA_INVENTORY_SEED } from "@/app/lib/seed-barista-data";
 import { BAR_CATEGORIES, BarCategory, buyingPriceUnit, BAR_OPENING_CAPITAL, OPENING_CAPITAL_VERSION, syncBarCatalogToPos } from "@/app/lib/bar-catalog";
 import { STOCK_IN_HISTORY_KEY, StockInEntry } from "@/app/lib/bar-stock-history";
+import { KitchenPurchaseHistoryEntry, STORAGE_BARISTA_PURCHASE_HISTORY } from "@/app/lib/kitchen-session-storage";
 import { useIsDirector } from "@/hooks/use-is-director";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -37,7 +38,7 @@ import { CheckCircle2, Coffee, Lock, Minus, Pencil, Plus, Receipt, Search, Trash
 import { useConfirmDialog } from "@/hooks/use-confirm-dialog";
 import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey, transactSyncedStorageKeys, transactSyncedStorageValue } from "@/app/lib/firebase-sync";
 import { reconcileCartWithMenu } from "@/app/lib/pos-menu";
-import { DEFAULT_LOGIN_PASSWORD, getDefaultLoginPassword, getProfilePassword, isProfileUserBlocked, readActiveSessionUsername, readLocalLoginProfiles, saveLoginProfileToServer, STORAGE_LOGIN_PROFILES, subscribeToSessionIdentity, upsertProfileUser } from "@/app/lib/login-profiles";
+import { DEFAULT_LOGIN_PASSWORD, getProfilePassword, readActiveSessionUsername, readLocalLoginProfiles, saveLoginProfileToServer, STORAGE_LOGIN_PROFILES, subscribeToSessionIdentity, upsertProfileUser } from "@/app/lib/login-profiles";
 
 type BaristaCategory =
   | "all"
@@ -134,6 +135,17 @@ interface BaristaPaymentRecord {
   recordedAt?: number;
 }
 
+interface BaristaCancellationRequest {
+  id: string;
+  ticketId: string;
+  code: string;
+  requestedBy: string;
+  requestedAt: number;
+  updatedAt: number;
+  status: "pending" | "approved" | "rejected";
+  approvedBy?: string;
+}
+
 interface CancelledBaristaTicket extends Omit<BaristaTicket, "status"> {
   status: "cancelled";
   source?: "kitchen" | "barista";
@@ -155,6 +167,7 @@ const STORAGE_SEQ = "orange-hotel-barista-seq";
 const STORAGE_MENU = "orange-hotel-barista-menu";
 const STORAGE_PAYMENTS = "orange-hotel-barista-payments";
 const STORAGE_CANCELLED = "orange-hotel-cancelled-tickets";
+const STORAGE_CANCEL_REQUESTS = "orange-hotel-barista-cancel-requests";
 const STORAGE_WASTE = "orange-hotel-barista-waste";
 const STORAGE_STARTING_CAPITAL = "orange-hotel-barista-starting-capital-v1";
 
@@ -290,8 +303,7 @@ function syncBaristaMenuItemsWithSharedInventory(
   });
 }
 
-function getLocalDateInputValue() {
-  const now = new Date();
+function getLocalDateInputValue(now = new Date()) {
   const offsetMs = now.getTimezoneOffset() * 60_000;
   return new Date(now.getTime() - offsetMs).toISOString().slice(0, 10);
 }
@@ -343,10 +355,7 @@ export default function BaristaPage() {
   const [managerTab, setManagerTab] = useState<"inventory" | "finance" | "sales" | "drinks">("inventory");
   const [showManagerItemEditor, setShowManagerItemEditor] = useState(false);
   const [restockDialogOpen, setRestockDialogOpen] = useState(false);
-  const [cancellationTicketId, setCancellationTicketId] = useState<string | null>(null);
-  const [cancellationManagerName, setCancellationManagerName] = useState("");
-  const [cancellationManagerPassword, setCancellationManagerPassword] = useState("");
-  const [cancellationError, setCancellationError] = useState("");
+  const [cancelRequests, setCancelRequests] = useState<BaristaCancellationRequest[]>([]);
   const [cancellationSaving, setCancellationSaving] = useState(false);
   const [restockTargetItem, setRestockTargetItem] = useState<BaristaManagerPricingRow | null>(null);
   const managerSaveBusy = useRef(false);
@@ -392,6 +401,7 @@ export default function BaristaPage() {
   const [queueTab, setQueueTab] = useState<"queue" | "from-store">("queue");
   const [baristaStoreItems, setBaristaStoreItems] = useState<MainStoreItem[]>([]);
   const [stockInHistory, setStockInHistory] = useState<StockInEntry[]>([]);
+  const [barPurchaseHistory, setBarPurchaseHistory] = useState<KitchenPurchaseHistoryEntry[]>([]);
   const [startingCapital, setStartingCapital] = useState<StartingCapitalSnapshot | null>(null);
   const startingCapitalCaptureBusy = useRef(false);
   const [fromStoreEntries, setFromStoreEntries] = useState<StoreMovementLog[]>([]);
@@ -492,6 +502,13 @@ export default function BaristaPage() {
     };
   }, []);
 
+  useEffect(() => {
+    const loadRequests = () => setCancelRequests(readJson<BaristaCancellationRequest[]>(STORAGE_CANCEL_REQUESTS) ?? []);
+    void hydrateStorageKeyFromFirebase(STORAGE_CANCEL_REQUESTS).finally(loadRequests);
+    const unsubscribe = subscribeToSyncedStorageKey(STORAGE_CANCEL_REQUESTS, loadRequests);
+    return unsubscribe;
+  }, []);
+
   const loadFromStoreData = () => {
     const savedStoreItems = readJson<Array<MainStoreItem & { lane?: "kitchen" | "barista" }>>(STORAGE_MAIN_STORE_ITEMS);
     const savedMovements = readJson<StoreMovementLog[]>(STORAGE_STORE_MOVEMENTS);
@@ -519,18 +536,21 @@ export default function BaristaPage() {
     const loadFinance = () => {
       if (cancelled) return;
       setStockInHistory(readJson<StockInEntry[]>(STOCK_IN_HISTORY_KEY) ?? []);
+      setBarPurchaseHistory(readJson<KitchenPurchaseHistoryEntry[]>(STORAGE_BARISTA_PURCHASE_HISTORY) ?? []);
       setStartingCapital(readJson<StartingCapitalSnapshot>(STORAGE_STARTING_CAPITAL));
     };
     void Promise.all([
       hydrateStorageKeyFromFirebase(STOCK_IN_HISTORY_KEY),
+      hydrateStorageKeyFromFirebase(STORAGE_BARISTA_PURCHASE_HISTORY),
       hydrateStorageKeyFromFirebase(STORAGE_STARTING_CAPITAL),
     ]).then(() => {
       if (cancelled) return;
       loadFinance();
     }).catch((error) => console.error("Barista finance hydration failed", error));
     const unsubscribeHistory = subscribeToSyncedStorageKey(STOCK_IN_HISTORY_KEY, loadFinance);
+    const unsubscribePurchases = subscribeToSyncedStorageKey(STORAGE_BARISTA_PURCHASE_HISTORY, loadFinance);
     const unsubscribeCapital = subscribeToSyncedStorageKey(STORAGE_STARTING_CAPITAL, loadFinance);
-    return () => { cancelled = true; unsubscribeHistory(); unsubscribeCapital(); };
+    return () => { cancelled = true; unsubscribeHistory(); unsubscribePurchases(); unsubscribeCapital(); };
   }, []);
 
   useEffect(() => {
@@ -1092,6 +1112,7 @@ export default function BaristaPage() {
       setStoredMenuItems(savedSnapshot.menuItems.filter(isActiveBaristaMenuItem));
       setBaristaStoreItems(((committed[STORAGE_MAIN_STORE_ITEMS] as MainStoreItem[]) ?? []).filter((entry) => entry.lane === "barista" && !entry.deletedAt));
       setInventoryItems((committed[STORAGE_INVENTORY_ITEMS] as InventoryItem[]) ?? []);
+      setStockInHistory((committed[STOCK_IN_HISTORY_KEY] as StockInEntry[]) ?? []);
       setManagerPricingDrafts((current) => { const next = { ...current }; delete next[item.id]; return next; });
       setSavedBaristaItemId(item.id);
       window.setTimeout(() => {
@@ -1238,25 +1259,60 @@ export default function BaristaPage() {
     () => baristaInventoryRows.reduce((sum, item) => sum + item.capital, 0),
     [baristaInventoryRows],
   );
+  const barRestockHistory = useMemo(() => {
+    const barRestockCost = (itemName: string, quantity: number, price: number) => {
+      const store = baristaStoreItems.find((item) => normalizeBaristaTarget(getStoreItemLabel(item)) === normalizeBaristaTarget(itemName));
+      const totsPerBottle = buyingPriceUnit(itemName) === "tot" ? getTotLimit(store ?? { name: itemName, size: "", totLimit: undefined }) || 30 : 1;
+      return quantity * price * totsPerBottle;
+    };
+    return [
+    ...stockInHistory.filter((entry) => entry.quantity > 0).map((entry) => ({
+      id: `stock-in-${entry.id}`,
+      itemId: entry.itemId,
+      itemName: entry.itemName,
+      date: entry.date,
+      recordedAt: entry.recordedAt || new Date(`${entry.date}T12:00:00`).getTime(),
+      quantity: entry.quantity,
+      unit: entry.unit ?? "units",
+      buyingPrice: entry.buyingPrice,
+      amount: barRestockCost(entry.itemName, entry.quantity, entry.buyingPrice),
+      source: "Stock In",
+      user: entry.user ?? "",
+    })),
+    ...barPurchaseHistory.flatMap((purchase) => purchase.lines.filter((line) => line.addedQty > 0).map((line) => ({
+      id: `purchase-${purchase.id}-${line.id}`,
+      itemId: line.itemId ?? "",
+      itemName: line.itemName,
+      date: getLocalDateInputValue(new Date(purchase.closedAt)),
+      recordedAt: new Date(purchase.closedAt).getTime(),
+      quantity: line.addedQty,
+      unit: line.unit,
+      buyingPrice: line.pricePerUnit,
+      amount: barRestockCost(line.itemName, line.addedQty, line.pricePerUnit),
+      source: "Purchase",
+      user: purchase.signoff?.approvedBy || purchase.signoff?.preparedBy || "",
+    }))),
+  ].sort((a, b) => b.recordedAt - a.recordedAt);
+  }, [barPurchaseHistory, baristaStoreItems, stockInHistory]);
   const restockCapital = useMemo(
-    () => stockInHistory.reduce((sum, entry) => sum + entry.quantity * entry.buyingPrice, 0),
-    [stockInHistory],
+    () => barRestockHistory.reduce((sum, entry) => sum + entry.amount, 0),
+    [barRestockHistory],
   );
   const restockedQuantityByItem = useMemo(() => {
     const quantities = new Map<string, number>();
-    for (const entry of stockInHistory) {
-      if (entry.quantity <= 0) continue;
-      const target = entry.itemId || normalizeBaristaTarget(entry.itemName);
-      quantities.set(target, (quantities.get(target) ?? 0) + entry.quantity);
+    for (const entry of barRestockHistory) {
+      const nameKey = normalizeBaristaTarget(entry.itemName);
+      quantities.set(nameKey, (quantities.get(nameKey) ?? 0) + entry.quantity);
+      if (entry.itemId) quantities.set(entry.itemId, (quantities.get(entry.itemId) ?? 0) + entry.quantity);
     }
     return quantities;
-  }, [stockInHistory]);
+  }, [barRestockHistory]);
 
   useEffect(() => {
-    if (!posHydrated || startingCapital || startingCapitalCaptureBusy.current || (role !== "manager" && role !== "director")) return;
+    if (!posHydrated || startingCapital?.version === OPENING_CAPITAL_VERSION || startingCapitalCaptureBusy.current || (role !== "manager" && role !== "director")) return;
     const openingAmount = BAR_OPENING_CAPITAL;
     startingCapitalCaptureBusy.current = true;
-    void transactSyncedStorageValue<StartingCapitalSnapshot>(STORAGE_STARTING_CAPITAL, (current) => current ?? { amount: openingAmount, capturedAt: Date.now(), version: OPENING_CAPITAL_VERSION })
+    void transactSyncedStorageValue<StartingCapitalSnapshot>(STORAGE_STARTING_CAPITAL, (current) => current?.version === OPENING_CAPITAL_VERSION ? current : { amount: openingAmount, capturedAt: current?.capturedAt ?? Date.now(), version: OPENING_CAPITAL_VERSION })
       .then(setStartingCapital)
       .catch((error) => console.error("Starting capital could not be saved", error))
       .finally(() => { startingCapitalCaptureBusy.current = false; });
@@ -1393,7 +1449,7 @@ export default function BaristaPage() {
     </Card>
     <aside className="space-y-4" aria-label="Barista capital summary">
       <Card className="border-none shadow-sm">
-        <CardHeader><CardTitle className="text-sm font-black uppercase tracking-widest">Starting Capital</CardTitle><CardDescription>Opening inventory investment, fixed when first recorded.</CardDescription></CardHeader>
+        <CardHeader><CardTitle className="text-sm font-black uppercase tracking-widest">Starting Capital</CardTitle><CardDescription>Opening inventory value at the original buying prices.</CardDescription></CardHeader>
         <CardContent className="text-2xl font-black">{startingCapital ? `TSh ${startingCapital.amount.toLocaleString()}` : "Loading…"}</CardContent>
       </Card>
       <Card className="border-none shadow-sm">
@@ -1405,6 +1461,27 @@ export default function BaristaPage() {
         <CardContent className="text-2xl font-black">TSh {baristaCapitalTotal.toLocaleString()}</CardContent>
       </Card>
     </aside>
+    <Card className="border-none shadow-sm xl:col-span-2">
+      <CardHeader>
+        <CardTitle className="text-xl font-black uppercase tracking-tight">Bar Stock Restock History</CardTitle>
+        <CardDescription>Every recorded bar stock addition and purchase, with its date and cost.</CardDescription>
+      </CardHeader>
+      <CardContent className="overflow-x-auto p-0">
+        <Table>
+          <TableHeader className="bg-muted/10"><TableRow>
+            <TableHead>Date</TableHead><TableHead>Item</TableHead><TableHead>Source</TableHead><TableHead>Quantity</TableHead><TableHead>Buying Price</TableHead><TableHead>Restock Cost</TableHead><TableHead>Recorded By</TableHead>
+          </TableRow></TableHeader>
+          <TableBody>
+            {barRestockHistory.map((entry) => <TableRow key={entry.id}>
+              <TableCell>{entry.date}</TableCell><TableCell className="font-bold">{entry.itemName}</TableCell><TableCell>{entry.source}</TableCell>
+              <TableCell>{entry.quantity} {entry.unit}</TableCell><TableCell>TSh {entry.buyingPrice.toLocaleString()} / {buyingPriceUnit(entry.itemName)}</TableCell>
+              <TableCell className="font-bold">TSh {entry.amount.toLocaleString()}</TableCell><TableCell>{entry.user || "-"}</TableCell>
+            </TableRow>)}
+            {barRestockHistory.length === 0 && <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">No bar restocks recorded yet.</TableCell></TableRow>}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
     </div>
   );
 
@@ -1805,33 +1882,58 @@ export default function BaristaPage() {
     }
   };
 
-  const cancelTicket = async () => {
-    if (isDirector || !cancellationTicketId || cancellationSaving) return;
-    const managerName = cancellationManagerName.trim();
-    const managerProfile = readLocalLoginProfiles()?.manager;
-    const knownManagers = managerProfile?.users?.length
-      ? managerProfile.users.map((user) => user.username.trim().toLowerCase())
-      : [managerProfile?.username?.trim().toLowerCase() || "manager"];
-    if (!managerName || !knownManagers.includes(managerName.toLowerCase()) || isProfileUserBlocked(managerProfile, managerName) ||
-      cancellationManagerPassword !== getProfilePassword(managerProfile, managerName, getDefaultLoginPassword("manager"))) {
-      setCancellationError("Invalid manager username or password.");
-      return;
-    }
-
+  const requestCancellation = async (id: string) => {
+    if (isDirector || cancellationSaving) return;
     setCancellationSaving(true);
-    const id = cancellationTicketId;
+    try {
+      const activeBaristaKey = getActiveBaristaStateKey();
+      const committed = await transactSyncedStorageKeys([STORAGE_CANCEL_REQUESTS, activeBaristaKey], (current) => {
+        const snapshot = current[activeBaristaKey] as ReturnType<typeof readPosState<BaristaTicket, BaristaPaymentRecord, BaristaMenuItem>> | null;
+        const ticket = snapshot?.tickets.find((entry) => entry.id === id);
+        if (!ticket) throw new Error("This order is no longer active. Refresh the page and try again.");
+        const requests = (current[STORAGE_CANCEL_REQUESTS] as BaristaCancellationRequest[] | null) ?? [];
+        if (requests.some((request) => request.ticketId === id && request.status === "pending")) return current;
+        const now = Date.now();
+        const request: BaristaCancellationRequest = {
+          id: crypto.randomUUID(), ticketId: id, code: ticket.code,
+          requestedBy: readActiveSessionUsername("barista"), requestedAt: now, updatedAt: now, status: "pending",
+        };
+        return { ...current, [STORAGE_CANCEL_REQUESTS]: [request, ...requests] };
+      });
+      setCancelRequests((committed[STORAGE_CANCEL_REQUESTS] as BaristaCancellationRequest[]) ?? []);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Cancellation request could not be saved.");
+    } finally {
+      setCancellationSaving(false);
+    }
+  };
+
+  const approveCancellation = async (requestId: string) => {
+    if (role !== "manager" || cancellationSaving) return;
+    const request = cancelRequests.find((entry) => entry.id === requestId);
+    if (!request) return;
+    const approved = await confirm({
+      title: "Approve Bar Cancellation",
+      description: `Cancel ${request.code}, reverse its payment in Finance, and restore its stock?`,
+      actionLabel: "Approve Cancellation",
+    });
+    if (!approved) return;
+    setCancellationSaving(true);
     const activeBaristaKey = getActiveBaristaStateKey();
+    const managerName = readActiveSessionUsername("manager");
     try {
       const committed = await transactSyncedStorageKeys(
-        [activeBaristaKey, STORAGE_MAIN_STORE_ITEMS, STORAGE_INVENTORY_ITEMS, STORAGE_CANCELLED],
+        [activeBaristaKey, STORAGE_MAIN_STORE_ITEMS, STORAGE_INVENTORY_ITEMS, STORAGE_CANCELLED, STORAGE_CANCEL_REQUESTS],
         (current) => {
+          const requests = (current[STORAGE_CANCEL_REQUESTS] as BaristaCancellationRequest[] | null) ?? [];
+          const liveRequest = requests.find((entry) => entry.id === requestId && entry.status === "pending");
+          if (!liveRequest) throw new Error("This request has already been handled. Refresh the page.");
           const snapshot = (current[activeBaristaKey] as ReturnType<typeof readPosState<BaristaTicket, BaristaPaymentRecord, BaristaMenuItem>> | null)
             ?? { tickets: [], ticketSeq: 490, payments: [], menuItems: [] };
-          const liveTicket = snapshot.tickets.find((entry) => entry.id === id);
-          if (!liveTicket) throw new Error("This order is no longer active. Refresh the page and try again.");
+          const liveTicket = snapshot.tickets.find((entry) => entry.id === liveRequest.ticketId);
+          if (!liveTicket) throw new Error("This order is no longer active. Refresh the page and reject the request.");
           const stock = calculateBaristaStock(
-            liveTicket.lines,
-            "restore",
+            liveTicket.lines, "restore",
             (current[STORAGE_MAIN_STORE_ITEMS] as MainStoreItem[] | null) ?? [],
             (current[STORAGE_INVENTORY_ITEMS] as InventoryItem[] | null) ?? [],
           );
@@ -1841,12 +1943,15 @@ export default function BaristaPage() {
           return {
             [activeBaristaKey]: {
               ...snapshot,
-              tickets: snapshot.tickets.filter((entry) => entry.id !== id),
-              payments: snapshot.payments.filter((payment) => payment.ticketId !== id),
+              tickets: snapshot.tickets.filter((entry) => entry.id !== liveTicket.id),
+              payments: snapshot.payments.filter((payment) => payment.ticketId !== liveTicket.id && payment.code !== liveTicket.code),
             },
             [STORAGE_MAIN_STORE_ITEMS]: stock.stores,
             [STORAGE_INVENTORY_ITEMS]: stock.inventory,
             [STORAGE_CANCELLED]: [{ ...liveTicket, status: "cancelled", deliveredAt: undefined, source: "barista", cancelledAt, approvedBy: managerName }, ...cancelled],
+            [STORAGE_CANCEL_REQUESTS]: requests.map((entry) => entry.id === requestId
+              ? { ...entry, status: "approved" as const, approvedBy: managerName, updatedAt: cancelledAt }
+              : entry),
           };
         },
       );
@@ -1855,12 +1960,25 @@ export default function BaristaPage() {
       setBaristaPayments(snapshot.payments);
       setBaristaStoreItems(((committed[STORAGE_MAIN_STORE_ITEMS] as MainStoreItem[]) ?? []).filter((entry) => entry.lane === "barista" && !entry.deletedAt));
       setInventoryItems((committed[STORAGE_INVENTORY_ITEMS] as InventoryItem[]) ?? []);
-      setCancellationTicketId(null);
-      setCancellationManagerName("");
-      setCancellationManagerPassword("");
-      setCancellationError("");
+      setCancelRequests((committed[STORAGE_CANCEL_REQUESTS] as BaristaCancellationRequest[]) ?? []);
     } catch (error) {
-      setCancellationError(error instanceof Error ? error.message : "Cancellation could not be saved. Please try again.");
+      window.alert(error instanceof Error ? error.message : "Cancellation could not be saved. Please try again.");
+    } finally {
+      setCancellationSaving(false);
+    }
+  };
+
+  const rejectCancellation = async (requestId: string) => {
+    if (role !== "manager" || cancellationSaving) return;
+    setCancellationSaving(true);
+    try {
+      const committed = await transactSyncedStorageValue<BaristaCancellationRequest[]>(STORAGE_CANCEL_REQUESTS, (current) =>
+        (current ?? []).map((entry) => entry.id === requestId && entry.status === "pending"
+          ? { ...entry, status: "rejected" as const, approvedBy: readActiveSessionUsername("manager"), updatedAt: Date.now() }
+          : entry));
+      setCancelRequests(committed);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Request could not be rejected.");
     } finally {
       setCancellationSaving(false);
     }
@@ -2406,11 +2524,37 @@ export default function BaristaPage() {
             Add Barista Item
           </Button>
         </header>
-        {isManager && <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        {isManager && <Card className="border-none shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-xl font-black uppercase tracking-tight">Bar Cancellation Requests</CardTitle>
+            <CardDescription>Approve a request to reverse the sale in Finance and restore its stock.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {cancelRequests.filter((request) => request.status === "pending").map((request) => {
+              const ticket = tickets.find((entry) => entry.id === request.ticketId);
+              return <div key={request.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
+                <div><p className="font-black">{request.code} - TSh {ticket?.total.toLocaleString() ?? "-"}</p>
+                  <p className="text-sm text-muted-foreground">{ticket?.lines.map((line) => `${line.name} x${line.qty}`).join(" | ") ?? "Order unavailable"}</p>
+                  <p className="text-xs text-muted-foreground">Requested by {request.requestedBy} - {new Date(request.requestedAt).toLocaleString()}</p>
+                </div>
+                <div className="flex gap-2"><Button disabled={cancellationSaving} onClick={() => void approveCancellation(request.id)}>Approve Cancellation</Button>
+                  <Button variant="outline" disabled={cancellationSaving} onClick={() => void rejectCancellation(request.id)}>Reject</Button></div>
+              </div>;
+            })}
+            {cancelRequests.every((request) => request.status !== "pending") && <p className="text-sm text-muted-foreground">No pending bar cancellation requests.</p>}
+          </CardContent>
+        </Card>}
+        {isManager && <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
           <Card className="border-none shadow-sm">
             <CardContent className="p-4">
               <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Starting Capital</p>
               <p className="mt-2 text-2xl font-black">{startingCapital ? `TSh ${startingCapital.amount.toLocaleString()}` : "Loading…"}</p>
+            </CardContent>
+          </Card>
+          <Card className="border-none shadow-sm">
+            <CardContent className="p-4">
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Restock Capital</p>
+              <p className="mt-2 text-2xl font-black">TSh {restockCapital.toLocaleString()}</p>
             </CardContent>
           </Card>
           <Card className="border-none shadow-sm">
@@ -2795,25 +2939,6 @@ export default function BaristaPage() {
   return (
     <div className="space-y-8">
       {dialog}
-      <Dialog open={cancellationTicketId !== null} onOpenChange={(open) => { if (!open && !cancellationSaving) setCancellationTicketId(null); }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Manager approval for cancellation</DialogTitle>
-            <DialogDescription>
-              Approving cancels the order, reverses its payment record, and restores its stock.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <Input aria-label="Manager username" placeholder="Manager username" autoComplete="username" value={cancellationManagerName} onChange={(event) => setCancellationManagerName(event.target.value)} />
-            <Input aria-label="Manager password" type="password" placeholder="Manager password" autoComplete="current-password" value={cancellationManagerPassword} onChange={(event) => setCancellationManagerPassword(event.target.value)} />
-            {cancellationError && <p className="text-sm text-red-600" role="alert">{cancellationError}</p>}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" disabled={cancellationSaving} onClick={() => setCancellationTicketId(null)}>Close</Button>
-            <Button disabled={cancellationSaving} onClick={() => void cancelTicket()}>{cancellationSaving ? "Saving..." : "Approve Cancellation"}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
       <header className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 bg-primary rounded-2xl flex items-center justify-center text-white shadow-lg shadow-primary/20">
@@ -3077,8 +3202,8 @@ export default function BaristaPage() {
                                 {!isDelivered && <Button onClick={() => deliverTicket(ticket.id)} disabled={isDirector || deliveringTicketId === ticket.id} className="h-9 font-black uppercase text-[10px] tracking-widest bg-green-600 hover:bg-green-600/90">
                                   <CheckCircle2 className="w-4 h-4 mr-1" /> {deliveringTicketId === ticket.id ? "Saving" : "Delivered"}
                                 </Button>}
-                                <Button onClick={() => { setCancellationTicketId(ticket.id); setCancellationManagerName(""); setCancellationManagerPassword(""); setCancellationError(""); }} disabled={isDirector} className="h-9 font-black uppercase text-[10px] tracking-widest bg-red-600 hover:bg-red-600/90 text-white">
-                                  <XCircle className="w-4 h-4 mr-1" /> Cancelled
+                                <Button onClick={() => void requestCancellation(ticket.id)} disabled={isDirector || cancellationSaving || cancelRequests.some((request) => request.ticketId === ticket.id && request.status === "pending")} className="h-9 font-black uppercase text-[10px] tracking-widest bg-red-600 hover:bg-red-600/90 text-white">
+                                  <XCircle className="w-4 h-4 mr-1" /> {cancelRequests.some((request) => request.ticketId === ticket.id && request.status === "pending") ? "Requested" : "Request Cancel"}
                                 </Button>
                               </div>
                           </TableCell>

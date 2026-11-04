@@ -325,6 +325,7 @@ export const FIREBASE_SYNC_KEYS = [
   "orange-hotel-kitchen-state",
   "orange-hotel-barista-state",
   "orange-hotel-barista-stock-in-history",
+  "orange-hotel-barista-cancel-requests",
   "orange-hotel-barista-starting-capital-v1",
   "orange-hotel-company-stock",
   "orange-hotel-inventory-items",
@@ -924,6 +925,7 @@ function protectSyncedValueBeforeWrite(key: string, localValue: unknown, remoteV
     key === "orange-hotel-expenses" ||
     key === "orange-hotel-laundry-records" ||
     key === "orange-hotel-cancelled-tickets" ||
+    key === "orange-hotel-barista-cancel-requests" ||
     key === "orange-hotel-menu-audit-trail" ||
     key === "orange-hotel-store-movements" ||
     key === "orange-hotel-store-usage" ||
@@ -960,6 +962,7 @@ function getCanonicalDefaultValue(key: string) {
     case "orange-hotel-store-movements":
     case "orange-hotel-store-usage":
     case "orange-hotel-cancelled-tickets":
+    case "orange-hotel-barista-cancel-requests":
     case "orange-hotel-fnb-beverage-cost":
     case "orange-hotel-fnb-recipe-cost":
     case "orange-hotel-fnb-stock-sales":
