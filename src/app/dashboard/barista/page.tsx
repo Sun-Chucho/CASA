@@ -37,7 +37,7 @@ import { CheckCircle2, Coffee, Lock, Minus, Pencil, Plus, Receipt, Search, Trash
 import { useConfirmDialog } from "@/hooks/use-confirm-dialog";
 import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey, transactSyncedStorageKeys, transactSyncedStorageValue } from "@/app/lib/firebase-sync";
 import { reconcileCartWithMenu } from "@/app/lib/pos-menu";
-import { DEFAULT_LOGIN_PASSWORD, getProfilePassword, readActiveSessionUsername, readLocalLoginProfiles, saveLoginProfileToServer, STORAGE_LOGIN_PROFILES, subscribeToSessionIdentity, upsertProfileUser } from "@/app/lib/login-profiles";
+import { DEFAULT_LOGIN_PASSWORD, getDefaultLoginPassword, getProfilePassword, isProfileUserBlocked, readActiveSessionUsername, readLocalLoginProfiles, saveLoginProfileToServer, STORAGE_LOGIN_PROFILES, subscribeToSessionIdentity, upsertProfileUser } from "@/app/lib/login-profiles";
 
 type BaristaCategory =
   | "all"
@@ -138,6 +138,7 @@ interface CancelledBaristaTicket extends Omit<BaristaTicket, "status"> {
   status: "cancelled";
   source?: "kitchen" | "barista";
   cancelledAt: number;
+  approvedBy?: string;
 }
 
 interface PendingOrder {
@@ -342,6 +343,11 @@ export default function BaristaPage() {
   const [managerTab, setManagerTab] = useState<"inventory" | "finance" | "sales" | "drinks">("inventory");
   const [showManagerItemEditor, setShowManagerItemEditor] = useState(false);
   const [restockDialogOpen, setRestockDialogOpen] = useState(false);
+  const [cancellationTicketId, setCancellationTicketId] = useState<string | null>(null);
+  const [cancellationManagerName, setCancellationManagerName] = useState("");
+  const [cancellationManagerPassword, setCancellationManagerPassword] = useState("");
+  const [cancellationError, setCancellationError] = useState("");
+  const [cancellationSaving, setCancellationSaving] = useState(false);
   const [restockTargetItem, setRestockTargetItem] = useState<BaristaManagerPricingRow | null>(null);
   const managerSaveBusy = useRef(false);
   const restockOperationId = useRef("");
@@ -1799,17 +1805,21 @@ export default function BaristaPage() {
     }
   };
 
-  const cancelTicket = async (id: string) => {
-    if (isDirector) return;
-    const ticket = tickets.find((entry) => entry.id === id);
-    if (!ticket) return;
-    const approved = await confirm({
-      title: "Cancel Barista Order",
-      description: `Approve cancellation of ${ticket.code}? Its payment will be reversed and its stock restored.`,
-      actionLabel: "Approve Cancellation",
-    });
-    if (!approved) return;
+  const cancelTicket = async () => {
+    if (isDirector || !cancellationTicketId || cancellationSaving) return;
+    const managerName = cancellationManagerName.trim();
+    const managerProfile = readLocalLoginProfiles()?.manager;
+    const knownManagers = managerProfile?.users?.length
+      ? managerProfile.users.map((user) => user.username.trim().toLowerCase())
+      : [managerProfile?.username?.trim().toLowerCase() || "manager"];
+    if (!managerName || !knownManagers.includes(managerName.toLowerCase()) || isProfileUserBlocked(managerProfile, managerName) ||
+      cancellationManagerPassword !== getProfilePassword(managerProfile, managerName, getDefaultLoginPassword("manager"))) {
+      setCancellationError("Invalid manager username or password.");
+      return;
+    }
 
+    setCancellationSaving(true);
+    const id = cancellationTicketId;
     const activeBaristaKey = getActiveBaristaStateKey();
     try {
       const committed = await transactSyncedStorageKeys(
@@ -1836,7 +1846,7 @@ export default function BaristaPage() {
             },
             [STORAGE_MAIN_STORE_ITEMS]: stock.stores,
             [STORAGE_INVENTORY_ITEMS]: stock.inventory,
-            [STORAGE_CANCELLED]: [{ ...liveTicket, status: "cancelled", deliveredAt: undefined, source: "barista", cancelledAt }, ...cancelled],
+            [STORAGE_CANCELLED]: [{ ...liveTicket, status: "cancelled", deliveredAt: undefined, source: "barista", cancelledAt, approvedBy: managerName }, ...cancelled],
           };
         },
       );
@@ -1845,8 +1855,14 @@ export default function BaristaPage() {
       setBaristaPayments(snapshot.payments);
       setBaristaStoreItems(((committed[STORAGE_MAIN_STORE_ITEMS] as MainStoreItem[]) ?? []).filter((entry) => entry.lane === "barista" && !entry.deletedAt));
       setInventoryItems((committed[STORAGE_INVENTORY_ITEMS] as InventoryItem[]) ?? []);
+      setCancellationTicketId(null);
+      setCancellationManagerName("");
+      setCancellationManagerPassword("");
+      setCancellationError("");
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "Cancellation could not be saved. Please try again.");
+      setCancellationError(error instanceof Error ? error.message : "Cancellation could not be saved. Please try again.");
+    } finally {
+      setCancellationSaving(false);
     }
   };
 
@@ -2779,6 +2795,25 @@ export default function BaristaPage() {
   return (
     <div className="space-y-8">
       {dialog}
+      <Dialog open={cancellationTicketId !== null} onOpenChange={(open) => { if (!open && !cancellationSaving) setCancellationTicketId(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Manager approval for cancellation</DialogTitle>
+            <DialogDescription>
+              Approving cancels the order, reverses its payment record, and restores its stock.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input aria-label="Manager username" placeholder="Manager username" autoComplete="username" value={cancellationManagerName} onChange={(event) => setCancellationManagerName(event.target.value)} />
+            <Input aria-label="Manager password" type="password" placeholder="Manager password" autoComplete="current-password" value={cancellationManagerPassword} onChange={(event) => setCancellationManagerPassword(event.target.value)} />
+            {cancellationError && <p className="text-sm text-red-600" role="alert">{cancellationError}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" disabled={cancellationSaving} onClick={() => setCancellationTicketId(null)}>Close</Button>
+            <Button disabled={cancellationSaving} onClick={() => void cancelTicket()}>{cancellationSaving ? "Saving..." : "Approve Cancellation"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <header className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 bg-primary rounded-2xl flex items-center justify-center text-white shadow-lg shadow-primary/20">
@@ -3042,7 +3077,7 @@ export default function BaristaPage() {
                                 {!isDelivered && <Button onClick={() => deliverTicket(ticket.id)} disabled={isDirector || deliveringTicketId === ticket.id} className="h-9 font-black uppercase text-[10px] tracking-widest bg-green-600 hover:bg-green-600/90">
                                   <CheckCircle2 className="w-4 h-4 mr-1" /> {deliveringTicketId === ticket.id ? "Saving" : "Delivered"}
                                 </Button>}
-                                <Button onClick={() => cancelTicket(ticket.id)} disabled={isDirector} className="h-9 font-black uppercase text-[10px] tracking-widest bg-red-600 hover:bg-red-600/90 text-white">
+                                <Button onClick={() => { setCancellationTicketId(ticket.id); setCancellationManagerName(""); setCancellationManagerPassword(""); setCancellationError(""); }} disabled={isDirector} className="h-9 font-black uppercase text-[10px] tracking-widest bg-red-600 hover:bg-red-600/90 text-white">
                                   <XCircle className="w-4 h-4 mr-1" /> Cancelled
                                 </Button>
                               </div>

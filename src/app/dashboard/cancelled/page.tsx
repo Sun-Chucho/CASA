@@ -24,6 +24,7 @@ interface CancelledKitchenTicket {
   total: number;
   source?: "kitchen" | "barista";
   cancelledAt: number;
+  approvedBy?: string;
 }
 
 const STORAGE_CANCELLED = "orange-hotel-cancelled-tickets";
@@ -170,6 +171,7 @@ export default function CancelledPage() {
                     <Badge className="bg-red-600 text-white border-red-600 hover:bg-red-600">
                       <XCircle className="w-3.5 h-3.5 mr-1" /> {formatAgo(ticket.cancelledAt)}
                     </Badge>
+                    {ticket.approvedBy && <p className="mt-1 text-xs text-muted-foreground">Approved by {ticket.approvedBy}</p>}
                   </TableCell>
                 </TableRow>
               ))}
