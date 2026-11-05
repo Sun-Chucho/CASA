@@ -10,6 +10,8 @@ import { readJson, readPosState, STORAGE_BARISTA_STATE } from "@/app/lib/storage
 import { BAR_CATEGORIES, buyingPriceUnit, syncBarCatalogToPos } from "@/app/lib/bar-catalog";
 import { getRemainingTots, getTotLimit } from "@/app/lib/barista-stock";
 import { STOCK_IN_HISTORY_KEY, StockInEntry } from "@/app/lib/bar-stock-history";
+import { KitchenPurchaseHistoryEntry, STORAGE_BARISTA_PURCHASE_HISTORY } from "@/app/lib/kitchen-session-storage";
+import { downloadCSV } from "@/app/lib/inventory-manager";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -18,11 +20,18 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 
 const CATEGORIES = [...BAR_CATEGORIES, "beer", "wine", "spirits", "cider", "soft-drinks", "water-juice", "energy-drinks", "malt", "coffee", "tea", "cold", "snacks"] as const;
 type DrinkCategory = typeof CATEGORIES[number];
-type StockMode = "new" | "addition";
+type StockMode = "new" | "addition" | "history";
+type HistoryFilter = "date" | "month" | "year" | "all";
 type StockMenuItem = { id: string; name: string; price: number; buyingPrice?: number; category: DrinkCategory; prepMinutes: number; updatedAt?: number; deletedAt?: number };
 
 function today() {
   const date = new Date();
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+}
+
+function localDate(value: string | number) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
   return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
 }
 
@@ -46,6 +55,11 @@ export default function StockInPage() {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [menus, setMenus] = useState<StockMenuItem[]>([]);
   const [history, setHistory] = useState<StockInEntry[]>([]);
+  const [purchaseHistory, setPurchaseHistory] = useState<KitchenPurchaseHistoryEntry[]>([]);
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("date");
+  const [historyDate, setHistoryDate] = useState(today);
+  const [historyMonth, setHistoryMonth] = useState(() => today().slice(0, 7));
+  const [historyYear, setHistoryYear] = useState(() => today().slice(0, 4));
   const [selected, setSelected] = useState("");
   const [name, setName] = useState("");
   const [size, setSize] = useState("");
@@ -67,6 +81,7 @@ export default function StockInPage() {
     setInventory((readJson<InventoryItem[]>(STORAGE_INVENTORY_ITEMS) ?? []).filter((item) => item.category.trim().toLowerCase() === "bar" && item.status !== "INACTIVE"));
     setMenus(readBaristaSnapshot().menuItems.filter((item) => !item.deletedAt));
     setHistory(readJson<StockInEntry[]>(STOCK_IN_HISTORY_KEY) ?? []);
+    setPurchaseHistory(readJson<KitchenPurchaseHistoryEntry[]>(STORAGE_BARISTA_PURCHASE_HISTORY) ?? []);
   };
 
   useEffect(() => {
@@ -78,8 +93,9 @@ export default function StockInPage() {
       hydrateStorageKeyFromFirebase(STORAGE_INVENTORY_ITEMS),
       hydrateStorageKeyFromFirebase(STORAGE_BARISTA_STATE),
       hydrateStorageKeyFromFirebase(STOCK_IN_HISTORY_KEY),
+      hydrateStorageKeyFromFirebase(STORAGE_BARISTA_PURCHASE_HISTORY),
     ]).then(() => syncBarCatalogToPos()).catch((error) => console.error("Bar catalog sync failed", error)).finally(() => { reload(); if (!cancelled) setHydrated(true); });
-    const unsubscribers = [STORAGE_MAIN_STORE_ITEMS, STORAGE_INVENTORY_ITEMS, STORAGE_BARISTA_STATE, STOCK_IN_HISTORY_KEY]
+    const unsubscribers = [STORAGE_MAIN_STORE_ITEMS, STORAGE_INVENTORY_ITEMS, STORAGE_BARISTA_STATE, STOCK_IN_HISTORY_KEY, STORAGE_BARISTA_PURCHASE_HISTORY]
       .map((key) => subscribeToSyncedStorageKey(key, reload));
     reload();
     return () => { cancelled = true; unsubscribers.forEach((unsubscribe) => unsubscribe()); };
@@ -122,8 +138,61 @@ export default function StockInPage() {
     setFeedback("");
   };
 
+  const historyRows = useMemo(() => [
+    ...history.filter((entry) => entry.quantity > 0).map((entry) => {
+      const store = stores.find((item) => normalizeBaristaProductTarget(getStoreItemLabel(item)) === normalizeBaristaProductTarget(entry.itemName));
+      const priceUnit = buyingPriceUnit(entry.itemName);
+      const unitsPerBottle = priceUnit === "tot" ? getTotLimit(store ?? { name: entry.itemName, size: "", totLimit: undefined }) || 30 : 1;
+      return {
+        id: `stock-${entry.id}`,
+        date: entry.date || localDate(entry.recordedAt),
+        recordedAt: entry.recordedAt ?? 0,
+        itemName: entry.itemName,
+        source: entry.kind === "new" ? "New Item" : "New Addition",
+        quantity: entry.quantity,
+        unit: entry.unit ?? "units",
+        buyingPrice: entry.buyingPrice,
+        priceUnit,
+        totalCost: entry.quantity * entry.buyingPrice * unitsPerBottle,
+        sellingPrice: entry.sellingPrice as number | null,
+        user: entry.user ?? "",
+      };
+    }),
+    ...purchaseHistory.flatMap((purchase) => purchase.lines.filter((line) => line.addedQty > 0).map((line) => ({
+      id: `purchase-${purchase.id}-${line.id}`,
+      date: localDate(purchase.closedAt),
+      recordedAt: new Date(purchase.closedAt).getTime() || 0,
+      itemName: line.itemName,
+      source: "Bar Purchase",
+      quantity: line.addedQty,
+      unit: line.unit,
+      buyingPrice: line.pricePerUnit,
+      priceUnit: line.unit,
+      totalCost: line.addedQty * line.pricePerUnit,
+      sellingPrice: null as number | null,
+      user: purchase.signoff?.approvedBy || purchase.signoff?.preparedBy || "",
+    }))),
+  ].sort((a, b) => b.date.localeCompare(a.date) || b.recordedAt - a.recordedAt), [history, purchaseHistory, stores]);
+
+  const filteredHistoryRows = useMemo(() => historyRows.filter((entry) => {
+    if (historyFilter === "date") return entry.date === historyDate;
+    if (historyFilter === "month") return entry.date.slice(0, 7) === historyMonth;
+    if (historyFilter === "year") return entry.date.slice(0, 4) === historyYear;
+    return true;
+  }), [historyDate, historyFilter, historyMonth, historyRows, historyYear]);
+  const filteredHistoryTotal = filteredHistoryRows.reduce((sum, entry) => sum + entry.totalCost, 0);
+
+  const downloadHistory = () => {
+    const period = historyFilter === "date" ? historyDate : historyFilter === "month" ? historyMonth : historyFilter === "year" ? historyYear : "all-time";
+    const rows = filteredHistoryRows.map((entry) => [entry.date, entry.itemName, entry.source, String(entry.quantity), entry.unit, String(entry.buyingPrice), entry.priceUnit, String(entry.totalCost), entry.sellingPrice === null ? "" : String(entry.sellingPrice), entry.user]);
+    downloadCSV(`bar-restock-history-${period}.csv`,
+      ["Purchase Date", "Drink", "Source", "Quantity", "Unit", "Buying Price (TSh)", "Price Unit", "Total Cost (TSh)", "Selling Price (TSh)", "Recorded By"],
+      [...rows, ["", "", "Total", "", "", "", "", String(filteredHistoryTotal), "", ""]],
+    );
+  };
+
   const save = async () => {
-    if (saveBusy.current || saving || !hydrated || role !== "manager") return;
+    if (mode === "history" || saveBusy.current || saving || !hydrated || role !== "manager") return;
     const qty = Number(quantity);
     const buy = Number(buyingPrice);
     const sell = Number(sellingPrice);
@@ -213,11 +282,12 @@ export default function StockInPage() {
     <div className="space-y-6">
       <header>
         <h1 className="text-3xl font-black tracking-tight">Stock In</h1>
-        <p className="text-sm text-muted-foreground">Manager drink stock: create a new item or record a dated addition to an existing item.</p>
+        <p className="text-sm text-muted-foreground">Create drinks, record stock additions, and review purchase history by date.</p>
       </header>
       <Tabs value={mode} onValueChange={(value) => { setMode(value as StockMode); setFeedback(""); setQuantity(""); setBuyingPrice(""); setSellingPrice(""); setSelected(""); }}>
-        <TabsList><TabsTrigger value="new">New Item</TabsTrigger><TabsTrigger value="addition">New Additions</TabsTrigger></TabsList>
+        <TabsList><TabsTrigger value="new">New Item</TabsTrigger><TabsTrigger value="addition">New Additions</TabsTrigger><TabsTrigger value="history">Restock History</TabsTrigger></TabsList>
       </Tabs>
+      {mode !== "history" && <>
       <Card>
         <CardHeader><CardTitle>{mode === "new" ? "Set opening stock" : "Record stock addition"}</CardTitle><CardDescription>Buying price is per bottle or unit, except St. Remy (per tot). Selling price is per tot for tot products and per unit otherwise.</CardDescription></CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -242,6 +312,34 @@ export default function StockInPage() {
         <CardHeader><CardTitle>Recent additions</CardTitle><CardDescription>Recorded stock entries and their purchase dates.</CardDescription></CardHeader>
         <CardContent className="overflow-x-auto p-0"><Table><TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Drink</TableHead><TableHead>Type</TableHead><TableHead>Quantity received</TableHead><TableHead>Buying price</TableHead><TableHead>Selling price</TableHead><TableHead>Recorded by</TableHead></TableRow></TableHeader><TableBody>{history.slice(0, 30).map((entry) => <TableRow key={entry.id}><TableCell>{entry.date}</TableCell><TableCell>{entry.itemName}</TableCell><TableCell>{entry.kind === "new" ? "Opening stock" : "Addition"}</TableCell><TableCell>{entry.quantity} {entry.unit ?? ""}</TableCell><TableCell>TSh {entry.buyingPrice.toLocaleString()}</TableCell><TableCell>TSh {entry.sellingPrice.toLocaleString()}</TableCell><TableCell>{entry.user ?? "—"}</TableCell></TableRow>)}{history.length === 0 && <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">No stock entries yet.</TableCell></TableRow>}</TableBody></Table></CardContent>
       </Card>
+      </>}
+      {mode === "history" && <Card>
+        <CardHeader className="gap-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle>Restock History</CardTitle>
+              <CardDescription>Drinks received through Stock In, Bar inventory restock, and Bar purchases.</CardDescription>
+            </div>
+            <Button variant="outline" onClick={downloadHistory} disabled={!hydrated || filteredHistoryRows.length === 0}>Download CSV</Button>
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
+            <div><label htmlFor="restock-history-period" className={fieldLabel}>Period</label><select id="restock-history-period" className="h-10 rounded-md border bg-background px-3 text-sm" value={historyFilter} onChange={(event) => setHistoryFilter(event.target.value as HistoryFilter)}><option value="date">Date</option><option value="month">Month</option><option value="year">Year</option><option value="all">All Time</option></select></div>
+            {historyFilter === "date" && <div><label htmlFor="restock-history-date" className={fieldLabel}>Purchase date</label><Input id="restock-history-date" type="date" value={historyDate} onChange={(event) => setHistoryDate(event.target.value)} /></div>}
+            {historyFilter === "month" && <div><label htmlFor="restock-history-month" className={fieldLabel}>Purchase month</label><Input id="restock-history-month" type="month" value={historyMonth} onChange={(event) => setHistoryMonth(event.target.value)} /></div>}
+            {historyFilter === "year" && <div><label htmlFor="restock-history-year" className={fieldLabel}>Purchase year</label><Input id="restock-history-year" type="number" min="2000" max={new Date().getFullYear()} value={historyYear} onChange={(event) => setHistoryYear(event.target.value)} className="w-28" /></div>}
+          </div>
+          <p className="text-sm font-medium">{filteredHistoryRows.length} drink entr{filteredHistoryRows.length === 1 ? "y" : "ies"} · Total buying cost: TSh {filteredHistoryTotal.toLocaleString()}</p>
+        </CardHeader>
+        <CardContent className="overflow-x-auto p-0">
+          <Table>
+            <TableHeader><TableRow><TableHead>Purchase date</TableHead><TableHead>Drink</TableHead><TableHead>Source</TableHead><TableHead>Quantity received</TableHead><TableHead>Buying price</TableHead><TableHead>Total cost</TableHead><TableHead>Selling price</TableHead><TableHead>Recorded by</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {filteredHistoryRows.map((entry) => <TableRow key={entry.id}><TableCell className="font-medium">{entry.date}</TableCell><TableCell className="font-medium">{entry.itemName}</TableCell><TableCell>{entry.source}</TableCell><TableCell>{entry.quantity} {entry.unit}</TableCell><TableCell>TSh {entry.buyingPrice.toLocaleString()} / {entry.priceUnit}</TableCell><TableCell className="font-medium">TSh {entry.totalCost.toLocaleString()}</TableCell><TableCell>{entry.sellingPrice === null ? "—" : `TSh ${entry.sellingPrice.toLocaleString()}`}</TableCell><TableCell>{entry.user || "—"}</TableCell></TableRow>)}
+              {filteredHistoryRows.length === 0 && <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">No drinks received for this period.</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>}
     </div>
   );
 }
