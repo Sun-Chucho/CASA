@@ -363,6 +363,7 @@ export default function BaristaPage() {
   const restockOperationId = useRef("");
   const restockOperationItemId = useRef("");
   const [restockQtyInput, setRestockQtyInput] = useState("");
+  const [restockDateInput, setRestockDateInput] = useState(getLocalDateInputValue);
   const [restockBuyingPriceInput, setRestockBuyingPriceInput] = useState("");
   const [drinkEditId, setDrinkEditId] = useState<string | null>(null);
   const [drinkName, setDrinkName] = useState("");
@@ -1035,7 +1036,7 @@ export default function BaristaPage() {
   // refresh or a new login cannot reintroduce an older value from another key.
   const saveBaristaManagerItem = async (
     item: BaristaManagerPricingRow,
-    customValues?: { stockIn?: number; buyingPrice?: number; sellingPrice?: number; operationId?: string },
+    customValues?: { stockIn?: number; buyingPrice?: number; sellingPrice?: number; date?: string; operationId?: string },
   ) => {
     if (managerSaveBusy.current) return false;
     const draft = managerPricingDrafts[item.id] ?? {
@@ -1052,6 +1053,7 @@ export default function BaristaPage() {
     const sellingPrice = customValues?.sellingPrice !== undefined
       ? customValues.sellingPrice
       : Number(draft.sellingPrice);
+    const stockDate = customValues?.date ?? getLocalDateInputValue();
     if (
       !Number.isInteger(stockIn) ||
       stockIn < 0 ||
@@ -1061,6 +1063,11 @@ export default function BaristaPage() {
       sellingPrice < 0
     ) {
       window.alert("Enter valid non-negative stock-in, buying price and selling price values.");
+      return false;
+    }
+    const parsedStockDate = new Date(`${stockDate}T12:00:00`);
+    if (stockIn > 0 && (!/^\d{4}-\d{2}-\d{2}$/.test(stockDate) || !Number.isFinite(parsedStockDate.getTime()) || getLocalDateInputValue(parsedStockDate) !== stockDate || stockDate > getLocalDateInputValue())) {
+      window.alert("Choose a valid purchase date that is not in the future.");
       return false;
     }
 
@@ -1112,7 +1119,7 @@ export default function BaristaPage() {
             updatedAt,
           });
         }
-        const entry: StockInEntry = { id: operationId, itemId: nextStore.id, itemName: item.name, kind: "addition", date: getLocalDateInputValue(), quantity: stockIn, unit: getTotLimit(nextStore) > 0 ? "bottles" : nextStore.unit, buyingPrice, sellingPrice, recordedAt: updatedAt, user: readActiveSessionUsername(readStoredRole() ?? "manager") };
+        const entry: StockInEntry = { id: operationId, itemId: nextStore.id, itemName: item.name, kind: "addition", date: stockDate, quantity: stockIn, unit: getTotLimit(nextStore) > 0 ? "bottles" : nextStore.unit, buyingPrice, sellingPrice, recordedAt: updatedAt, user: readActiveSessionUsername(readStoredRole() ?? "manager") };
         return { [activeBaristaKey]: { ...snapshot, menuItems: nextMenuItems }, [STORAGE_MAIN_STORE_ITEMS]: stores, [STORAGE_INVENTORY_ITEMS]: inventory, [STOCK_IN_HISTORY_KEY]: stockIn > 0 ? [entry, ...history] : history };
       });
       const savedSnapshot = committed[activeBaristaKey] as ReturnType<typeof readPosState<BaristaTicket, BaristaPaymentRecord, BaristaMenuItem>>;
@@ -1139,6 +1146,7 @@ export default function BaristaPage() {
     if (restockOperationItemId.current !== item.id) { restockOperationId.current = crypto.randomUUID(); restockOperationItemId.current = item.id; }
     setRestockTargetItem(item);
     setRestockQtyInput("");
+    setRestockDateInput(getLocalDateInputValue());
     setRestockBuyingPriceInput(item.buyingPrice > 0 ? String(item.buyingPrice) : "");
     setRestockDialogOpen(true);
   };
@@ -1160,6 +1168,7 @@ export default function BaristaPage() {
       stockIn: qty,
       buyingPrice: buying,
       sellingPrice: currentSelling,
+      date: restockDateInput,
       operationId: restockOperationId.current,
     });
     if (!saved) return;
@@ -1168,6 +1177,7 @@ export default function BaristaPage() {
     setRestockDialogOpen(false);
     setRestockTargetItem(null);
     setRestockQtyInput("");
+    setRestockDateInput(getLocalDateInputValue());
     setRestockBuyingPriceInput("");
   };
 
@@ -1299,7 +1309,7 @@ export default function BaristaPage() {
       source: "Purchase",
       user: purchase.signoff?.approvedBy || purchase.signoff?.preparedBy || "",
     }))),
-  ].sort((a, b) => b.recordedAt - a.recordedAt);
+  ].sort((a, b) => b.date.localeCompare(a.date) || b.recordedAt - a.recordedAt);
   }, [barPurchaseHistory, baristaStoreItems, stockInHistory]);
   const restockCapital = useMemo(
     () => barRestockHistory.reduce((sum, entry) => sum + entry.amount, 0),
@@ -2746,6 +2756,20 @@ export default function BaristaPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
+            <div className="space-y-1">
+              <label htmlFor="bar-restock-date" className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                Purchase Date
+              </label>
+              <Input
+                id="bar-restock-date"
+                type="date"
+                required
+                max={getLocalDateInputValue()}
+                value={restockDateInput}
+                onChange={(event) => setRestockDateInput(event.target.value)}
+                className="h-11"
+              />
+            </div>
             <div className="space-y-1">
               <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
                 Quantity to Add ({restockTargetItem?.totsPerBottle ? "bottles" : restockTargetItem?.unit || "units"})
