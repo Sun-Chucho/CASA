@@ -309,6 +309,12 @@ function getLocalDateInputValue(now = new Date()) {
   return new Date(now.getTime() - offsetMs).toISOString().slice(0, 10);
 }
 
+function isValidPurchaseDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T12:00:00`);
+  return Number.isFinite(date.getTime()) && getLocalDateInputValue(date) === value && value <= getLocalDateInputValue();
+}
+
 function normalizeBaristaTarget(name: string) {
   return normalizeBaristaProductTarget(name);
 }
@@ -365,6 +371,7 @@ export default function BaristaPage() {
   const [restockQtyInput, setRestockQtyInput] = useState("");
   const [restockDateInput, setRestockDateInput] = useState(getLocalDateInputValue);
   const [restockBuyingPriceInput, setRestockBuyingPriceInput] = useState("");
+  const [restockConfirmationPending, setRestockConfirmationPending] = useState(false);
   const [drinkEditId, setDrinkEditId] = useState<string | null>(null);
   const [drinkName, setDrinkName] = useState("");
   const [drinkPrice, setDrinkPrice] = useState("");
@@ -1065,8 +1072,7 @@ export default function BaristaPage() {
       window.alert("Enter valid non-negative stock-in, buying price and selling price values.");
       return false;
     }
-    const parsedStockDate = new Date(`${stockDate}T12:00:00`);
-    if (stockIn > 0 && (!/^\d{4}-\d{2}-\d{2}$/.test(stockDate) || !Number.isFinite(parsedStockDate.getTime()) || getLocalDateInputValue(parsedStockDate) !== stockDate || stockDate > getLocalDateInputValue())) {
+    if (stockIn > 0 && !isValidPurchaseDate(stockDate)) {
       window.alert("Choose a valid purchase date that is not in the future.");
       return false;
     }
@@ -1152,33 +1158,49 @@ export default function BaristaPage() {
   };
 
   const handleConfirmRestock = async () => {
-    if (!restockTargetItem) return;
+    if (!restockTargetItem || restockConfirmationPending) return;
     const qty = Number(restockQtyInput);
     const buying = Number(restockBuyingPriceInput);
     if (!Number.isInteger(qty) || qty <= 0 || !Number.isFinite(buying) || buying < 0) {
       window.alert("Please enter a positive whole number of bottles or units and a valid non-negative buying price.");
       return;
     }
+    if (!isValidPurchaseDate(restockDateInput)) {
+      window.alert("Choose a valid purchase date that is not in the future.");
+      return;
+    }
 
-    const currentSelling = managerPricingDrafts[restockTargetItem.id]?.sellingPrice
-      ? Number(managerPricingDrafts[restockTargetItem.id]?.sellingPrice)
-      : restockTargetItem.sellingPrice;
+    setRestockConfirmationPending(true);
+    try {
+      const unit = restockTargetItem.totsPerBottle ? "bottles" : restockTargetItem.unit || "units";
+      const approved = await confirm({
+        title: "Confirm Bar Restock",
+        description: `Do you want to add ${qty} ${unit} of ${restockTargetItem.name} for ${restockDateInput}?`,
+        actionLabel: "OK, Restock",
+      });
+      if (!approved) return;
 
-    const saved = await saveBaristaManagerItem(restockTargetItem, {
-      stockIn: qty,
-      buyingPrice: buying,
-      sellingPrice: currentSelling,
-      date: restockDateInput,
-      operationId: restockOperationId.current,
-    });
-    if (!saved) return;
-    restockOperationId.current = "";
-    restockOperationItemId.current = "";
-    setRestockDialogOpen(false);
-    setRestockTargetItem(null);
-    setRestockQtyInput("");
-    setRestockDateInput(getLocalDateInputValue());
-    setRestockBuyingPriceInput("");
+      const currentSelling = managerPricingDrafts[restockTargetItem.id]?.sellingPrice
+        ? Number(managerPricingDrafts[restockTargetItem.id]?.sellingPrice)
+        : restockTargetItem.sellingPrice;
+      const saved = await saveBaristaManagerItem(restockTargetItem, {
+        stockIn: qty,
+        buyingPrice: buying,
+        sellingPrice: currentSelling,
+        date: restockDateInput,
+        operationId: restockOperationId.current,
+      });
+      if (!saved) return;
+      restockOperationId.current = "";
+      restockOperationItemId.current = "";
+      setRestockDialogOpen(false);
+      setRestockTargetItem(null);
+      setRestockQtyInput("");
+      setRestockDateInput(getLocalDateInputValue());
+      setRestockBuyingPriceInput("");
+    } finally {
+      setRestockConfirmationPending(false);
+    }
   };
 
   const deleteBaristaItem = async (itemId: string, itemName?: string) => {
@@ -2805,9 +2827,10 @@ export default function BaristaPage() {
             </Button>
             <Button
               onClick={() => void handleConfirmRestock()}
+              disabled={restockConfirmationPending || savingBaristaItemId === restockTargetItem?.id}
               className="font-black uppercase tracking-widest"
             >
-              Confirm Restock
+              {restockConfirmationPending ? "Confirming..." : "Add Restock"}
             </Button>
           </DialogFooter>
         </DialogContent>
