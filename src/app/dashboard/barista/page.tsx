@@ -61,7 +61,7 @@ type BaristaPaymentMethod = "cash" | "mobile" | "bank" | "card" | "credit";
 type PaidBaristaPaymentMethod = "cash" | "mobile" | "bank";
 type BaristaPaymentStatus = "completed" | "credit";
 type BaristaOrderLine = { name: string; qty: number };
-type SalesDateFilter = "day" | "week" | "month" | "all";
+type SalesDateFilter = "day" | "week" | "month" | "all" | "date";
 type BaristaManagerPricingRow = {
   id: string;
   name: string;
@@ -191,12 +191,13 @@ const BARISTA_CATEGORIES: Array<{ value: BaristaCategory; label: string }> = [
   { value: "snacks", label: "Snacks" },
 ];
 
-function matchesSalesDateFilter(createdAt: number | undefined, filter: SalesDateFilter) {
+function matchesSalesDateFilter(createdAt: number | undefined, filter: SalesDateFilter, selectedDate: string) {
   if (filter === "all") return true;
   if (!createdAt) return false;
 
   const saleDate = new Date(createdAt);
   if (!Number.isFinite(saleDate.getTime())) return false;
+  if (filter === "date") return Boolean(selectedDate) && getLocalDateInputValue(saleDate) === selectedDate;
 
   const now = new Date();
   const saleDay = new Date(saleDate.getFullYear(), saleDate.getMonth(), saleDate.getDate()).getTime();
@@ -381,6 +382,7 @@ export default function BaristaPage() {
   const [managerCategoryFilter, setManagerCategoryFilter] = useState("all");
   const [directorTab, setDirectorTab] = useState<"inventory" | "finance" | "purchases" | "sales">("finance");
   const [directorSalesDateFilter, setDirectorSalesDateFilter] = useState<SalesDateFilter>("day");
+  const [directorSalesDate, setDirectorSalesDate] = useState(getLocalDateInputValue);
   const [category, setCategory] = useState<BaristaCategory>("all");
   const [serviceMode, setServiceMode] = useState<ServiceMode>("restaurant");
   const [searchTerm, setSearchTerm] = useState("");
@@ -1340,9 +1342,9 @@ export default function BaristaPage() {
   const filteredDirectorSalesPayments = useMemo(
     () =>
       [...baristaPayments]
-        .filter((payment) => matchesSalesDateFilter(payment.createdAt, directorSalesDateFilter))
+        .filter((payment) => matchesSalesDateFilter(payment.createdAt, directorSalesDateFilter, directorSalesDate))
         .sort((a, b) => b.createdAt - a.createdAt),
-    [baristaPayments, directorSalesDateFilter],
+    [baristaPayments, directorSalesDate, directorSalesDateFilter],
   );
   const directorSalesRows = useMemo(
     () =>
@@ -1499,14 +1501,24 @@ export default function BaristaPage() {
             Itemized sales captured from barista POS settlements.
           </p>
         </div>
-        <Tabs value={directorSalesDateFilter} onValueChange={(value) => setDirectorSalesDateFilter(value as SalesDateFilter)}>
-          <TabsList className="h-10">
-            <TabsTrigger value="day" className="font-black uppercase text-[10px] tracking-widest">Day</TabsTrigger>
-            <TabsTrigger value="week" className="font-black uppercase text-[10px] tracking-widest">Week</TabsTrigger>
-            <TabsTrigger value="month" className="font-black uppercase text-[10px] tracking-widest">Month</TabsTrigger>
-            <TabsTrigger value="all" className="font-black uppercase text-[10px] tracking-widest">All Time</TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Tabs value={directorSalesDateFilter} onValueChange={(value) => setDirectorSalesDateFilter(value as SalesDateFilter)}>
+            <TabsList className="h-10">
+              <TabsTrigger value="day" className="font-black uppercase text-[10px] tracking-widest">Today</TabsTrigger>
+              <TabsTrigger value="week" className="font-black uppercase text-[10px] tracking-widest">Week</TabsTrigger>
+              <TabsTrigger value="month" className="font-black uppercase text-[10px] tracking-widest">Month</TabsTrigger>
+              <TabsTrigger value="all" className="font-black uppercase text-[10px] tracking-widest">All Time</TabsTrigger>
+              <TabsTrigger value="date" className="font-black uppercase text-[10px] tracking-widest">Date</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <Input
+            type="date"
+            aria-label="Bar sales date"
+            value={directorSalesDate}
+            onChange={(event) => { setDirectorSalesDate(event.target.value); setDirectorSalesDateFilter("date"); }}
+            className="h-10 sm:w-[160px]"
+          />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -1533,7 +1545,7 @@ export default function BaristaPage() {
       <Card className="border-none shadow-sm">
         <CardHeader>
           <CardTitle className="text-xl font-black uppercase tracking-tight">Sold Items</CardTitle>
-          <CardDescription>Filter by day, week, month, or all time.</CardDescription>
+          <CardDescription>Filter by today, week, month, all time, or a selected date.</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
