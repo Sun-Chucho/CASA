@@ -1086,13 +1086,30 @@ export default function BaristaPage() {
         if (storeIndex >= 0) stores[storeIndex] = nextStore; else stores.push(nextStore);
         if (inventoryIndex >= 0) inventory[inventoryIndex] = { ...inventory[inventoryIndex], stock: nextStore.stock, totSold: nextStore.totSold ?? 0, totPerBottle: getTotLimit(nextStore) || undefined, buyingPrice, sellingPrice, price: sellingPrice, receivedStock: (inventory[inventoryIndex].receivedStock ?? 0) + stockIn, updatedAt };
         else inventory.push({ id: `inv-manager-${updatedAt}`, barcode: "", name: nextStore.name, category: "Bar", subCategory: nextStore.subCategory, size: nextStore.size ?? "", stock: nextStore.stock, totSold: nextStore.totSold ?? 0, totPerBottle: getTotLimit(nextStore) || undefined, buyingPrice, sellingPrice, price: sellingPrice, status: "ACTIVE", minStock: nextStore.minStock, unit: nextStore.unit, receivedStock: stockIn, updatedAt });
+        const snapshotMenu = Array.isArray(snapshot.menuItems) ? snapshot.menuItems : [];
+        // The inventory screen can show a seeded drink before its POS menu entry
+        // has reached the shared snapshot. Keep the selected drink and stock in
+        // the same transaction instead of rejecting an otherwise valid restock.
+        if (snapshotMenu.some((menuItem) => menuItem.deletedAt && (menuItem.id === item.id || normalizeBaristaTarget(menuItem.name) === target))) {
+          throw new Error("This drink was deleted. Refresh the page before restocking it.");
+        }
         let matchedMenu = false;
-        const nextMenuItems = snapshot.menuItems.map((menuItem) => {
+        const nextMenuItems = snapshotMenu.map((menuItem) => {
           if (menuItem.deletedAt || normalizeBaristaTarget(menuItem.name) !== target) return menuItem;
           matchedMenu = true;
           return { ...menuItem, buyingPrice, price: sellingPrice, updatedAt };
         });
-        if (!matchedMenu) throw new Error("The menu item is missing. Refresh this page and try again.");
+        if (!matchedMenu) {
+          nextMenuItems.push({
+            id: snapshotMenu.some((menuItem) => menuItem.id === item.id) ? `restock-menu-${operationId}` : item.id,
+            name: item.name,
+            category: item.category as BaristaMenuItem["category"],
+            prepMinutes: 2,
+            buyingPrice,
+            price: sellingPrice,
+            updatedAt,
+          });
+        }
         const entry: StockInEntry = { id: operationId, itemId: nextStore.id, itemName: item.name, kind: "addition", date: getLocalDateInputValue(), quantity: stockIn, unit: getTotLimit(nextStore) > 0 ? "bottles" : nextStore.unit, buyingPrice, sellingPrice, recordedAt: updatedAt, user: readActiveSessionUsername(readStoredRole() ?? "manager") };
         return { [activeBaristaKey]: { ...snapshot, menuItems: nextMenuItems }, [STORAGE_MAIN_STORE_ITEMS]: stores, [STORAGE_INVENTORY_ITEMS]: inventory, [STOCK_IN_HISTORY_KEY]: stockIn > 0 ? [entry, ...history] : history };
       });
