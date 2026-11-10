@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { BreakfastAllocation, BREAKFAST_PRICE, STORAGE_BREAKFAST, roomRevenue } from "@/app/lib/breakfast";
 import { format } from "date-fns";
 import type { DateRange } from "react-day-picker";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -49,6 +50,7 @@ type ReportRange = "daily" | "weekly" | "monthly" | "custom" | "all-time";
 type AnalyticsView = "analytics" | "reports";
 
 type BookingTransaction = {
+  id?: string;
   createdAt?: number;
   total?: number;
   guestName?: string;
@@ -68,6 +70,7 @@ type RevenueHistoryRow = {
   label: string;
   totalRevenue: number;
   roomRevenue: number;
+  breakfastRevenue: number;
   kitchenRevenue: number;
   baristaRevenue: number;
   laundryRevenue: number;
@@ -78,7 +81,7 @@ type RevenueHistoryRow = {
 type BusinessEvent = {
   date: string;
   timestamp: number;
-  source: "rooms" | "kitchen" | "barista" | "laundry" | "expense";
+  source: "rooms" | "breakfast" | "kitchen" | "barista" | "laundry" | "expense";
   total: number;
 };
 
@@ -248,6 +251,7 @@ export default function AnalyticsPage() {
   });
   const [isDateFilterOpen, setIsDateFilterOpen] = useState(false);
   const [bookings, setBookings] = useState<BookingTransaction[]>([]);
+  const [breakfast, setBreakfast] = useState<BreakfastAllocation[]>([]);
   const [kitchenPayments, setKitchenPayments] = useState<PosPaymentRecord[]>([]);
   const [baristaPayments, setBaristaPayments] = useState<PosPaymentRecord[]>([]);
   const [beverageRows, setBeverageRows] = useState<BeverageCostRow[]>([]);
@@ -284,6 +288,7 @@ export default function AnalyticsPage() {
       );
 
       setBookings(cashierSnapshot.transactions);
+      setBreakfast(readJson<BreakfastAllocation[]>(STORAGE_BREAKFAST) ?? []);
       setKitchenPayments(kitchenSnapshot.payments);
       setBaristaPayments(baristaSnapshot.payments);
       setBeverageRows(readJson<BeverageCostRow[]>(STORAGE_BEVERAGE_COST) ?? []);
@@ -297,6 +302,7 @@ export default function AnalyticsPage() {
 
     void Promise.all([
       hydrateStorageKeyFromFirebase("orange-hotel-cashier-state", true),
+      hydrateStorageKeyFromFirebase(STORAGE_BREAKFAST, true),
       hydrateStorageKeyFromFirebase(activeKitchenKey, true),
       hydrateStorageKeyFromFirebase(activeBaristaKey, true),
       hydrateStorageKeyFromFirebase(STORAGE_BEVERAGE_COST, true),
@@ -310,6 +316,7 @@ export default function AnalyticsPage() {
 
     const unsubscribers = [
       subscribeToSyncedStorageKey("orange-hotel-cashier-state", applyAnalyticsSnapshot),
+      subscribeToSyncedStorageKey(STORAGE_BREAKFAST, applyAnalyticsSnapshot),
       subscribeToSyncedStorageKey(activeKitchenKey, applyAnalyticsSnapshot),
       subscribeToSyncedStorageKey("orange-hotel-kitchen-payments", applyAnalyticsSnapshot),
       subscribeToSyncedStorageKey(activeBaristaKey, applyAnalyticsSnapshot),
@@ -330,7 +337,16 @@ export default function AnalyticsPage() {
 
     bookings.forEach((booking) => {
       if (booking.status === "credit" || !booking.createdAt || !booking.total) return;
-      events.push({ date: toDayKey(booking.createdAt), timestamp: booking.createdAt, source: "rooms", total: booking.total });
+      events.push({ date: toDayKey(booking.createdAt), timestamp: booking.createdAt, source: "rooms", total: roomRevenue(booking, breakfast) });
+    });
+
+    breakfast.forEach((allocation) => {
+      if (allocation.count <= 0) return;
+      const booking = bookings.find((entry) => entry.id === allocation.bookingId);
+      if (!booking || booking.status === "credit") return;
+      const timestamp = new Date(`${allocation.date}T10:00:00`).getTime();
+      if (!Number.isFinite(timestamp)) return;
+      events.push({ date: allocation.date, timestamp, source: "breakfast", total: Math.min(allocation.count * BREAKFAST_PRICE, booking.total || 0) });
     });
 
     kitchenPayments.forEach((payment) => {
@@ -355,7 +371,7 @@ export default function AnalyticsPage() {
     });
 
     return events;
-  }, [baristaPayments, bookings, expenses, kitchenPayments, laundryRecords]);
+  }, [baristaPayments, bookings, breakfast, expenses, kitchenPayments, laundryRecords]);
 
   const availableMonths = useMemo(() => {
     const monthKeys = Array.from(new Set(businessEvents.map((event) => toMonthKey(event.timestamp))));
@@ -397,6 +413,7 @@ export default function AnalyticsPage() {
           label: /^\d{4}-\d{2}$/.test(key) ? formatMonthLabel(key) : key,
           totalRevenue: 0,
           roomRevenue: 0,
+          breakfastRevenue: 0,
           kitchenRevenue: 0,
           baristaRevenue: 0,
           laundryRevenue: 0,
@@ -411,6 +428,7 @@ export default function AnalyticsPage() {
       const row = rows.get(key);
       if (!row) return;
       if (event.source === "rooms") row.roomRevenue += event.total;
+      if (event.source === "breakfast") row.breakfastRevenue += event.total;
       if (event.source === "kitchen") row.kitchenRevenue += event.total;
       if (event.source === "barista") row.baristaRevenue += event.total;
       if (event.source === "laundry") row.laundryRevenue += event.total;
@@ -425,6 +443,7 @@ export default function AnalyticsPage() {
   const totals = useMemo(() => {
     const totalRevenue = history.reduce((sum, day) => sum + day.totalRevenue, 0);
     const roomRevenue = history.reduce((sum, day) => sum + day.roomRevenue, 0);
+    const breakfastRevenue = history.reduce((sum, day) => sum + day.breakfastRevenue, 0);
     const kitchenRevenue = history.reduce((sum, day) => sum + day.kitchenRevenue, 0);
     const baristaRevenue = history.reduce((sum, day) => sum + day.baristaRevenue, 0);
     const laundryRevenue = history.reduce((sum, day) => sum + day.laundryRevenue, 0);
@@ -443,6 +462,7 @@ export default function AnalyticsPage() {
     return {
       totalRevenue,
       roomRevenue,
+      breakfastRevenue,
       kitchenRevenue,
       baristaRevenue,
       laundryRevenue,
@@ -510,11 +530,12 @@ export default function AnalyticsPage() {
   const pieData = useMemo(
     () => [
       { name: "Room Revenue", value: totals.roomRevenue },
+      { name: "Breakfast Revenue", value: totals.breakfastRevenue },
       { name: "Kitchen Revenue", value: totals.kitchenRevenue },
       { name: "Barista Revenue", value: totals.baristaRevenue },
       { name: "Laundry Revenue", value: totals.laundryRevenue },
     ].filter((item) => item.value > 0),
-    [totals.baristaRevenue, totals.kitchenRevenue, totals.laundryRevenue, totals.roomRevenue],
+    [totals.baristaRevenue, totals.breakfastRevenue, totals.kitchenRevenue, totals.laundryRevenue, totals.roomRevenue],
   );
 
   const creditExposure = useMemo(
@@ -549,6 +570,7 @@ export default function AnalyticsPage() {
   const aspectRows = useMemo(
     () => [
       { label: "Rooms", revenue: totals.roomRevenue, expenses: periodExpenses.filter((expense) => expense.department === "rooms").reduce((sum, expense) => sum + expense.amount, 0), color: "#F57C00" },
+      { label: "Breakfast", revenue: totals.breakfastRevenue, expenses: 0, color: "#D97706" },
       { label: "Kitchen", revenue: totals.kitchenRevenue, expenses: periodExpenses.filter((expense) => expense.department === "kitchen").reduce((sum, expense) => sum + expense.amount, 0), color: "#111111" },
       { label: "Barista", revenue: totals.baristaRevenue, expenses: periodExpenses.filter((expense) => expense.department === "barista").reduce((sum, expense) => sum + expense.amount, 0), color: "#00A676" },
       { label: "Laundry", revenue: totals.laundryRevenue, expenses: 0, color: "#2F80ED" },
@@ -558,7 +580,7 @@ export default function AnalyticsPage() {
       { label: "Utilities", revenue: 0, expenses: periodExpenses.filter((expense) => expense.department === "utilities-government").reduce((sum, expense) => sum + expense.amount, 0), color: "#64748B" },
       { label: "Maintenance", revenue: 0, expenses: periodExpenses.filter((expense) => expense.department === "others").reduce((sum, expense) => sum + expense.amount, 0), color: "#D92D20" },
     ],
-    [periodExpenses, totals.baristaRevenue, totals.kitchenRevenue, totals.laundryRevenue, totals.roomRevenue],
+    [periodExpenses, totals.baristaRevenue, totals.breakfastRevenue, totals.kitchenRevenue, totals.laundryRevenue, totals.roomRevenue],
   );
 
   const stats = useMemo(
@@ -620,12 +642,13 @@ export default function AnalyticsPage() {
 
     const revenue = {
       rooms: reportEvents.filter((event) => event.source === "rooms").reduce((sum, event) => sum + event.total, 0),
+      breakfast: reportEvents.filter((event) => event.source === "breakfast").reduce((sum, event) => sum + event.total, 0),
       kitchen: reportEvents.filter((event) => event.source === "kitchen").reduce((sum, event) => sum + event.total, 0),
       bar: reportEvents.filter((event) => event.source === "barista").reduce((sum, event) => sum + event.total, 0),
       laundry: reportEvents.filter((event) => event.source === "laundry").reduce((sum, event) => sum + event.total, 0),
       conference: 0,
     };
-    const totalRevenue = revenue.rooms + revenue.kitchen + revenue.bar + revenue.laundry + revenue.conference;
+    const totalRevenue = revenue.rooms + revenue.breakfast + revenue.kitchen + revenue.bar + revenue.laundry + revenue.conference;
 
     const operatingTotals = new Map<string, number>();
     periodExpenses
@@ -675,6 +698,7 @@ export default function AnalyticsPage() {
       ["", ""],
       ["REVENUE", ""],
       ["Room Sales", financialStatement.revenue.rooms],
+      ["Breakfast", financialStatement.revenue.breakfast],
       ["Kitchen", financialStatement.revenue.kitchen],
       ["Bar", financialStatement.revenue.bar],
       ["Laundry", financialStatement.revenue.laundry],
@@ -857,6 +881,7 @@ export default function AnalyticsPage() {
                     <StatementRow label="Rooms Sold" value={financialStatement.roomsSold} plain />
                     <StatementHeader label="Revenue" />
                     <StatementRow label="Room Sales" value={financialStatement.revenue.rooms} />
+                    <StatementRow label="Breakfast" value={financialStatement.revenue.breakfast} />
                     <StatementRow label="Kitchen" value={financialStatement.revenue.kitchen} />
                     <StatementRow label="Bar" value={financialStatement.revenue.bar} />
                     <StatementRow label="Laundry" value={financialStatement.revenue.laundry} />
@@ -919,6 +944,7 @@ export default function AnalyticsPage() {
               <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Rooms</p>
               <p className="text-sm font-black">TSh {totals.roomRevenue.toLocaleString()}</p>
             </div>
+            <div><p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Breakfast</p><p className="text-sm font-black">TSh {totals.breakfastRevenue.toLocaleString()}</p></div>
             <div>
               <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Kitchen</p>
               <p className="text-sm font-black">TSh {totals.kitchenRevenue.toLocaleString()}</p>
@@ -1167,6 +1193,7 @@ export default function AnalyticsPage() {
                 <tr>
                   <th className="px-4 py-3 text-[10px] font-black uppercase tracking-widest">Period</th>
                   <th className="px-4 py-3 text-[10px] font-black uppercase tracking-widest">Rooms</th>
+                  <th className="px-4 py-3 text-[10px] font-black uppercase tracking-widest">Breakfast</th>
                   <th className="px-4 py-3 text-[10px] font-black uppercase tracking-widest">Kitchen</th>
                   <th className="px-4 py-3 text-[10px] font-black uppercase tracking-widest">Barista</th>
                   <th className="px-4 py-3 text-[10px] font-black uppercase tracking-widest">Laundry</th>
@@ -1180,6 +1207,7 @@ export default function AnalyticsPage() {
                   <tr key={row.date} className="border-t">
                     <td className="px-4 py-3 font-bold">{row.label}</td>
                     <td className="px-4 py-3 font-bold">TSh {row.roomRevenue.toLocaleString()}</td>
+                    <td className="px-4 py-3 font-bold">TSh {row.breakfastRevenue.toLocaleString()}</td>
                     <td className="px-4 py-3 font-bold">TSh {row.kitchenRevenue.toLocaleString()}</td>
                     <td className="px-4 py-3 font-bold">TSh {row.baristaRevenue.toLocaleString()}</td>
                     <td className="px-4 py-3 font-bold">TSh {row.laundryRevenue.toLocaleString()}</td>

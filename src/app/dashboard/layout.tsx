@@ -67,6 +67,7 @@ const MANAGEMENT_SYNC_KEYS = [
   "orange-hotel-laundry-records",
   "orange-hotel-company-stock",
   "orange-hotel-website-bookings",
+  "orange-hotel-breakfast-allocations",
 ] as const;
 
 const STARTUP_SYNC_KEYS_BY_ROLE: Record<Role, string[]> = {
@@ -1057,11 +1058,11 @@ export default function DashboardLayout({
   const [usernameFeedback, setUsernameFeedback] = useState<string | null>(null);
 
   const allowedByRole: Record<Role, string[]> = {
-    manager: ['/dashboard', '/dashboard/rooms', '/dashboard/inventory', '/dashboard/inventory/kitchen-stock', '/dashboard/inventory/bar-stock', '/dashboard/inventory/reception-stock', '/dashboard/inventory/housekeeping-stock', '/dashboard/inventory/room-stock', '/dashboard/inventory/stock-downloads', '/dashboard/inventory/barista-stock', '/dashboard/stock-in', '/dashboard/menu-create', '/dashboard/company-stock', '/dashboard/cashier', '/dashboard/laundry', '/dashboard/expenses', '/dashboard/finances', '/dashboard/payments', '/dashboard/kitchen', '/dashboard/cancelled', '/dashboard/barista', '/dashboard/staff', '/dashboard/analytics', '/dashboard/settings', '/dashboard/settings/sync', '/dashboard/settings/password'],
-    director: ['/dashboard', '/dashboard/rooms', '/dashboard/company-stock', '/dashboard/cashier', '/dashboard/laundry', '/dashboard/expenses', '/dashboard/finances', '/dashboard/payments', '/dashboard/kitchen', '/dashboard/barista', '/dashboard/staff', '/dashboard/analytics', '/dashboard/settings', '/dashboard/settings/sync', '/dashboard/settings/password'],
+    manager: ['/dashboard/breakfast', '/dashboard', '/dashboard/rooms', '/dashboard/inventory', '/dashboard/inventory/kitchen-stock', '/dashboard/inventory/bar-stock', '/dashboard/inventory/reception-stock', '/dashboard/inventory/housekeeping-stock', '/dashboard/inventory/room-stock', '/dashboard/inventory/stock-downloads', '/dashboard/inventory/barista-stock', '/dashboard/stock-in', '/dashboard/menu-create', '/dashboard/company-stock', '/dashboard/cashier', '/dashboard/laundry', '/dashboard/expenses', '/dashboard/finances', '/dashboard/payments', '/dashboard/kitchen', '/dashboard/cancelled', '/dashboard/barista', '/dashboard/staff', '/dashboard/analytics', '/dashboard/settings', '/dashboard/settings/sync', '/dashboard/settings/password'],
+    director: ['/dashboard/breakfast', '/dashboard', '/dashboard/rooms', '/dashboard/company-stock', '/dashboard/cashier', '/dashboard/laundry', '/dashboard/expenses', '/dashboard/finances', '/dashboard/payments', '/dashboard/kitchen', '/dashboard/barista', '/dashboard/staff', '/dashboard/analytics', '/dashboard/settings', '/dashboard/settings/sync', '/dashboard/settings/password'],
     inventory: ['/dashboard/inventory', '/dashboard/inventory/kitchen-stock', '/dashboard/inventory/bar-stock', '/dashboard/inventory/reception-stock', '/dashboard/inventory/housekeeping-stock', '/dashboard/inventory/room-stock', '/dashboard/inventory/stock-downloads', '/dashboard/inventory/barista-stock', '/dashboard/company-stock', '/dashboard/settings/password'],
-    cashier: ['/dashboard/cashier', '/dashboard/laundry', '/dashboard/cash-requests', '/dashboard/website-bookings', '/dashboard/live-chat', '/dashboard/payments', '/dashboard/rooms', '/dashboard/settings/password'],
-    kitchen: ['/dashboard/fnb-pos', '/dashboard/kitchen', '/dashboard/kitchen/past-payments', '/dashboard/menu-create', '/dashboard/cancelled', '/dashboard/payments', '/dashboard/settings/password'],
+    cashier: ['/dashboard/breakfast', '/dashboard/cashier', '/dashboard/laundry', '/dashboard/cash-requests', '/dashboard/website-bookings', '/dashboard/live-chat', '/dashboard/payments', '/dashboard/rooms', '/dashboard/settings/password'],
+    kitchen: ['/dashboard/breakfast', '/dashboard/fnb-pos', '/dashboard/kitchen', '/dashboard/kitchen/past-payments', '/dashboard/menu-create', '/dashboard/cancelled', '/dashboard/payments', '/dashboard/settings/password'],
     barista: ['/dashboard/fnb-pos', '/dashboard/barista', '/dashboard/barista/past-sales', '/dashboard/barista/restock', '/dashboard/payments', '/dashboard/cancelled', '/dashboard/settings/password'],
   };
 

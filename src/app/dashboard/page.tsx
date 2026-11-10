@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { BreakfastAllocation, BREAKFAST_PRICE, STORAGE_BREAKFAST, roomRevenue } from "@/app/lib/breakfast";
 import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { readStoredRole } from "@/app/lib/auth";
@@ -27,6 +28,7 @@ import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/ap
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 interface CashierTransaction {
+  id?: string;
   roomNumber?: string;
   total: number;
   status?: "completed" | "checked-out" | "credit";
@@ -74,6 +76,7 @@ export default function OverviewPage() {
   const [activeKitchen, setActiveKitchen] = useState(0);
   const [activeBarista, setActiveBarista] = useState(0);
   const [kitchenRevenue, setKitchenRevenue] = useState(0);
+  const [breakfastRevenue, setBreakfastRevenue] = useState(0);
   const [baristaRevenue, setBaristaRevenue] = useState(0);
   const [foodRevenue, setFoodRevenue] = useState(0);
   const [laundryRevenue, setLaundryRevenue] = useState(0);
@@ -116,6 +119,7 @@ export default function OverviewPage() {
       const savedRole = readStoredRole();
       const savedShift = localStorage.getItem("orange-hotel-shift");
       const cashierSnapshot = readCashierState<CashierTransaction>("orange-hotel-cashier-transactions", "orange-hotel-cashier-seq", 84920);
+      const breakfast = readJson<BreakfastAllocation[]>(STORAGE_BREAKFAST) ?? [];
       const kitchenSnapshot = readPosState<QueueTicket, POSPaymentRecord, unknown>(activeKitchenKey, "orange-hotel-kitchen-tickets", "orange-hotel-kitchen-seq", "orange-hotel-kitchen-payments", "orange-hotel-kitchen-menu", 300);
       const baristaSnapshot = readPosState<QueueTicket, POSPaymentRecord, unknown>(activeBaristaKey, "orange-hotel-barista-orders", "orange-hotel-barista-seq", "orange-hotel-barista-payments", "orange-hotel-barista-menu", 490);
       const laundry = readJson<LaundryRecord[]>(STORAGE_LAUNDRY_RECORDS) ?? [];
@@ -130,7 +134,11 @@ export default function OverviewPage() {
       if (savedRole) setRole(savedRole);
       if (savedShift) setShift(savedShift);
 
-      const bookingMetrics = collectRecordTotals(cashierSnapshot.transactions, "total", period);
+      const bookingMetrics = collectRecordTotals(cashierSnapshot.transactions.map((booking) => ({ ...booking, total: roomRevenue(booking, breakfast) })), "total", period);
+      const breakfastRevenue = breakfast.filter((entry) => isInOverviewPeriod(new Date(`${entry.date}T10:00:00`).getTime(), period)).reduce((sum, entry) => {
+        const booking = cashierSnapshot.transactions.find((item) => item.id === entry.bookingId);
+        return sum + (booking && booking.status !== "credit" ? Math.min(Number(booking.total) || 0, Math.max(0, entry.count) * BREAKFAST_PRICE) : 0);
+      }, 0);
       const laundryMetrics = collectRecordTotals(
         laundry.map((record) => ({ ...record, createdAt: getLaundryBusinessTimestamp(record) })),
         "totalAmount",
@@ -145,8 +153,9 @@ export default function OverviewPage() {
       const baristaMetrics = collectPaymentMetrics(baristaSnapshot.payments, period);
 
       setKitchenRevenue(kitchenMetrics.paid);
+      setBreakfastRevenue(breakfastRevenue);
       setBaristaRevenue(baristaMetrics.paid);
-      setFoodRevenue(kitchenMetrics.paid + baristaMetrics.paid);
+      setFoodRevenue(kitchenMetrics.paid + breakfastRevenue + baristaMetrics.paid);
       setLaundryRevenue(laundryMetrics.paid);
       setExpensesTotal(
         expenses
@@ -162,6 +171,7 @@ export default function OverviewPage() {
 
     void Promise.all([
       hydrateStorageKeyFromFirebase("orange-hotel-cashier-state", true),
+      hydrateStorageKeyFromFirebase(STORAGE_BREAKFAST, true),
       hydrateStorageKeyFromFirebase(activeKitchenKey, true),
       hydrateStorageKeyFromFirebase(activeBaristaKey, true),
       hydrateStorageKeyFromFirebase(STORAGE_LAUNDRY_RECORDS, true),
@@ -170,6 +180,7 @@ export default function OverviewPage() {
     ]).finally(refreshOverview);
 
     const unsubscribeCashier = subscribeToSyncedStorageKey("orange-hotel-cashier-state", refreshOverview);
+    const unsubscribeBreakfast = subscribeToSyncedStorageKey(STORAGE_BREAKFAST, refreshOverview);
     const unsubscribeKitchen = subscribeToSyncedStorageKey(activeKitchenKey, refreshOverview);
     const unsubscribeBarista = subscribeToSyncedStorageKey(activeBaristaKey, refreshOverview);
     const unsubscribeLaundry = subscribeToSyncedStorageKey(STORAGE_LAUNDRY_RECORDS, refreshOverview);
@@ -178,6 +189,7 @@ export default function OverviewPage() {
 
     return () => {
       unsubscribeCashier();
+      unsubscribeBreakfast();
       unsubscribeKitchen();
       unsubscribeBarista();
       unsubscribeLaundry();
@@ -198,12 +210,13 @@ export default function OverviewPage() {
     () => [
       { name: "Booking", value: bookingRevenue, fill: "#F57C00" },
       { name: "Kitchen", value: kitchenRevenue, fill: "#111111" },
+      { name: "Breakfast", value: breakfastRevenue, fill: "#D97706" },
       { name: "Barista", value: baristaRevenue, fill: "#00A676" },
       { name: "Laundry", value: laundryRevenue, fill: "#2F80ED" },
       { name: "Expenses", value: expensesTotal, fill: "#D92D20" },
       { name: "Net", value: actualNetRevenue, fill: actualNetRevenue >= 0 ? "#15803D" : "#B42318" },
     ],
-    [actualNetRevenue, baristaRevenue, bookingRevenue, expensesTotal, kitchenRevenue, laundryRevenue],
+    [actualNetRevenue, baristaRevenue, bookingRevenue, breakfastRevenue, expensesTotal, kitchenRevenue, laundryRevenue],
   );
 
   const stats = useMemo(
@@ -221,7 +234,7 @@ export default function OverviewPage() {
       { label: "Total Revenue", value: `TSh ${totalRevenue.toLocaleString()}`, note: `${periodLabel}: rooms + F&B + laundry` },
       { label: "Actual Net Revenue", value: `TSh ${actualNetRevenue.toLocaleString()}`, note: `${periodLabel} income minus expenses` },
       { label: "Total Expenses", value: `TSh ${expensesTotal.toLocaleString()}`, note: `${periodLabel} saved expense records` },
-      { label: "F&B Revenue", value: `TSh ${foodRevenue.toLocaleString()}`, note: "Kitchen and Barista settlements" },
+      { label: "F&B Revenue", value: `TSh ${foodRevenue.toLocaleString()}`, note: "Breakfast, Kitchen and Barista" },
       { label: "Laundry Revenue", value: `TSh ${laundryRevenue.toLocaleString()}`, note: "Completed laundry collections" },
       { label: "Credit Exposure", value: `TSh ${creditExposure.toLocaleString()}`, note: "Outstanding unsettled balances" },
       { label: "RevPAR", value: `TSh ${revPar.toLocaleString()}`, note: "Revenue per available room" },

@@ -322,6 +322,7 @@ export function clearKitchenBarCacheOnce() {
 
 export const FIREBASE_SYNC_KEYS = [
   "orange-hotel-cashier-state",
+  "orange-hotel-breakfast-allocations",
   "orange-hotel-kitchen-state",
   "orange-hotel-barista-state",
   "orange-hotel-barista-stock-in-history",
@@ -920,6 +921,7 @@ function protectSyncedValueBeforeWrite(key: string, localValue: unknown, remoteV
 
   if (
     key === "orange-hotel-website-bookings" ||
+    key === "orange-hotel-breakfast-allocations" ||
     key === "orange-hotel-company-stock" ||
     key === "orange-hotel-live-chat" ||
     key === "orange-hotel-expenses" ||
@@ -967,6 +969,7 @@ function getCanonicalDefaultValue(key: string) {
     case "orange-hotel-fnb-recipe-cost":
     case "orange-hotel-fnb-stock-sales":
     case "orange-hotel-website-bookings":
+    case "orange-hotel-breakfast-allocations":
     case "orange-hotel-live-chat":
     case "orange-hotel-expenses":
     case "orange-hotel-laundry-records":

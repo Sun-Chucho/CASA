@@ -37,6 +37,7 @@ import { useConfirmDialog } from "@/hooks/use-confirm-dialog";
 const FRIENDLY_NAMES: Record<string, string> = {
   "orange-hotel-cashier-state": "Bookings (Cashier)",
   "orange-hotel-kitchen-state": "Kitchen POS",
+  "orange-hotel-breakfast-allocations": "Breakfast",
   "orange-hotel-barista-state": "Barista POS",
   "orange-hotel-company-stock": "Company Stock",
   "orange-hotel-inventory-items": "Inventory Items",
@@ -262,7 +263,7 @@ export default function SyncVerificationPage() {
                 size="sm" 
                 disabled={cleaning}
                 onClick={() => handleWipe(
-                  ["orange-hotel-cashier-state", "orange-hotel-kitchen-state", "orange-hotel-barista-state", "orange-hotel-cancelled-tickets"],
+                  ["orange-hotel-cashier-state", "orange-hotel-breakfast-allocations", "orange-hotel-kitchen-state", "orange-hotel-barista-state", "orange-hotel-cancelled-tickets"],
                   "Clear All Transactions",
                   "This will remove all bookings, kitchen orders, and payments. This action cannot be undone."
                 )}
@@ -305,7 +306,7 @@ export default function SyncVerificationPage() {
                 disabled={cleaning}
                 onClick={() => handleWipe(
                   [
-                    "orange-hotel-cashier-state", "orange-hotel-kitchen-state", "orange-hotel-barista-state", 
+                    "orange-hotel-cashier-state", "orange-hotel-breakfast-allocations", "orange-hotel-kitchen-state", "orange-hotel-barista-state",
                     "orange-hotel-company-stock", "orange-hotel-inventory-items", "orange-hotel-main-store-items",
                     "orange-hotel-stock-logic", "orange-hotel-store-movements", "orange-hotel-store-usage",
                     "orange-hotel-cancelled-tickets", "orange-hotel-rooms-state", "orange-hotel-fnb-beverage-cost",

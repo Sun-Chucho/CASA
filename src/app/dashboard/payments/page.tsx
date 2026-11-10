@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { BreakfastAllocation, BREAKFAST_PRICE, STORAGE_BREAKFAST, breakfastForBooking, roomRevenue } from "@/app/lib/breakfast";
 import { readStoredRole } from "@/app/lib/auth";
 import { getCasaRoomPrice, Role } from "@/app/lib/mock-data";
-import { getActiveBaristaStateKey, getActiveKitchenStateKey, readCashierState, readPosState, writeCashierState, writePosState } from "@/app/lib/storage";
+import { getActiveBaristaStateKey, getActiveKitchenStateKey, readCashierState, readJson, readPosState, writeCashierState, writePosState } from "@/app/lib/storage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -15,7 +16,7 @@ import { Receipt } from "lucide-react";
 import { useIsDirector } from "@/hooks/use-is-director";
 import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
 
-type PaymentsTab = "reception" | "kitchen" | "barista";
+type PaymentsTab = "reception" | "breakfast" | "kitchen" | "barista";
 type PaymentDateFilter = "all" | "date";
 type PaymentMethod = "cash" | "card" | "mobile-money" | "bank" | "credit";
 type KitchenPaymentMethod = "cash" | "card" | "mobile" | "bank" | "credit";
@@ -84,7 +85,7 @@ interface BaristaPaymentRecord {
 }
 
 interface PaymentRow {
-  source: "booking" | "kitchen" | "barista";
+  source: "booking" | "breakfast" | "kitchen" | "barista";
   id: string;
   ref: string;
   payer: string;
@@ -205,6 +206,7 @@ export default function PaymentsPage() {
   const [paymentDateFilter, setPaymentDateFilter] = useState<PaymentDateFilter>("all");
   const [selectedPaymentDate, setSelectedPaymentDate] = useState("");
   const [bookingTransactions, setBookingTransactions] = useState<BookingRecord[]>([]);
+  const [breakfast, setBreakfast] = useState<BreakfastAllocation[]>([]);
   const [kitchenPayments, setKitchenPayments] = useState<KitchenPaymentRecord[]>([]);
   const [baristaPayments, setBaristaPayments] = useState<BaristaPaymentRecord[]>([]);
 
@@ -269,6 +271,7 @@ export default function PaymentsPage() {
       });
 
       setBookingTransactions(correctedBookingTransactions);
+      setBreakfast((readJson<BreakfastAllocation[]>(STORAGE_BREAKFAST) ?? []));
       setKitchenPayments(kitchenSnapshot.payments.map((tx) => ({ ...tx, status: tx.status === "credit" ? "credit" : "completed" })));
       setBaristaPayments(baristaSnapshot.payments.map((tx) => ({ ...tx, status: tx.status === "credit" ? "credit" : "completed" })));
     };
@@ -277,16 +280,19 @@ export default function PaymentsPage() {
 
     void Promise.all([
       hydrateStorageKeyFromFirebase("orange-hotel-cashier-state", true),
+      hydrateStorageKeyFromFirebase(STORAGE_BREAKFAST, true),
       hydrateStorageKeyFromFirebase(activeKitchenKey, true),
       hydrateStorageKeyFromFirebase(activeBaristaKey, true),
     ]).finally(refreshPayments);
 
     const unsubscribeCashier = subscribeToSyncedStorageKey("orange-hotel-cashier-state", refreshPayments);
+    const unsubscribeBreakfast = subscribeToSyncedStorageKey(STORAGE_BREAKFAST, refreshPayments);
     const unsubscribeKitchen = subscribeToSyncedStorageKey(activeKitchenKey, refreshPayments);
     const unsubscribeBarista = subscribeToSyncedStorageKey(activeBaristaKey, refreshPayments);
 
     return () => {
       unsubscribeCashier();
+      unsubscribeBreakfast();
       unsubscribeKitchen();
       unsubscribeBarista();
     };
@@ -299,7 +305,7 @@ export default function PaymentsPage() {
         id: tx.id,
         ref: tx.receiptNo,
         payer: tx.guestName,
-        context: `Room ${tx.roomNumber}`,
+        context: `Room ${tx.roomNumber} · Rooms TSh ${roomRevenue(tx, breakfast).toLocaleString()} · Breakfast TSh ${Math.min(asNumber(tx.total), breakfastForBooking(tx.id, breakfast)).toLocaleString()}`,
         roomNumber: tx.roomNumber || "-",
         dateLabel: `${formatDate(tx.checkInDate)} - ${formatDate(tx.checkOutDate)}`,
         dateDetail: [
@@ -312,8 +318,14 @@ export default function PaymentsPage() {
         updatedAt: asNumber(tx.updatedAt ?? tx.paymentMethodEditedAt) || undefined,
         status: tx.status === "credit" ? "credit" : "completed",
       })),
-    [bookingTransactions],
+    [bookingTransactions, breakfast],
   );
+
+  const breakfastRows = useMemo<PaymentRow[]>(() => breakfast.filter((entry) => entry.count > 0).flatMap((entry) => {
+    const booking = bookingTransactions.find((tx) => tx.id === entry.bookingId);
+    if (!booking || booking.status === "credit") return [];
+    return [{ source: "breakfast" as const, id: entry.id, ref: booking.receiptNo, payer: entry.guestName, context: `${entry.count} breakfast guest${entry.count === 1 ? "" : "s"}`, roomNumber: entry.roomNumber, dateLabel: entry.date, method: booking.payment, amount: entry.count * BREAKFAST_PRICE, createdAt: new Date(`${entry.date}T10:00:00`).getTime(), updatedAt: entry.updatedAt, status: "completed" as const }];
+  }), [breakfast, bookingTransactions]);
 
   const kitchenRows = useMemo<PaymentRow[]>(
     () =>
@@ -359,10 +371,12 @@ export default function PaymentsPage() {
     () =>
       paymentsTab === "reception"
         ? bookingRows
+        : paymentsTab === "breakfast"
+        ? breakfastRows
         : paymentsTab === "kitchen"
         ? kitchenRows
         : baristaRows,
-    [baristaRows, bookingRows, kitchenRows, paymentsTab],
+    [baristaRows, bookingRows, breakfastRows, kitchenRows, paymentsTab],
   );
   const completedPayments = useMemo(() => activePaymentRows.filter((tx) => tx.status === "completed"), [activePaymentRows]);
   const creditPayments = useMemo(() => activePaymentRows.filter((tx) => tx.status === "credit"), [activePaymentRows]);
@@ -371,7 +385,7 @@ export default function PaymentsPage() {
   const totalCredit = creditPayments.reduce((sum, tx) => sum + tx.amount, 0);
 
   const openPaidFlow = (row: PaymentRow) => {
-    if (isDirector) return;
+    if (isDirector || row.source === "breakfast") return;
     setCreditPaymentFeedback(null);
     setSelectedCredit({ source: row.source, id: row.id });
     setShowMethodPopup(true);
@@ -581,6 +595,7 @@ export default function PaymentsPage() {
                     <TabsTrigger value="reception" className="text-[10px] font-black uppercase tracking-widest">
                       Reception
                     </TabsTrigger>
+                    <TabsTrigger value="breakfast" className="text-[10px] font-black uppercase tracking-widest">Breakfast</TabsTrigger>
                     <TabsTrigger value="kitchen" className="text-[10px] font-black uppercase tracking-widest">
                       Kitchen
                     </TabsTrigger>

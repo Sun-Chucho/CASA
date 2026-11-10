@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { BreakfastAllocation, BREAKFAST_PRICE, STORAGE_BREAKFAST, roomRevenue } from "@/app/lib/breakfast";
 import { ExpenseRecord, STORAGE_EXPENSES, getExpenseDepartmentLabel, normalizeExpenseRecords } from "@/app/lib/expenses";
 import { getLaundryBusinessTimestamp, LaundryRecord, STORAGE_LAUNDRY_RECORDS } from "@/app/lib/laundry";
 import { getActiveBaristaStateKey, getActiveKitchenStateKey, readCashierState, readJson, readPosState } from "@/app/lib/storage";
@@ -10,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 interface BookingRecord {
+  id?: string;
   total: number;
   createdAt?: number;
   status?: "completed" | "checked-out" | "credit";
@@ -44,6 +46,7 @@ function matchesSelectedDate(createdAt: unknown, selectedDate: string) {
 
 export default function FinancesPage() {
   const [bookings, setBookings] = useState<BookingRecord[]>([]);
+  const [breakfast, setBreakfast] = useState<BreakfastAllocation[]>([]);
   const [kitchenPayments, setKitchenPayments] = useState<PosPaymentRecord[]>([]);
   const [baristaPayments, setBaristaPayments] = useState<PosPaymentRecord[]>([]);
   const [laundryRecords, setLaundryRecords] = useState<LaundryRecord[]>([]);
@@ -59,6 +62,7 @@ export default function FinancesPage() {
       const kitchenSnapshot = readPosState<unknown, PosPaymentRecord, unknown>(activeKitchenKey, "orange-hotel-kitchen-tickets", "orange-hotel-kitchen-seq", "orange-hotel-kitchen-payments", "orange-hotel-kitchen-menu", 300);
       const baristaSnapshot = readPosState<unknown, PosPaymentRecord, unknown>(activeBaristaKey, "orange-hotel-barista-orders", "orange-hotel-barista-seq", "orange-hotel-barista-payments", "orange-hotel-barista-menu", 490);
       setBookings(cashierSnapshot.transactions);
+      setBreakfast(readJson<BreakfastAllocation[]>(STORAGE_BREAKFAST) ?? []);
       setKitchenPayments(kitchenSnapshot.payments);
       setBaristaPayments(baristaSnapshot.payments);
       setLaundryRecords(readJson<LaundryRecord[]>(STORAGE_LAUNDRY_RECORDS) ?? []);
@@ -68,6 +72,7 @@ export default function FinancesPage() {
     refreshFinances();
     void Promise.all([
       hydrateStorageKeyFromFirebase("orange-hotel-cashier-state", true),
+      hydrateStorageKeyFromFirebase(STORAGE_BREAKFAST, true),
       hydrateStorageKeyFromFirebase(activeKitchenKey, true),
       hydrateStorageKeyFromFirebase(activeBaristaKey, true),
       hydrateStorageKeyFromFirebase(STORAGE_LAUNDRY_RECORDS, true),
@@ -75,6 +80,7 @@ export default function FinancesPage() {
     ]).finally(refreshFinances);
     const unsubscribers = [
       subscribeToSyncedStorageKey("orange-hotel-cashier-state", refreshFinances),
+      subscribeToSyncedStorageKey(STORAGE_BREAKFAST, refreshFinances),
       subscribeToSyncedStorageKey(activeKitchenKey, refreshFinances),
       subscribeToSyncedStorageKey(activeBaristaKey, refreshFinances),
       subscribeToSyncedStorageKey(STORAGE_LAUNDRY_RECORDS, refreshFinances),
@@ -92,7 +98,11 @@ export default function FinancesPage() {
       matchesSelectedDate(getLaundryBusinessTimestamp(item), selectedDate),
     );
     const datedExpenses = expenses.filter((item) => matchesSelectedDate(item.createdAt, selectedDate));
-    const bookingRevenue = datedBookings.filter((item) => item.status !== "credit").reduce((sum, item) => sum + asNumber(item.total), 0);
+    const bookingRevenue = datedBookings.filter((item) => item.status !== "credit").reduce((sum, item) => sum + roomRevenue(item, breakfast), 0);
+    const breakfastRevenue = breakfast.filter((item) => !selectedDate || item.date === selectedDate).reduce((sum, item) => {
+      const booking = bookings.find((entry) => entry.id === item.bookingId);
+      return sum + (booking && booking.status !== "credit" ? Math.min(asNumber(booking.total), Math.max(0, item.count) * BREAKFAST_PRICE) : 0);
+    }, 0);
     const bookingCredit = datedBookings.filter((item) => item.status === "credit").reduce((sum, item) => sum + asNumber(item.total), 0);
     const kitchenRevenue = datedKitchenPayments.filter((item) => item.status !== "credit").reduce((sum, item) => sum + asNumber(item.total), 0);
     const kitchenCredit = datedKitchenPayments.filter((item) => item.status === "credit").reduce((sum, item) => sum + asNumber(item.total), 0);
@@ -101,11 +111,12 @@ export default function FinancesPage() {
     const laundryRevenue = datedLaundryRecords.filter((item) => item.status !== "credit").reduce((sum, item) => sum + asNumber(item.totalAmount), 0);
     const laundryCredit = datedLaundryRecords.filter((item) => item.status === "credit").reduce((sum, item) => sum + asNumber(item.totalAmount), 0);
     const expenseTotal = datedExpenses.reduce((sum, item) => sum + asNumber(item.amount), 0);
-    const incomeTotal = bookingRevenue + kitchenRevenue + baristaRevenue + laundryRevenue;
+    const incomeTotal = bookingRevenue + breakfastRevenue + kitchenRevenue + baristaRevenue + laundryRevenue;
     const creditTotal = bookingCredit + kitchenCredit + baristaCredit + laundryCredit;
 
     return {
       bookingRevenue,
+      breakfastRevenue,
       kitchenRevenue,
       baristaRevenue,
       laundryRevenue,
@@ -114,7 +125,7 @@ export default function FinancesPage() {
       creditTotal,
       netCash: incomeTotal - expenseTotal,
     };
-  }, [baristaPayments, bookings, expenses, kitchenPayments, laundryRecords, selectedDate]);
+  }, [baristaPayments, bookings, breakfast, expenses, kitchenPayments, laundryRecords, selectedDate]);
 
   const expenseRows = useMemo(() => {
     const grouped = new Map<string, number>();
@@ -129,6 +140,7 @@ export default function FinancesPage() {
 
   const incomeRows = [
     { label: "Booking Revenue", total: totals.bookingRevenue },
+    { label: "Breakfast Revenue", total: totals.breakfastRevenue },
     { label: "Kitchen Revenue", total: totals.kitchenRevenue },
     { label: "Barista Revenue", total: totals.baristaRevenue },
     { label: "Laundry Revenue", total: totals.laundryRevenue },
