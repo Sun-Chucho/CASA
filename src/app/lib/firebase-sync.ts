@@ -1024,6 +1024,7 @@ function getCanonicalDefaultValue(key: string) {
     case "orange-hotel-kitchen-daily-stock-history":
     case "orange-hotel-barista-purchase-history":
     case "orange-hotel-barista-daily-stock-history":
+    case "orange-hotel-barista-stock-in-history":
       return [];
     case "orange-hotel-kitchen-purchase-session":
     case "orange-hotel-kitchen-daily-stock-session":
@@ -1053,6 +1054,17 @@ function getCanonicalDefaultValue(key: string) {
       return null;
   }
 }
+
+// These histories were explicitly cleared for the November opening. Firebase
+// stores empty arrays as null, so an old browser cache must not seed them again.
+const RESET_HISTORY_KEYS = new Set([
+  "orange-hotel-breakfast-allocations",
+  "orange-hotel-website-bookings",
+  "orange-hotel-barista-purchase-history",
+  "orange-hotel-barista-daily-stock-history",
+  "orange-hotel-barista-stock-in-history",
+  "orange-hotel-barista-cancel-requests",
+]);
 
 function getLocalFallbackForSync(key: string) {
   if (typeof window === "undefined") return null;
@@ -1341,7 +1353,9 @@ async function hydrateStorageKeyFromFirebaseInternal(key: string) {
     const canonicalScore = getSnapshotScore(key, canonicalValue);
 
     let preferredValue: unknown = canonicalValue;
-    if (hasPendingSyncMarker(key) && localValue !== null) {
+    if (remoteValue === null && RESET_HISTORY_KEYS.has(key)) {
+      preferredValue = canonicalValue;
+    } else if (hasPendingSyncMarker(key) && localValue !== null) {
       preferredValue = protectSyncedValueBeforeWrite(key, localValue, remoteValue);
     } else if (remoteScore > 0) {
       preferredValue = mergeRemoteValueForLocalApply(key, remoteValue);
@@ -1353,6 +1367,13 @@ async function hydrateStorageKeyFromFirebaseInternal(key: string) {
 
     const sanitizedPreferredValue = applyHydratedValue(preferredValue);
     if (sanitizedPreferredValue === null) return;
+
+    if (remoteValue === null && RESET_HISTORY_KEYS.has(key)) {
+      clearPendingSync(key);
+      delete _pendingLocalWrites[key];
+      markSyncHealthy(key);
+      return;
+    }
 
     if (!areSnapshotsEqual(remoteValue, sanitizedPreferredValue)) {
       const committedValue = await withTimeout(
