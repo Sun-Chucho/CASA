@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Receipt } from "lucide-react";
 import { useIsDirector } from "@/hooks/use-is-director";
 import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
+import { bookingChargeDays } from "@/app/lib/booking-stay";
 
 type PaymentsTab = "reception" | "breakfast" | "kitchen" | "barista";
 type PaymentDateFilter = "all" | "date";
@@ -42,6 +43,7 @@ interface BookingRecord {
   roomNumber: string;
   payment: PaymentMethod;
   checkInDate: string;
+  checkInTime?: string;
   checkOutDate: string;
   checkOutTime: string;
   nights: number;
@@ -151,13 +153,6 @@ function getUpdatedPaymentDetail(createdAt: number, updatedAt?: number) {
   return `Updated ${new Date(revision).toLocaleString()}`;
 }
 
-function daysBetween(start: string, end: string) {
-  const startDate = new Date(`${start}T00:00:00`);
-  const endDate = new Date(`${end}T00:00:00`);
-  if (!Number.isFinite(startDate.getTime()) || !Number.isFinite(endDate.getTime())) return 0;
-  return Math.round((endDate.getTime() - startDate.getTime()) / 86_400_000);
-}
-
 function matchesPaymentDateFilter(createdAt: number, filter: PaymentDateFilter, selectedDate: string) {
   if (filter === "all") return true;
 
@@ -218,11 +213,13 @@ export default function PaymentsPage() {
   const [payerNameDraft, setPayerNameDraft] = useState("");
   const [roomNumberDraft, setRoomNumberDraft] = useState("");
   const [checkInDateDraft, setCheckInDateDraft] = useState("");
+  const [checkInTimeDraft, setCheckInTimeDraft] = useState("14:00");
   const [checkOutDateDraft, setCheckOutDateDraft] = useState("");
+  const [checkOutTimeDraft, setCheckOutTimeDraft] = useState("12:00");
   const [paymentMethodDraft, setPaymentMethodDraft] = useState<PaymentMethod>("cash");
   const [savingEditedPayment, setSavingEditedPayment] = useState(false);
   const [editPaymentFeedback, setEditPaymentFeedback] = useState<string | null>(null);
-  const adjustedNights = daysBetween(checkInDateDraft, checkOutDateDraft);
+  const adjustedNights = bookingChargeDays(checkInDateDraft, checkInTimeDraft, checkOutDateDraft, checkOutTimeDraft);
   const adjustedRate = roomNumberDraft.trim() ? getCasaRoomPrice(roomNumberDraft.trim()) : 0;
   const adjustedTotal = adjustedNights > 0 ? adjustedNights * adjustedRate : 0;
 
@@ -399,7 +396,9 @@ export default function PaymentsPage() {
     setPayerNameDraft(booking.guestName);
     setRoomNumberDraft(booking.roomNumber);
     setCheckInDateDraft(booking.checkInDate);
+    setCheckInTimeDraft(booking.checkInTime || "14:00");
     setCheckOutDateDraft(booking.checkOutDate);
+    setCheckOutTimeDraft(booking.checkOutTime || "12:00");
     setPaymentMethodDraft(booking.status === "credit" ? "credit" : booking.payment);
     setEditPaymentFeedback(null);
   };
@@ -409,7 +408,9 @@ export default function PaymentsPage() {
     setPayerNameDraft("");
     setRoomNumberDraft("");
     setCheckInDateDraft("");
+    setCheckInTimeDraft("14:00");
     setCheckOutDateDraft("");
+    setCheckOutTimeDraft("12:00");
     setPaymentMethodDraft("cash");
     setEditPaymentFeedback(null);
   };
@@ -418,7 +419,7 @@ export default function PaymentsPage() {
     if (!editingBookingId || savingEditedPayment) return;
     const nextName = payerNameDraft.trim();
     const nextRoomNumber = roomNumberDraft.trim();
-    const nextNights = daysBetween(checkInDateDraft, checkOutDateDraft);
+    const nextNights = bookingChargeDays(checkInDateDraft, checkInTimeDraft, checkOutDateDraft, checkOutTimeDraft);
     if (!nextName || !nextRoomNumber || nextNights < 1) return;
 
     const snapshot = readCashierState<BookingRecord>(STORAGE_BOOKING_TX, "orange-hotel-cashier-seq", 0);
@@ -430,7 +431,9 @@ export default function PaymentsPage() {
             guestName: nextName,
             roomNumber: nextRoomNumber,
             checkInDate: checkInDateDraft,
+            checkInTime: checkInTimeDraft,
             checkOutDate: checkOutDateDraft,
+            checkOutTime: checkOutTimeDraft,
             nights: nextNights,
             ratePerNight: adjustedRate,
             total: nextNights * adjustedRate,
@@ -874,11 +877,19 @@ export default function PaymentsPage() {
               <Input type="date" value={checkInDateDraft} onChange={(event) => setCheckInDateDraft(event.target.value)} className="h-11" />
             </div>
             <div className="space-y-2">
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Check-in Time</p>
+              <Input type="time" value={checkInTimeDraft} onChange={(event) => setCheckInTimeDraft(event.target.value)} className="h-11" />
+            </div>
+            <div className="space-y-2">
               <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Check-out Date</p>
               <Input type="date" min={checkInDateDraft} value={checkOutDateDraft} onChange={(event) => setCheckOutDateDraft(event.target.value)} className="h-11" />
             </div>
-            {checkInDateDraft && checkOutDateDraft && daysBetween(checkInDateDraft, checkOutDateDraft) < 1 && (
-              <p className="text-sm font-bold text-red-600 sm:col-span-2">Check-out must be after check-in.</p>
+            <div className="space-y-2">
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Check-out Time</p>
+              <Input type="time" value={checkOutTimeDraft} onChange={(event) => setCheckOutTimeDraft(event.target.value)} className="h-11" />
+            </div>
+            {checkInDateDraft && checkOutDateDraft && adjustedNights < 1 && (
+              <p className="text-sm font-bold text-red-600 sm:col-span-2">Check-out must be later than check-in, including the time on a same-day stay.</p>
             )}
             {roomNumberDraft.trim() && adjustedNights > 0 && (
               <div className="space-y-2 rounded-lg border bg-muted/20 p-3 sm:col-span-2">

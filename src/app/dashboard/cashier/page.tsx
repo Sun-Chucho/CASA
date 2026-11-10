@@ -29,6 +29,7 @@ import { useConfirmDialog } from "@/hooks/use-confirm-dialog";
 import { isBookingStillActive, readRoomsState, syncRoomsStateFromBookings, updateRoomStatusByNumber } from "@/app/lib/rooms-storage";
 import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey, transactSyncedStorageValue } from "@/app/lib/firebase-sync";
 import { getScopedStorageKey } from "@/app/lib/storage";
+import { bookingChargeDays } from "@/app/lib/booking-stay";
 
 type PaymentMethod = "cash" | "card" | "mobile-money" | "credit";
 type TransactionTab = "completed" | "credit";
@@ -271,7 +272,7 @@ export default function BookingPage() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const nights = useMemo(() => daysBetween(checkInDate, checkOutDate), [checkInDate, checkOutDate]);
+  const nights = useMemo(() => bookingChargeDays(checkInDate, checkInTime, checkOutDate, checkOutTime), [checkInDate, checkInTime, checkOutDate, checkOutTime]);
   const packageConfig = selectedPackage === "none" ? null : SPECIAL_PACKAGES[selectedPackage];
   const selectedRoom = useMemo(
     () => rooms.find((room) => room.number === selectedRoomNumber) ?? null,
@@ -295,14 +296,14 @@ export default function BookingPage() {
     : phone.trim().length < 7
       ? "Enter a valid phone number."
       : nights < 1
-        ? "Check-out date must be after check-in date."
+        ? "Check-out must be later than check-in. On the same date, choose a later check-out time."
         : !selectedRoomNumber
           ? "No available room is selected for this room type."
           : null;
 
   useEffect(() => {
     if (!checkInDate) return;
-    if (!checkOutDate || daysBetween(checkInDate, checkOutDate) < 1) {
+    if (!checkOutDate || checkOutDate < checkInDate) {
       setCheckOutDate(addDays(checkInDate, 1));
     }
   }, [checkInDate, checkOutDate]);
@@ -391,8 +392,8 @@ export default function BookingPage() {
     [extendCheckOutDate, extendCheckoutIsLater, selectedExtendBooking],
   );
   const extendNights = useMemo(
-    () => (selectedExtendBooking ? daysBetween(selectedExtendBooking.checkInDate, extendCheckOutDate) : 0),
-    [extendCheckOutDate, selectedExtendBooking],
+    () => (selectedExtendBooking ? selectedExtendBooking.nights + extendAddedNights : 0),
+    [extendAddedNights, selectedExtendBooking],
   );
   const extendIncrement = useMemo(
     () => (selectedExtendBooking ? extendAddedNights * (selectedExtendBooking.ratePerNight ?? 0) : 0),
@@ -697,7 +698,7 @@ export default function BookingPage() {
             ...latestBooking,
             checkOutDate: extendCheckOutDate,
             checkOutTime: extendCheckOutTime,
-            nights: daysBetween(latestBooking.checkInDate, extendCheckOutDate),
+            nights: latestBooking.nights + addedNights,
             total: latestBooking.total + addedNights * (latestBooking.ratePerNight ?? 0),
             status: nextStatus,
             extensionPaymentMethod: paymentMethod,
@@ -743,12 +744,18 @@ export default function BookingPage() {
     });
     if (!approved) return;
 
+    const checkedOutAt = Date.now();
     const nextTransactions = transactions.map((entry) =>
-      entry.id === booking.id ? { ...entry, status: "checked-out" as TransactionStatus, checkedOutAt: Date.now(), updatedAt: Date.now() } : entry,
+      entry.id === booking.id ? { ...entry, status: "checked-out" as TransactionStatus, checkedOutAt, updatedAt: checkedOutAt } : entry,
     );
 
+    const saved = await writeCashierState(nextTransactions, receiptSeq);
+    if (!saved) {
+      setSaveFeedback("Check-out was not uploaded. Check the connection and try again.");
+      return;
+    }
     setTransactions(nextTransactions);
-    writeCashierState(nextTransactions, receiptSeq);
+    setSaveFeedback(null);
 
     const checkedOutRooms = syncRoomsStateFromBookings(nextTransactions, rooms);
     const cleaningRooms = updateRoomStatusByNumber(booking.roomNumber, "cleaning", checkedOutRooms);
@@ -883,6 +890,9 @@ export default function BookingPage() {
               </div>
             </div>
           </div>
+          {checkInDate === checkOutDate && (
+            <p className="text-xs text-muted-foreground">Same-day stays are charged for one day when check-out is later than check-in.</p>
+          )}
 
           <div className="space-y-2 border-t pt-4">
             <div className="flex justify-between text-xs font-black uppercase tracking-widest opacity-60">
