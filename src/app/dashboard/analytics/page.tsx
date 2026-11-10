@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { BreakfastAllocation, BREAKFAST_PRICE, STORAGE_BREAKFAST, roomRevenue } from "@/app/lib/breakfast";
+import { barSaleBusinessDate } from "@/app/lib/bar-sale-date";
 import { format } from "date-fns";
 import type { DateRange } from "react-day-picker";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -356,7 +357,7 @@ export default function AnalyticsPage() {
 
     baristaPayments.forEach((payment) => {
       if (payment.status === "credit" || !payment.createdAt || !payment.total) return;
-      events.push({ date: toDayKey(payment.createdAt), timestamp: payment.createdAt, source: "barista", total: payment.total });
+      events.push({ date: barSaleBusinessDate(payment), timestamp: payment.createdAt, source: "barista", total: payment.total });
     });
 
     laundryRecords.forEach((record) => {
@@ -374,7 +375,7 @@ export default function AnalyticsPage() {
   }, [baristaPayments, bookings, breakfast, expenses, kitchenPayments, laundryRecords]);
 
   const availableMonths = useMemo(() => {
-    const monthKeys = Array.from(new Set(businessEvents.map((event) => toMonthKey(event.timestamp))));
+    const monthKeys = Array.from(new Set(businessEvents.map((event) => event.date.slice(0, 7))));
     if (monthKeys.length === 0) monthKeys.push(toMonthKey(Date.now()));
     return monthKeys.sort((a, b) => b.localeCompare(a));
   }, [businessEvents]);
@@ -424,7 +425,7 @@ export default function AnalyticsPage() {
     );
 
     businessEvents.forEach((event) => {
-      const key = range === "all-time" ? toMonthKey(event.timestamp) : event.date;
+      const key = range === "all-time" ? event.date.slice(0, 7) : event.date;
       const row = rows.get(key);
       if (!row) return;
       if (event.source === "rooms") row.roomRevenue += event.total;

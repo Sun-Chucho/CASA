@@ -23,7 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Clock, Phone, Receipt, User } from "lucide-react";
+import { Clock, Phone, Receipt, User, X } from "lucide-react";
 import { useIsDirector } from "@/hooks/use-is-director";
 import { useConfirmDialog } from "@/hooks/use-confirm-dialog";
 import { isBookingStillActive, readRoomsState, syncRoomsStateFromBookings, updateRoomStatusByNumber } from "@/app/lib/rooms-storage";
@@ -54,6 +54,7 @@ interface BookingRecord {
   specialPackage?: SpecialPackage;
   currency?: BookingCurrency;
   ratePerNight?: number;
+  discountPercent?: number;
   payment: PaymentMethod;
   checkInDate: string;
   checkInTime: string;
@@ -189,7 +190,7 @@ export default function BookingPage() {
   const [guestName, setGuestName] = useState("");
   const [phone, setPhone] = useState("");
   const [checkInDate, setCheckInDate] = useState(today);
-  const [checkInTime, setCheckInTime] = useState("14:00");
+  const [checkInTime, setCheckInTime] = useState("10:00");
   const [checkOutDate, setCheckOutDate] = useState(defaultCheckOutDate);
   const [checkOutTime, setCheckOutTime] = useState("12:00");
   const [selectedRoomNumber, setSelectedRoomNumber] = useState("");
@@ -285,7 +286,9 @@ export default function BookingPage() {
   const bookingCurrency: BookingCurrency = packageConfig?.currency ?? "TSh";
   const accountingCurrency = toAccountingCurrency(bookingCurrency);
   const accountingRate = toAccountingRate(rate, bookingCurrency);
-  const total = nights * accountingRate;
+  const editingDiscountPercent = editingBookingId ? transactions.find((entry) => entry.id === editingBookingId)?.discountPercent ?? 0 : 0;
+  const effectiveRate = Math.round(accountingRate * (1 - editingDiscountPercent / 100));
+  const total = nights * effectiveRate;
   const canSubmitBooking =
     guestName.trim().length > 0 &&
     phone.trim().length >= 7 &&
@@ -396,7 +399,7 @@ export default function BookingPage() {
     [extendAddedNights, selectedExtendBooking],
   );
   const extendIncrement = useMemo(
-    () => (selectedExtendBooking ? extendAddedNights * (selectedExtendBooking.ratePerNight ?? 0) : 0),
+    () => (selectedExtendBooking ? extendAddedNights * Math.round((selectedExtendBooking.ratePerNight ?? 0) * (1 - (selectedExtendBooking.discountPercent ?? 0) / 100)) : 0),
     [extendAddedNights, selectedExtendBooking],
   );
   const extendTotal = useMemo(
@@ -453,7 +456,7 @@ export default function BookingPage() {
     setGuestName("");
     setPhone("");
     setCheckInDate(today);
-    setCheckInTime("14:00");
+    setCheckInTime("10:00");
     setCheckOutDate(defaultCheckOutDate);
     setCheckOutTime("12:00");
     setSelectedRoomNumber("");
@@ -471,7 +474,7 @@ export default function BookingPage() {
     setGuestName(booking.guestName);
     setPhone(booking.phone);
     setCheckInDate(booking.checkInDate);
-    setCheckInTime(booking.checkInTime || "14:00");
+    setCheckInTime(booking.checkInTime || "10:00");
     setCheckOutDate(booking.checkOutDate);
     setCheckOutTime(booking.checkOutTime || "12:00");
     setSelectedRoomNumber(booking.roomNumber);
@@ -699,10 +702,10 @@ export default function BookingPage() {
             checkOutDate: extendCheckOutDate,
             checkOutTime: extendCheckOutTime,
             nights: latestBooking.nights + addedNights,
-            total: latestBooking.total + addedNights * (latestBooking.ratePerNight ?? 0),
+            total: latestBooking.total + addedNights * Math.round((latestBooking.ratePerNight ?? 0) * (1 - (latestBooking.discountPercent ?? 0) / 100)),
             status: nextStatus,
             extensionPaymentMethod: paymentMethod,
-            extensionAmount: addedNights * (latestBooking.ratePerNight ?? 0),
+            extensionAmount: addedNights * Math.round((latestBooking.ratePerNight ?? 0) * (1 - (latestBooking.discountPercent ?? 0) / 100)),
             lastExtendedAt: extendedAt,
             updatedAt: extendedAt,
           };
@@ -757,9 +760,10 @@ export default function BookingPage() {
     setTransactions(nextTransactions);
     setSaveFeedback(null);
 
-    const checkedOutRooms = syncRoomsStateFromBookings(nextTransactions, rooms);
-    const cleaningRooms = updateRoomStatusByNumber(booking.roomNumber, "cleaning", checkedOutRooms);
-    setRooms(cleaningRooms);
+    const reconciledRooms = syncRoomsStateFromBookings(nextTransactions, rooms);
+    setRooms(nextTransactions.some((entry) => entry.roomNumber === booking.roomNumber && isBookingStillActive(entry))
+      ? reconciledRooms
+      : updateRoomStatusByNumber(booking.roomNumber, "available", reconciledRooms));
   };
 
   return (
@@ -897,7 +901,7 @@ export default function BookingPage() {
           <div className="space-y-2 border-t pt-4">
             <div className="flex justify-between text-xs font-black uppercase tracking-widest opacity-60">
               <span>Rate / Night</span>
-              <span>{accountingCurrency} {accountingRate.toLocaleString()}</span>
+              <span>{accountingCurrency} {effectiveRate.toLocaleString()}</span>
             </div>
             <div className="flex justify-between text-xs font-black uppercase tracking-widest opacity-60">
               <span>Days</span>
@@ -1118,9 +1122,12 @@ export default function BookingPage() {
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <Card className="w-full max-w-2xl">
             <CardHeader>
-              <CardTitle className="text-xl font-black uppercase tracking-tight">
-                CASA Rooms
-              </CardTitle>
+              <div className="flex items-start justify-between gap-3">
+                <CardTitle className="text-xl font-black uppercase tracking-tight">CASA Rooms</CardTitle>
+                <Button type="button" variant="outline" size="sm" aria-label="Close room selector" onClick={() => setRoomPickerOpen(false)}>
+                  <X className="h-4 w-4" /><span className="ml-1">Close</span>
+                </Button>
+              </div>
               <CardDescription>Select from all rooms. Only available rooms can be booked.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">

@@ -48,6 +48,7 @@ interface BookingRecord {
   checkOutTime: string;
   nights: number;
   ratePerNight?: number;
+  discountPercent?: number;
   total: number;
   status: TransactionStatus;
   paymentBreakdown?: BookingPaymentBreakdownItem[];
@@ -213,14 +214,15 @@ export default function PaymentsPage() {
   const [payerNameDraft, setPayerNameDraft] = useState("");
   const [roomNumberDraft, setRoomNumberDraft] = useState("");
   const [checkInDateDraft, setCheckInDateDraft] = useState("");
-  const [checkInTimeDraft, setCheckInTimeDraft] = useState("14:00");
+  const [checkInTimeDraft, setCheckInTimeDraft] = useState("10:00");
   const [checkOutDateDraft, setCheckOutDateDraft] = useState("");
   const [checkOutTimeDraft, setCheckOutTimeDraft] = useState("12:00");
   const [paymentMethodDraft, setPaymentMethodDraft] = useState<PaymentMethod>("cash");
   const [savingEditedPayment, setSavingEditedPayment] = useState(false);
   const [editPaymentFeedback, setEditPaymentFeedback] = useState<string | null>(null);
   const adjustedNights = bookingChargeDays(checkInDateDraft, checkInTimeDraft, checkOutDateDraft, checkOutTimeDraft);
-  const adjustedRate = roomNumberDraft.trim() ? getCasaRoomPrice(roomNumberDraft.trim()) : 0;
+  const editingDiscountPercent = bookingTransactions.find((entry) => entry.id === editingBookingId)?.discountPercent ?? 0;
+  const adjustedRate = Math.round((roomNumberDraft.trim() ? getCasaRoomPrice(roomNumberDraft.trim()) : 0) * (1 - editingDiscountPercent / 100));
   const adjustedTotal = adjustedNights > 0 ? adjustedNights * adjustedRate : 0;
 
   useEffect(() => {
@@ -396,7 +398,7 @@ export default function PaymentsPage() {
     setPayerNameDraft(booking.guestName);
     setRoomNumberDraft(booking.roomNumber);
     setCheckInDateDraft(booking.checkInDate);
-    setCheckInTimeDraft(booking.checkInTime || "14:00");
+    setCheckInTimeDraft(booking.checkInTime || "10:00");
     setCheckOutDateDraft(booking.checkOutDate);
     setCheckOutTimeDraft(booking.checkOutTime || "12:00");
     setPaymentMethodDraft(booking.status === "credit" ? "credit" : booking.payment);
@@ -408,7 +410,7 @@ export default function PaymentsPage() {
     setPayerNameDraft("");
     setRoomNumberDraft("");
     setCheckInDateDraft("");
-    setCheckInTimeDraft("14:00");
+    setCheckInTimeDraft("10:00");
     setCheckOutDateDraft("");
     setCheckOutTimeDraft("12:00");
     setPaymentMethodDraft("cash");
@@ -435,7 +437,7 @@ export default function PaymentsPage() {
             checkOutDate: checkOutDateDraft,
             checkOutTime: checkOutTimeDraft,
             nights: nextNights,
-            ratePerNight: adjustedRate,
+            ratePerNight: getCasaRoomPrice(nextRoomNumber),
             total: nextNights * adjustedRate,
             payment: paymentMethodDraft,
             status:

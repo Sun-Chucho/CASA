@@ -45,7 +45,7 @@
         },
         "payments": {
           "$index": {
-            ".validate": "newData.child('createdAt').val() >= 1794321180000 && (!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1785099600000)"
+            ".validate": "newData.child('createdAt').val() >= 1794321180000 || (newData.child('historical').val() === true && newData.child('recordedAt').val() >= 1794321180000 && newData.child('createdAt').val() >= 1793480400000)"
           }
         },
         "ticketSeq": {

@@ -23,6 +23,7 @@ import { getActiveBaristaStateKey, readJson, readPosState, writeJson, writePosSt
 import { BARISTA_INVENTORY_SEED } from "@/app/lib/seed-barista-data";
 import { BAR_CATEGORIES, BarCategory, buyingPriceUnit, BAR_OPENING_CAPITAL, OPENING_CAPITAL_VERSION, syncBarCatalogToPos } from "@/app/lib/bar-catalog";
 import { STOCK_IN_HISTORY_KEY, StockInEntry } from "@/app/lib/bar-stock-history";
+import { barSaleBusinessDate } from "@/app/lib/bar-sale-date";
 import { KitchenPurchaseHistoryEntry, STORAGE_BARISTA_PURCHASE_HISTORY } from "@/app/lib/kitchen-session-storage";
 import { useIsDirector } from "@/hooks/use-is-director";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -133,6 +134,7 @@ interface BaristaPaymentRecord {
   lines?: BaristaOrderLine[];
   historical?: boolean;
   recordedAt?: number;
+  businessDate?: string;
 }
 
 interface BaristaCancellationRequest {
@@ -191,36 +193,17 @@ const BARISTA_CATEGORIES: Array<{ value: BaristaCategory; label: string }> = [
   { value: "snacks", label: "Snacks" },
 ];
 
-function matchesSalesDateFilter(createdAt: number | undefined, filter: SalesDateFilter, selectedDate: string) {
+function matchesSalesDateFilter(payment: BaristaPaymentRecord, filter: SalesDateFilter, selectedDate: string) {
   if (filter === "all") return true;
-  if (!createdAt) return false;
-
-  const saleDate = new Date(createdAt);
-  if (!Number.isFinite(saleDate.getTime())) return false;
-  if (filter === "date") return Boolean(selectedDate) && getLocalDateInputValue(saleDate) === selectedDate;
-
-  const now = new Date();
-  const saleDay = new Date(saleDate.getFullYear(), saleDate.getMonth(), saleDate.getDate()).getTime();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-
-  if (filter === "day") return saleDay === today;
-
-  if (filter === "week") {
-    const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
-    startOfWeek.setHours(0, 0, 0, 0);
-    const endOfWeek = new Date(startOfWeek);
-    endOfWeek.setDate(endOfWeek.getDate() + 7);
-    return saleDate >= startOfWeek && saleDate < endOfWeek;
-  }
-
-  return saleDate.getFullYear() === now.getFullYear() && saleDate.getMonth() === now.getMonth();
-}
-
-function formatPaymentDate(createdAt: number | undefined) {
-  if (!createdAt) return "-";
-  const date = new Date(createdAt);
-  return Number.isFinite(date.getTime()) ? date.toLocaleString() : "-";
+  const date = barSaleBusinessDate(payment);
+  if (!date) return false;
+  if (filter === "date") return Boolean(selectedDate) && date === selectedDate;
+  const today = barSaleBusinessDate({ createdAt: Date.now() });
+  if (filter === "day") return date === today;
+  if (filter === "month") return date.slice(0, 7) === today.slice(0, 7);
+  const start = new Date(`${today}T00:00:00Z`);
+  start.setUTCDate(start.getUTCDate() - start.getUTCDay());
+  return date >= start.toISOString().slice(0, 10) && date <= today;
 }
 
 function getBaristaPaymentRoomNumber(payment: Pick<BaristaPaymentRecord, "mode" | "destination" | "roomNumber">) {
@@ -390,11 +373,11 @@ export default function BaristaPage() {
   const [managerCategoryFilter, setManagerCategoryFilter] = useState("all");
   const [directorTab, setDirectorTab] = useState<"inventory" | "finance" | "purchases" | "sales">("finance");
   const [directorSalesDateFilter, setDirectorSalesDateFilter] = useState<SalesDateFilter>("day");
-  const [directorSalesDate, setDirectorSalesDate] = useState(getLocalDateInputValue);
+  const [directorSalesDate, setDirectorSalesDate] = useState(() => barSaleBusinessDate({ createdAt: Date.now() }));
   const [category, setCategory] = useState<BaristaCategory>("all");
   const [serviceMode, setServiceMode] = useState<ServiceMode>("restaurant");
   const [searchTerm, setSearchTerm] = useState("");
-  const [pastSaleDate, setPastSaleDate] = useState(getLocalDateInputValue);
+  const [pastSaleDate, setPastSaleDate] = useState(() => barSaleBusinessDate({ createdAt: Date.now() }));
   const [pastSaleSearch, setPastSaleSearch] = useState("");
   const [pastSaleMethod, setPastSaleMethod] = useState<PaidBaristaPaymentMethod>("cash");
   const [pastSaleCart, setPastSaleCart] = useState<CartLine[]>([]);
@@ -421,6 +404,8 @@ export default function BaristaPage() {
 
   const [pendingOrder, setPendingOrder] = useState<PendingOrder | null>(null);
   const [showPayNowPopup, setShowPayNowPopup] = useState(false);
+  const [savingOrder, setSavingOrder] = useState(false);
+  const savingOrderRef = useRef(false);
   const [accountTab, setAccountTab] = useState<"session" | "password">("session");
   const [activeUsername, setActiveUsername] = useState("");
   const [currentPasswordInput, setCurrentPasswordInput] = useState("");
@@ -1377,7 +1362,7 @@ export default function BaristaPage() {
   const filteredDirectorSalesPayments = useMemo(
     () =>
       [...baristaPayments]
-        .filter((payment) => matchesSalesDateFilter(payment.createdAt, directorSalesDateFilter, directorSalesDate))
+        .filter((payment) => matchesSalesDateFilter(payment, directorSalesDateFilter, directorSalesDate))
         .sort((a, b) => b.createdAt - a.createdAt),
     [baristaPayments, directorSalesDate, directorSalesDateFilter],
   );
@@ -1390,6 +1375,7 @@ export default function BaristaPage() {
               id: payment.id,
               code: payment.code,
               createdAt: payment.createdAt,
+              businessDate: barSaleBusinessDate(payment),
               itemName: "Unitemized sale",
               quantity: 1,
               destination: payment.destination,
@@ -1413,6 +1399,7 @@ export default function BaristaPage() {
             id: `${payment.id}-${index}`,
             code: payment.code,
             createdAt: payment.createdAt,
+            businessDate: barSaleBusinessDate(payment),
             itemName: line.name,
             quantity: line.qty,
             destination: payment.destination,
@@ -1433,6 +1420,20 @@ export default function BaristaPage() {
     () => filteredDirectorSalesPayments.reduce((sum, payment) => sum + payment.total, 0),
     [filteredDirectorSalesPayments],
   );
+  const directorSalesDailyTotals = useMemo(() => {
+    const byDate = new Map<string, { date: string; sales: number; quantity: number; paid: number; credit: number }>();
+    for (const payment of filteredDirectorSalesPayments) {
+      const date = barSaleBusinessDate(payment);
+      if (!date) continue;
+      const row = byDate.get(date) ?? { date, sales: 0, quantity: 0, paid: 0, credit: 0 };
+      row.sales += 1;
+      row.quantity += payment.lines?.reduce((sum, line) => sum + line.qty, 0) ?? 1;
+      if (payment.status === "credit") row.credit += payment.total;
+      else row.paid += payment.total;
+      byDate.set(date, row);
+    }
+    return [...byDate.values()].sort((a, b) => b.date.localeCompare(a.date));
+  }, [filteredDirectorSalesPayments]);
 
   const renderFinanceTable = () => (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_17rem]">
@@ -1578,6 +1579,19 @@ export default function BaristaPage() {
       </div>
 
       <Card className="border-none shadow-sm">
+        <CardHeader><CardTitle className="text-xl font-black uppercase tracking-tight">Sales by Date</CardTitle><CardDescription>Each sale appears on its recorded East Africa business date.</CardDescription></CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Sales</TableHead><TableHead>Items</TableHead><TableHead>Paid</TableHead><TableHead>Credit</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {directorSalesDailyTotals.map((row) => <TableRow key={row.date}><TableCell className="font-bold">{row.date}</TableCell><TableCell>{row.sales}</TableCell><TableCell>{row.quantity}</TableCell><TableCell>TSh {row.paid.toLocaleString()}</TableCell><TableCell>TSh {row.credit.toLocaleString()}</TableCell></TableRow>)}
+              {directorSalesDailyTotals.length === 0 && <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">No sales found for this filter.</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <Card className="border-none shadow-sm">
         <CardHeader>
           <CardTitle className="text-xl font-black uppercase tracking-tight">Sold Items</CardTitle>
           <CardDescription>Filter by today, week, month, all time, or a selected date.</CardDescription>
@@ -1600,7 +1614,7 @@ export default function BaristaPage() {
             <TableBody>
               {directorSalesRows.map((row) => (
                 <TableRow key={row.id}>
-                  <TableCell className="font-bold text-sm">{formatPaymentDate(row.createdAt)}</TableCell>
+                  <TableCell className="font-bold text-sm">{row.businessDate}</TableCell>
                   <TableCell className="font-black">{row.code}</TableCell>
                   <TableCell className="font-bold">{row.itemName}</TableCell>
                   <TableCell className="font-bold">{row.quantity}</TableCell>
@@ -1736,8 +1750,8 @@ export default function BaristaPage() {
 
   const recordPastSale = async () => {
     if (!isBaristaPastSales || !pastSaleDate || pastSaleCart.length === 0 || pastSaleTotal <= 0) return;
-    const saleTimestamp = new Date(`${pastSaleDate}T12:00:00`).getTime();
-    if (!Number.isFinite(saleTimestamp) || pastSaleDate > getLocalDateInputValue()) {
+    const saleTimestamp = new Date(`${pastSaleDate}T12:00:00+03:00`).getTime();
+    if (!Number.isFinite(saleTimestamp) || pastSaleDate > barSaleBusinessDate({ createdAt: Date.now() })) {
       setPastSaleFeedback("Choose a valid past or current sales date.");
       return;
     }
@@ -1753,49 +1767,61 @@ export default function BaristaPage() {
     setPastSaleFeedback(null);
     try {
       const pastLines = pastSaleCart.map((line) => ({ name: line.item.name, qty: line.qty }));
-      const stockResult = updateBaristaStoreStock(pastLines, "consume");
-      if (!stockResult.ok) {
-        setPastSaleFeedback(stockResult.error);
-        return;
-      }
       const activeBaristaKey = getActiveBaristaStateKey();
-      const snapshot = readPosState<BaristaTicket, BaristaPaymentRecord, BaristaMenuItem>(
-        activeBaristaKey,
-        STORAGE_TICKETS,
-        STORAGE_SEQ,
-        STORAGE_PAYMENTS,
-        STORAGE_MENU,
-        490,
-      );
-      const nextSeq = snapshot.ticketSeq + 1;
       const recordedAt = Date.now();
-      const paymentRecord: BaristaPaymentRecord = {
-        id: `bp-history-${recordedAt}`,
-        ticketId: `historical-${recordedAt}`,
-        code: `B-H-${nextSeq}`,
-        createdAt: saleTimestamp,
-        mode: "take-away",
-        destination: "Historical Bar Sale",
-        total: pastSaleTotal,
-        status: "completed",
-        method: pastSaleMethod,
-        lines: pastSaleCart.map((line) => ({ name: line.item.name, qty: line.qty })),
-        historical: true,
-        recordedAt,
-      };
-      const nextPayments = [paymentRecord, ...snapshot.payments];
-
-      await writePosState(
-        activeBaristaKey,
-        snapshot.tickets,
-        nextSeq,
-        nextPayments,
-        snapshot.menuItems,
+      const operationId = `bp-history-${crypto.randomUUID()}`;
+      const committed = await transactSyncedStorageKeys(
+        [activeBaristaKey, STORAGE_MAIN_STORE_ITEMS, STORAGE_INVENTORY_ITEMS],
+        (current) => {
+          const rawSnapshot = current[activeBaristaKey] as ReturnType<typeof readPosState<BaristaTicket, BaristaPaymentRecord, BaristaMenuItem>> | null;
+          const snapshot = {
+            ...rawSnapshot,
+            tickets: rawSnapshot?.tickets ?? [],
+            ticketSeq: rawSnapshot?.ticketSeq ?? 490,
+            payments: rawSnapshot?.payments ?? [],
+            menuItems: rawSnapshot?.menuItems ?? [],
+          };
+          if (snapshot.payments.some((payment) => payment.id === operationId)) return current;
+          const stock = calculateBaristaStock(
+            pastLines, "consume",
+            (current[STORAGE_MAIN_STORE_ITEMS] as MainStoreItem[] | null) ?? [],
+            (current[STORAGE_INVENTORY_ITEMS] as InventoryItem[] | null) ?? [],
+          );
+          if (!stock.ok) throw new Error(stock.error);
+          const nextSeq = snapshot.ticketSeq + 1;
+          const paymentRecord: BaristaPaymentRecord = {
+            id: operationId,
+            ticketId: `historical-${operationId}`,
+            code: `B-H-${nextSeq}`,
+            createdAt: saleTimestamp,
+            businessDate: pastSaleDate,
+            mode: "take-away",
+            destination: "Historical Bar Sale",
+            total: pastSaleTotal,
+            status: "completed",
+            method: pastSaleMethod,
+            lines: pastLines,
+            historical: true,
+            recordedAt,
+          };
+          return {
+            [activeBaristaKey]: { ...snapshot, ticketSeq: nextSeq, payments: [paymentRecord, ...snapshot.payments] },
+            [STORAGE_MAIN_STORE_ITEMS]: stock.stores,
+            [STORAGE_INVENTORY_ITEMS]: stock.inventory,
+          };
+        },
       );
-      setTicketSeq(nextSeq);
-      setBaristaPayments(nextPayments);
+      const snapshot = committed[activeBaristaKey] as ReturnType<typeof readPosState<BaristaTicket, BaristaPaymentRecord, BaristaMenuItem>>;
+      const paymentRecord = snapshot.payments.find((payment) => payment.id === operationId);
+      if (!paymentRecord) throw new Error("Past sale did not reach the cloud. Please try again.");
+      setTicketSeq(snapshot.ticketSeq);
+      setBaristaPayments(snapshot.payments);
+      setBaristaStoreItems(((committed[STORAGE_MAIN_STORE_ITEMS] as MainStoreItem[]) ?? []).filter((entry) => entry.lane === "barista" && !entry.deletedAt));
+      setInventoryItems((committed[STORAGE_INVENTORY_ITEMS] as InventoryItem[]) ?? []);
       setPastSaleCart([]);
       setPastSaleFeedback(`Past sale ${paymentRecord.code} recorded and stock deducted.`);
+    } catch (error) {
+      setPastSaleFeedback(error instanceof Error ? error.message : "Past sale could not be saved. Stock was not deducted.");
     } finally {
       setSavingPastSale(false);
     }
@@ -1833,69 +1859,70 @@ export default function BaristaPage() {
   };
 
   const finalizeOrder = async (method: PaidBaristaPaymentMethod) => {
-    if (isDirector) return;
-    if (!pendingOrder) return;
-
-    const stockResult = updateBaristaStoreStock(pendingOrder.lines, "consume");
-    if (!stockResult.ok) {
-      window.alert(stockResult.error);
-      return;
-    }
-
-    const nextSeq = ticketSeq + 1;
+    if (isDirector || !pendingOrder || savingOrderRef.current) return;
+    savingOrderRef.current = true;
+    setSavingOrder(true);
+    const order = pendingOrder;
     const createdAt = Date.now();
-    setTicketSeq(nextSeq);
-
-    const orderId = `bt-${createdAt}`;
-    const code = `B-${nextSeq}`;
-
-    const ticket: BaristaTicket = {
-      id: orderId,
-      code,
-      createdAt,
-      mode: pendingOrder.mode,
-      destination: pendingOrder.destination,
-      lines: pendingOrder.lines,
-      total: pendingOrder.total,
-    };
-
-    const paymentRecord: BaristaPaymentRecord = {
-      id: `bp-${createdAt}`,
-      ticketId: orderId,
-      code,
-      createdAt,
-      mode: pendingOrder.mode,
-      destination: pendingOrder.destination,
-      total: pendingOrder.total,
-      status: "completed",
-      method,
-      lines: pendingOrder.lines,
-    };
-
-    const nextTickets = [ticket, ...tickets];
-    const nextPayments = [paymentRecord, ...baristaPayments];
-    setTickets(nextTickets);
-    setBaristaPayments(nextPayments);
-    writePosState(getActiveBaristaStateKey(), nextTickets, nextSeq, nextPayments, storedMenuItems);
-
-    setCart([]);
-    setPendingOrder(null);
-    setShowPayNowPopup(false);
-
-    const printResult = await printDepartmentReceipt({
-      department: "barista",
-      code,
-      destination: pendingOrder.destination,
-      mode: pendingOrder.mode,
-      method,
-      status,
-      total: pendingOrder.total,
-      createdAt,
-      lines: pendingOrder.lines,
-    });
-
-    if (!printResult.ok && printResult.reason) {
-      window.alert(`Barista receipt was not printed: ${printResult.reason}`);
+    const orderId = `bt-${crypto.randomUUID()}`;
+    const paymentId = `bp-${crypto.randomUUID()}`;
+    const activeBaristaKey = getActiveBaristaStateKey();
+    try {
+      const committed = await transactSyncedStorageKeys(
+        [activeBaristaKey, STORAGE_MAIN_STORE_ITEMS, STORAGE_INVENTORY_ITEMS],
+        (current) => {
+          const rawSnapshot = current[activeBaristaKey] as ReturnType<typeof readPosState<BaristaTicket, BaristaPaymentRecord, BaristaMenuItem>> | null;
+          const snapshot = {
+            ...rawSnapshot,
+            tickets: rawSnapshot?.tickets ?? [],
+            ticketSeq: rawSnapshot?.ticketSeq ?? 490,
+            payments: rawSnapshot?.payments ?? [],
+            menuItems: rawSnapshot?.menuItems ?? [],
+          };
+          if (snapshot.payments.some((payment) => payment.id === paymentId)) return current;
+          const stock = calculateBaristaStock(
+            order.lines, "consume",
+            (current[STORAGE_MAIN_STORE_ITEMS] as MainStoreItem[] | null) ?? [],
+            (current[STORAGE_INVENTORY_ITEMS] as InventoryItem[] | null) ?? [],
+          );
+          if (!stock.ok) throw new Error(stock.error);
+          const code = `B-${snapshot.ticketSeq + 1}`;
+          const ticket: BaristaTicket = { id: orderId, code, createdAt, mode: order.mode, destination: order.destination, lines: order.lines, total: order.total };
+          const payment: BaristaPaymentRecord = {
+            id: paymentId, ticketId: orderId, code, createdAt,
+            businessDate: barSaleBusinessDate({ createdAt }),
+            mode: order.mode, destination: order.destination, total: order.total,
+            status: "completed", method, lines: order.lines,
+          };
+          return {
+            [activeBaristaKey]: { ...snapshot, ticketSeq: snapshot.ticketSeq + 1, tickets: [ticket, ...snapshot.tickets], payments: [payment, ...snapshot.payments] },
+            [STORAGE_MAIN_STORE_ITEMS]: stock.stores,
+            [STORAGE_INVENTORY_ITEMS]: stock.inventory,
+          };
+        },
+      );
+      const snapshot = committed[activeBaristaKey] as ReturnType<typeof readPosState<BaristaTicket, BaristaPaymentRecord, BaristaMenuItem>>;
+      const payment = snapshot.payments.find((entry) => entry.id === paymentId);
+      if (!payment) throw new Error("Sale did not reach the cloud. Stock was not deducted.");
+      setTickets(snapshot.tickets);
+      setTicketSeq(snapshot.ticketSeq);
+      setBaristaPayments(snapshot.payments);
+      setBaristaStoreItems(((committed[STORAGE_MAIN_STORE_ITEMS] as MainStoreItem[]) ?? []).filter((entry) => entry.lane === "barista" && !entry.deletedAt));
+      setInventoryItems((committed[STORAGE_INVENTORY_ITEMS] as InventoryItem[]) ?? []);
+      setCart([]);
+      setPendingOrder(null);
+      setShowPayNowPopup(false);
+      const printResult = await printDepartmentReceipt({
+        department: "barista", code: payment.code, destination: order.destination,
+        mode: order.mode, method, status: "completed", total: order.total,
+        createdAt, lines: order.lines,
+      });
+      if (!printResult.ok && printResult.reason) window.alert(`Barista receipt was not printed: ${printResult.reason}`);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Sale could not be saved. Stock was not deducted.");
+    } finally {
+      savingOrderRef.current = false;
+      setSavingOrder(false);
     }
   };
 
@@ -3508,17 +3535,18 @@ export default function BaristaPage() {
               <CardDescription>Select cash, mobile, or bank</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <Button onClick={() => finalizeOrder("cash")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
-                Cash
+              <Button disabled={savingOrder} onClick={() => finalizeOrder("cash")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
+                {savingOrder ? "Saving..." : "Cash"}
               </Button>
-              <Button onClick={() => finalizeOrder("mobile")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
+              <Button disabled={savingOrder} onClick={() => finalizeOrder("mobile")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
                 Mobile
               </Button>
-              <Button onClick={() => finalizeOrder("bank")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
+              <Button disabled={savingOrder} onClick={() => finalizeOrder("bank")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
                 Bank
               </Button>
               <Button
                 variant="outline"
+                disabled={savingOrder}
                 onClick={() => {
                   setShowPayNowPopup(false);
                 }}
