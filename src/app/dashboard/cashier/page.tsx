@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { BreakfastAllocation, STORAGE_BREAKFAST, breakfastForBooking, roomRevenue, localDateKey, BREAKFAST_PRICE } from "@/app/lib/breakfast";
 import {
   Role,
   Room,
@@ -8,7 +9,7 @@ import {
   getCasaRoomPrice,
 } from "@/app/lib/mock-data";
 import { readStoredRole } from "@/app/lib/auth";
-import { readCashierState, writeCashierState, getActiveCashierStateKey, STORAGE_CASHIER_STATE } from "@/app/lib/storage";
+import { readCashierState, readJson, writeCashierState, getActiveCashierStateKey, STORAGE_CASHIER_STATE } from "@/app/lib/storage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -206,6 +207,7 @@ export default function BookingPage() {
 
   const [rooms, setRooms] = useState<Room[]>(readRoomsState());
   const [transactions, setTransactions] = useState<BookingRecord[]>([]);
+  const [breakfastAllocations, setBreakfastAllocations] = useState<BreakfastAllocation[]>([]);
   const [receiptSeq, setReceiptSeq] = useState(84920);
   const [role, setRole] = useState<Role>("cashier");
   const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
@@ -229,6 +231,11 @@ export default function BookingPage() {
     };
 
     const activeCashierKey = getActiveCashierStateKey();
+    const applyBreakfastSnapshot = () => {
+      if (!cancelled) setBreakfastAllocations(readJson<BreakfastAllocation[]>(STORAGE_BREAKFAST) ?? []);
+    };
+    applyBreakfastSnapshot();
+    void hydrateStorageKeyFromFirebase(STORAGE_BREAKFAST, true).finally(applyBreakfastSnapshot);
     void hydrateStorageKeyFromFirebase(activeCashierKey).catch(() => undefined).finally(() => {
       applyCashierSnapshot();
     });
@@ -236,6 +243,7 @@ export default function BookingPage() {
     const unsubscribeCashier = subscribeToSyncedStorageKey(activeCashierKey, () => {
       applyCashierSnapshot();
     });
+    const unsubscribeBreakfast = subscribeToSyncedStorageKey(STORAGE_BREAKFAST, applyBreakfastSnapshot);
     const roomsStorageKey = getScopedStorageKey("orange-hotel-rooms-state");
     const unsubscribeRooms = subscribeToSyncedStorageKey<Room[]>(roomsStorageKey, (value) => {
       applyCashierSnapshot(Array.isArray(value) && value.length > 0 ? value : readRoomsState());
@@ -244,6 +252,7 @@ export default function BookingPage() {
     return () => {
       cancelled = true;
       unsubscribeCashier();
+      unsubscribeBreakfast();
       unsubscribeRooms();
     };
   }, []);
@@ -395,9 +404,16 @@ export default function BookingPage() {
   );
 
   const totalTransactions = transactions.length;
+  const todayKey = localDateKey(bookingClock);
   const todayRevenueTSh = transactions
-    .filter((tx) => (tx.status === "completed" || tx.status === "checked-out") && (tx.currency ?? "TSh") === "TSh")
-    .reduce((sum, tx) => sum + tx.total, 0);
+    .filter((tx) => (tx.status === "completed" || tx.status === "checked-out") && (tx.currency ?? "TSh") === "TSh" && localDateKey(tx.createdAt) === todayKey)
+    .reduce((sum, tx) => sum + roomRevenue(tx, breakfastAllocations), 0);
+  const todayBreakfastTSh = breakfastAllocations
+    .filter((allocation) => allocation.date === todayKey && allocation.count > 0)
+    .reduce((sum, allocation) => {
+      const booking = transactions.find((tx) => tx.id === allocation.bookingId);
+      return sum + (booking && booking.status !== "credit" ? Math.min(booking.total, allocation.count * BREAKFAST_PRICE) : 0);
+    }, 0);
 
   const getRoomBookingState = (room: Room) => {
     if (activeBookedRoomNumbers.has(room.number) || room.status === "occupied") {
@@ -749,7 +765,7 @@ export default function BookingPage() {
             Guest booking capture and payment processing
           </p>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 w-full lg:w-auto">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 w-full lg:w-auto">
           <a href="#active-stays" className="flex h-10 items-center justify-center rounded-md border border-red-300 bg-red-50 px-4 text-[10px] font-black uppercase tracking-widest text-red-800">
             {activeBookings.length} Checked In · {overstayCount} Overstay
           </a>
@@ -757,8 +773,9 @@ export default function BookingPage() {
             {totalTransactions} Transactions
           </Badge>
           <Badge variant="outline" className="h-10 px-4 justify-center font-black uppercase text-[10px] tracking-widest bg-white">
-            TSh {todayRevenueTSh.toLocaleString()} Today
+            Room TSh {todayRevenueTSh.toLocaleString()} Today
           </Badge>
+          <Badge variant="outline" className="h-10 px-4 justify-center font-black uppercase text-[10px] tracking-widest bg-white">Breakfast TSh {todayBreakfastTSh.toLocaleString()} Today</Badge>
         </div>
       </header>
       {isDirector && (
@@ -920,6 +937,7 @@ export default function BookingPage() {
                 <TableHead>Check-In</TableHead>
                 <TableHead>Expected Check-Out</TableHead>
                 <TableHead>Payment</TableHead>
+                <TableHead>Room / Breakfast</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Action</TableHead>
               </TableRow>
@@ -932,6 +950,11 @@ export default function BookingPage() {
                   <TableCell>{booking.checkInDate}</TableCell>
                   <TableCell>{booking.checkOutDate} {booking.checkOutTime}</TableCell>
                   <TableCell>{booking.status === "credit" ? "Credit" : "Paid"}</TableCell>
+                  <TableCell className="text-xs font-semibold">
+                    <p>Room TSh {roomRevenue(booking, breakfastAllocations).toLocaleString()}</p>
+                    {booking.status !== "credit" && breakfastForBooking(booking.id, breakfastAllocations) > 0 && <p className="text-amber-700">Breakfast −TSh {Math.min(booking.total, breakfastForBooking(booking.id, breakfastAllocations)).toLocaleString()}</p>}
+                    <p className="text-muted-foreground">Collected TSh {booking.total.toLocaleString()}</p>
+                  </TableCell>
                   <TableCell>
                     <Badge className={isOverstay(booking, bookingClock) ? "bg-red-600 text-white hover:bg-red-600" : "bg-green-600 text-white hover:bg-green-600"}>
                       {isOverstay(booking, bookingClock) ? "Overstay" : "Occupied"}
@@ -949,7 +972,7 @@ export default function BookingPage() {
               ))}
               {activeBookings.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="py-10 text-center text-sm text-muted-foreground">No guests are currently checked in.</TableCell>
+                  <TableCell colSpan={8} className="py-10 text-center text-sm text-muted-foreground">No guests are currently checked in.</TableCell>
                 </TableRow>
               )}
             </TableBody>
@@ -991,6 +1014,7 @@ export default function BookingPage() {
                 <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Check-In Date</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Check-Out</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Checked By</TableHead>
+                <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Room / Breakfast</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Status</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest h-12 text-right">Action</TableHead>
               </TableRow>
@@ -1007,6 +1031,11 @@ export default function BookingPage() {
                   </TableCell>
                   <TableCell className="font-black text-xs text-primary uppercase tracking-wider">
                     {tx.checkedBy || "---"}
+                  </TableCell>
+                  <TableCell className="text-xs font-semibold">
+                    <p>Room TSh {roomRevenue(tx, breakfastAllocations).toLocaleString()}</p>
+                    {tx.status !== "credit" && breakfastForBooking(tx.id, breakfastAllocations) > 0 && <p className="text-amber-700">Breakfast −TSh {Math.min(tx.total, breakfastForBooking(tx.id, breakfastAllocations)).toLocaleString()}</p>}
+                    <p className="text-muted-foreground">Collected TSh {tx.total.toLocaleString()}</p>
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
@@ -1060,7 +1089,7 @@ export default function BookingPage() {
 
               {visibleTransactions.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="py-12 text-center">
+                  <TableCell colSpan={8} className="py-12 text-center">
                     <div className="opacity-40">
                       <Receipt className="w-10 h-10 mx-auto mb-2" />
                       <p className="font-black uppercase tracking-widest text-xs">
