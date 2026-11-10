@@ -33,7 +33,7 @@ export default function BreakfastPage() {
     return () => { offBookings(); offBreakfast(); };
   }, []);
 
-  const occupied = useMemo(() => bookings.filter((booking) => booking.status !== "credit" && booking.currency !== "$" && bookingOccupiesDate(booking, date)).sort((a, b) => a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true })), [bookings, date]);
+  const occupied = useMemo(() => bookings.filter((booking) => bookingOccupiesDate(booking, date)).sort((a, b) => a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true })), [bookings, date]);
   const selected = useMemo(() => occupied.reduce((sum, booking) => sum + (allocations.find((entry) => entry.id === breakfastId(booking.id, date))?.count ?? 0), 0), [occupied, allocations, date]);
 
   async function changeCount(booking: BreakfastBooking, delta: number) {
@@ -60,13 +60,13 @@ export default function BreakfastPage() {
 
   return <div className="space-y-5">
     <header className="flex flex-wrap items-end justify-between gap-3">
-      <div><h1 className="text-3xl font-black uppercase tracking-tight">Breakfast</h1><p className="text-sm text-muted-foreground">Tap a room once per breakfast guest. Each tap allocates TSh 5,000 from its paid room booking.</p></div>
+      <div><h1 className="text-3xl font-black uppercase tracking-tight">Breakfast</h1><p className="text-sm text-muted-foreground">Tap a room once per breakfast guest. Each tap records TSh 5,000. Credit stays are counted when the booking is paid.</p></div>
       <label className="text-xs font-bold uppercase">Breakfast date<Input type="date" value={date} max={localDateKey(Date.now())} onChange={(event) => setDate(event.target.value)} className="mt-1 w-44" /></label>
     </header>
     <div className="flex flex-wrap gap-2 text-sm font-bold"><span>{occupied.length} occupied rooms</span><span>·</span><span>{selected} breakfasts</span><span>·</span><span>TSh {(selected * BREAKFAST_PRICE).toLocaleString()} allocated</span></div>
     {error && <p role="alert" className="text-sm font-semibold text-red-600">{error}</p>}
     {!ready && <p>Loading room stays and breakfast records…</p>}
-    {ready && occupied.length === 0 && <p className="rounded-lg border p-5 text-sm text-muted-foreground">No paid TSh room stays are recorded for this date.</p>}
+    {ready && occupied.length === 0 && <p className="rounded-lg border p-5 text-sm text-muted-foreground">No occupied room stays are recorded for this date.</p>}
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-7">
       {ready && occupied.map((booking) => {
         const count = allocations.find((entry) => entry.id === breakfastId(booking.id, date))?.count ?? 0;
@@ -74,6 +74,7 @@ export default function BreakfastPage() {
         return <Card key={booking.id} className={count ? "border-amber-500 bg-amber-50" : ""}><CardContent className="space-y-1 p-3">
           <button type="button" disabled={Boolean(busy) || atLimit} onClick={() => changeCount(booking, 1)} className="w-full text-left disabled:opacity-60" aria-label={`Add breakfast for room ${booking.roomNumber}`}>
             <span className="block text-lg font-black">Room {booking.roomNumber}</span><span className="block truncate text-xs text-muted-foreground">{booking.guestName || "Guest"}</span>
+            {booking.status === "credit" && <span className="block text-[10px] font-bold text-amber-700">Credit stay</span>}
             <span className="mt-2 block text-sm font-bold">{count} {count === 1 ? "guest" : "guests"}</span><span className="block text-xs font-semibold">TSh {(count * BREAKFAST_PRICE).toLocaleString()}</span>
           </button>
           <div className="flex gap-1 pt-1"><Button size="sm" variant="outline" className="h-7 flex-1" disabled={Boolean(busy) || count === 0} onClick={() => changeCount(booking, -1)} aria-label={`Remove breakfast for room ${booking.roomNumber}`}><Minus className="h-3 w-3" /></Button><Button size="sm" className="h-7 flex-1" disabled={Boolean(busy) || atLimit} onClick={() => changeCount(booking, 1)} aria-label={`Add breakfast for room ${booking.roomNumber}`}><Plus className="h-3 w-3" /></Button></div>

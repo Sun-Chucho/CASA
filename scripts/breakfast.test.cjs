@@ -19,12 +19,33 @@ test("paid room revenue is reclassified without changing the room payment", () =
   assert.equal(roomRevenue({ ...booking, status: "credit" }, records), 50000);
 });
 
-test("breakfast room list follows the stay and checkout time", () => {
+test("breakfast shows every currently occupied room, including overstays and credit", () => {
   process.env.TZ = "Africa/Nairobi";
-  const booking = { id: "stay-1", roomNumber: "101", checkInDate: "2026-11-09", checkInTime: "14:00", checkOutDate: "2026-11-11", checkOutTime: "11:00", total: 50000 };
-  assert.equal(bookingOccupiesDate(booking, "2026-11-09"), false);
-  assert.equal(bookingOccupiesDate(booking, "2026-11-10"), true);
-  assert.equal(bookingOccupiesDate(booking, "2026-11-11"), true);
-  assert.equal(bookingOccupiesDate(booking, "2026-11-12"), false);
-  assert.equal(bookingOccupiesDate({ ...booking, status: "checked-out", checkedOutAt: Date.parse("2026-11-10T08:00:00+03:00") }, "2026-11-10"), false);
+  const actualNow = Date.now;
+  Date.now = () => Date.parse("2026-11-10T09:00:00+03:00");
+  try {
+    const booking = { id: "stay-1", roomNumber: "101", checkInDate: "2026-11-07", checkInTime: "14:00", checkOutDate: "2026-11-08", checkOutTime: "11:00", total: 50000 };
+    assert.equal(bookingOccupiesDate(booking, "2026-11-10"), true);
+    assert.equal(bookingOccupiesDate({ ...booking, status: "credit" }, "2026-11-10"), true);
+    assert.equal(bookingOccupiesDate({ ...booking, status: "checked-out" }, "2026-11-10"), false);
+    assert.equal(bookingOccupiesDate({ ...booking, checkInDate: "2026-11-10", checkInTime: "14:00" }, "2026-11-10"), true);
+    assert.equal(bookingOccupiesDate(booking, "2026-11-11"), false);
+  } finally {
+    Date.now = actualNow;
+  }
+});
+
+test("historical breakfast dates use the actual checkout date", () => {
+  process.env.TZ = "Africa/Nairobi";
+  const actualNow = Date.now;
+  Date.now = () => Date.parse("2026-11-12T09:00:00+03:00");
+  try {
+    const booking = { id: "stay-2", roomNumber: "102", checkInDate: "2026-11-09", checkOutDate: "2026-11-10", checkedOutAt: Date.parse("2026-11-11T08:00:00+03:00"), status: "checked-out", total: 50000 };
+    assert.equal(bookingOccupiesDate(booking, "2026-11-08"), false);
+    assert.equal(bookingOccupiesDate(booking, "2026-11-10"), true);
+    assert.equal(bookingOccupiesDate(booking, "2026-11-11"), true);
+    assert.equal(bookingOccupiesDate(booking, "2026-11-12"), false);
+  } finally {
+    Date.now = actualNow;
+  }
 });
