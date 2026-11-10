@@ -2607,6 +2607,7 @@ export default function BaristaPage() {
             <CardContent className="p-4">
               <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Restock Capital</p>
               <p className="mt-2 text-2xl font-black">TSh {restockCapital.toLocaleString()}</p>
+              {restockCapital === 0 && <p className="mt-1 text-xs text-muted-foreground">No restocks recorded since opening.</p>}
             </CardContent>
           </Card>
           <Card className="border-none shadow-sm">
