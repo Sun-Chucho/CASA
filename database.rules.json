@@ -15,31 +15,45 @@
       "orange-hotel-cashier-state": {
         "transactions": {
           "$index": {
-            ".validate": "(!newData.hasChild('enteredAt') || newData.child('enteredAt').val() >= 1785099600000) && (((newData.child('roomNumber').val() === '100' || newData.child('roomNumber').val() === '108' || newData.child('roomNumber').val() === '109' || newData.child('roomNumber').val() === '110') && newData.child('ratePerNight').val() === 100000) || ((newData.child('roomNumber').val() === '101' || newData.child('roomNumber').val() === '102' || newData.child('roomNumber').val() === '103' || newData.child('roomNumber').val() === '104' || newData.child('roomNumber').val() === '105' || newData.child('roomNumber').val() === '106' || newData.child('roomNumber').val() === '107') && newData.child('ratePerNight').val() === 50000) || (newData.child('roomNumber').val() === '111' && newData.child('ratePerNight').val() === 120000) || ((newData.child('roomNumber').val() === '112' || newData.child('roomNumber').val() === '113' || newData.child('roomNumber').val() === '114' || newData.child('roomNumber').val() === '115' || newData.child('roomNumber').val() === '116' || newData.child('roomNumber').val() === '117') && newData.child('ratePerNight').val() === 60000) || ((newData.child('specialPackage').val() === 'resident-with-breakfast' || newData.child('specialPackage').val() === 'ninety-day-special') && newData.child('ratePerNight').val() === 70000) || (newData.child('specialPackage').val() === 'non-resident-with-breakfast' && newData.child('ratePerNight').val() === 150000))"
+            ".validate": "newData.child('enteredAt').val() >= 1794321180000 && ((!newData.hasChild('enteredAt') || newData.child('enteredAt').val() >= 1785099600000) && (((newData.child('roomNumber').val() === '100' || newData.child('roomNumber').val() === '108' || newData.child('roomNumber').val() === '109' || newData.child('roomNumber').val() === '110') && newData.child('ratePerNight').val() === 100000) || ((newData.child('roomNumber').val() === '101' || newData.child('roomNumber').val() === '102' || newData.child('roomNumber').val() === '103' || newData.child('roomNumber').val() === '104' || newData.child('roomNumber').val() === '105' || newData.child('roomNumber').val() === '106' || newData.child('roomNumber').val() === '107') && newData.child('ratePerNight').val() === 50000) || (newData.child('roomNumber').val() === '111' && newData.child('ratePerNight').val() === 120000) || ((newData.child('roomNumber').val() === '112' || newData.child('roomNumber').val() === '113' || newData.child('roomNumber').val() === '114' || newData.child('roomNumber').val() === '115' || newData.child('roomNumber').val() === '116' || newData.child('roomNumber').val() === '117') && newData.child('ratePerNight').val() === 60000) || ((newData.child('specialPackage').val() === 'resident-with-breakfast' || newData.child('specialPackage').val() === 'ninety-day-special') && newData.child('ratePerNight').val() === 70000) || (newData.child('specialPackage').val() === 'non-resident-with-breakfast' && newData.child('ratePerNight').val() === 150000)))"
           }
+        },
+        "receiptSeq": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && (!data.exists() || newData.val() <= data.val() + 1)"
         }
       },
       "orange-hotel-kitchen-state": {
         "tickets": {
           "$index": {
-            ".validate": "!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1785099600000"
+            ".validate": "newData.child('createdAt').val() >= 1794321180000 && (!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1785099600000)"
           }
         },
         "payments": {
           "$index": {
-            ".validate": "!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1785099600000"
+            ".validate": "newData.child('createdAt').val() >= 1794321180000 && (!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1785099600000)"
           }
+        },
+        "ticketSeq": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && (!data.exists() || newData.val() <= data.val() + 1)"
         }
       },
       "orange-hotel-barista-state": {
         "tickets": {
           "$index": {
-            ".validate": "!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1785099600000"
+            ".validate": "newData.child('createdAt').val() >= 1794321180000 && (!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1785099600000)"
           }
         },
         "payments": {
           "$index": {
-            ".validate": "!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1785099600000"
+            ".validate": "newData.child('createdAt').val() >= 1794321180000 && (!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1785099600000)"
+          }
+        },
+        "ticketSeq": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && (!data.exists() || newData.val() <= data.val() + 1)"
+        },
+        "menuItems": {
+          "$index": {
+            ".validate": "newData.hasChild('catalogVersion') ? newData.child('catalogVersion').val() === 'cassa-bar-catalog-2026-11-opening-stock' : newData.child('updatedAt').val() >= 1794321180000"
           }
         }
       },
@@ -47,6 +61,34 @@
         "$index": {
           ".validate": "!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1785099600000"
         }
+      },
+      "orange-hotel-breakfast-allocations": {
+        "$index": {
+          ".validate": "newData.child('updatedAt').val() >= 1794321180000"
+        }
+      },
+      "orange-hotel-barista-stock-in-history": {
+        "$index": {
+          ".validate": "newData.child('recordedAt').val() >= 1794321180000"
+        }
+      },
+      "orange-hotel-barista-cancel-requests": {
+        "$index": {
+          ".validate": "newData.child('requestedAt').val() >= 1794321180000"
+        }
+      },
+      "orange-hotel-main-store-items": {
+        "$index": {
+          ".validate": "newData.child('lane').val() !== 'barista' || (newData.hasChild('catalogVersion') ? newData.child('catalogVersion').val() === 'cassa-bar-catalog-2026-11-opening-stock' : newData.child('updatedAt').val() >= 1794321180000)"
+        }
+      },
+      "orange-hotel-inventory-items": {
+        "$index": {
+          ".validate": "newData.child('category').val() !== 'Bar' || (newData.hasChild('catalogVersion') ? newData.child('catalogVersion').val() === 'cassa-bar-catalog-2026-11-opening-stock' : newData.child('updatedAt').val() >= 1794321180000)"
+        }
+      },
+      "orange-hotel-barista-starting-capital-v1": {
+        ".validate": "newData.child('version').val() === 'cassa-catalog-opening-capital-nov-2026-v1' && newData.child('amount').val() === 4953724"
       }
     }
   }
