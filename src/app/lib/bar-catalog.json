@@ -2,7 +2,7 @@
   {
     "name": "CASTLE LAGER SMALL",
     "category": "Local Beers",
-    "buyingPrice": 1400.0,
+    "buyingPrice": 1875.0,
     "sellingPrice": 3000.0,
     "soldByTot": false,
     "openingStock": 0
@@ -13,15 +13,15 @@
     "buyingPrice": 1650.0,
     "sellingPrice": 3000.0,
     "soldByTot": false,
-    "openingStock": 51
+    "openingStock": 34
   },
   {
     "name": "CASTLE LITE CAN",
     "category": "Local Beers",
-    "buyingPrice": 2500.0,
+    "buyingPrice": 2208.3333333333335,
     "sellingPrice": 4000.0,
     "soldByTot": false,
-    "openingStock": 36
+    "openingStock": 60
   },
   {
     "name": "GUINESS LAGER",
@@ -50,15 +50,15 @@
   {
     "name": "KILIMANJARO LAGER [SMALL SIZE]",
     "category": "Local Beers",
-    "buyingPrice": 1650.0,
+    "buyingPrice": 1525.0,
     "sellingPrice": 3000.0,
     "soldByTot": false,
-    "openingStock": 68
+    "openingStock": 74
   },
   {
     "name": "KILIMANJARO LITE",
     "category": "Local Beers",
-    "buyingPrice": 2400.0,
+    "buyingPrice": 2200.0,
     "sellingPrice": 5000.0,
     "soldByTot": false,
     "openingStock": 34
@@ -66,15 +66,15 @@
   {
     "name": "SAFARI LAGER [LARGE SIZE]",
     "category": "Local Beers",
-    "buyingPrice": 1650.0,
+    "buyingPrice": 1525.0,
     "sellingPrice": 3000.0,
     "soldByTot": false,
-    "openingStock": 39
+    "openingStock": 37
   },
   {
     "name": "SERENGETI LAGER [LARGE SIZE]",
     "category": "Local Beers",
-    "buyingPrice": 1750.0,
+    "buyingPrice": 2000.0,
     "sellingPrice": 3000.0,
     "soldByTot": false,
     "openingStock": 0
@@ -85,7 +85,7 @@
     "buyingPrice": 1550.0,
     "sellingPrice": 3000.0,
     "soldByTot": false,
-    "openingStock": 45
+    "openingStock": 69
   },
   {
     "name": "SERENGETI LITE",
@@ -93,31 +93,31 @@
     "buyingPrice": 1640.0,
     "sellingPrice": 3000.0,
     "soldByTot": false,
-    "openingStock": 53
+    "openingStock": 55
   },
   {
-    "name": "SMIRNOFF GUARANA",
+    "name": "SMINOFF GWARANA",
     "category": "Local Beers",
-    "buyingPrice": 2320,
+    "buyingPrice": 0.0,
     "sellingPrice": 4000.0,
     "soldByTot": false,
-    "openingStock": 22
+    "openingStock": 18
   },
   {
     "name": "BRUTAL FRUITS",
     "category": "Imported Beers",
-    "buyingPrice": 3416.67,
+    "buyingPrice": 3416.6666666666665,
     "sellingPrice": 6000.0,
     "soldByTot": false,
-    "openingStock": 43
+    "openingStock": 37
   },
   {
     "name": "DESPERADO",
     "category": "Imported Beers",
-    "buyingPrice": 3250.0,
+    "buyingPrice": 3291.6666666666665,
     "sellingPrice": 5000.0,
     "soldByTot": false,
-    "openingStock": 22
+    "openingStock": 41
   },
   {
     "name": "FLYING FISH",
@@ -125,39 +125,39 @@
     "buyingPrice": 2000.0,
     "sellingPrice": 5000.0,
     "soldByTot": false,
-    "openingStock": 22
+    "openingStock": 17
   },
   {
     "name": "HEINEKEN",
     "category": "Imported Beers",
-    "buyingPrice": 3333.33,
+    "buyingPrice": 3000.0,
     "sellingPrice": 5000.0,
     "soldByTot": false,
-    "openingStock": 32
+    "openingStock": 23
   },
   {
     "name": "SAVANA DRY 330Mls",
     "category": "Imported Beers",
-    "buyingPrice": 3333.33,
+    "buyingPrice": 3541.6666666666665,
     "sellingPrice": 6000.0,
     "soldByTot": false,
-    "openingStock": 26
+    "openingStock": 23
   },
   {
     "name": "WINDHOEK",
     "category": "Imported Beers",
-    "buyingPrice": 3083.33,
+    "buyingPrice": 3083.3333333333335,
     "sellingPrice": 5000.0,
     "soldByTot": false,
-    "openingStock": 39
+    "openingStock": 36
   },
   {
     "name": "AZAM JUICE",
     "category": "Soft Drinks",
-    "buyingPrice": 3166.67,
+    "buyingPrice": 3166.6666666666665,
     "sellingPrice": 6000.0,
     "soldByTot": false,
-    "openingStock": 9
+    "openingStock": 20
   },
   {
     "name": "BALTICA",
@@ -170,10 +170,10 @@
   {
     "name": "CERES JUICE",
     "category": "Soft Drinks",
-    "buyingPrice": 4833.33,
+    "buyingPrice": 4750.0,
     "sellingPrice": 8000.0,
     "soldByTot": false,
-    "openingStock": 6
+    "openingStock": 17
   },
   {
     "name": "COKE MIX",
@@ -181,7 +181,7 @@
     "buyingPrice": 562.5,
     "sellingPrice": 1500.0,
     "soldByTot": false,
-    "openingStock": 172
+    "openingStock": 183
   },
   {
     "name": "GRAND MALT",
@@ -189,31 +189,31 @@
     "buyingPrice": 1750.0,
     "sellingPrice": 4500.0,
     "soldByTot": false,
-    "openingStock": 21
+    "openingStock": 18
   },
   {
     "name": "HILL WATER 1 LTR",
     "category": "Soft Drinks",
-    "buyingPrice": 500.0,
+    "buyingPrice": 583.3333333333334,
     "sellingPrice": 2000.0,
     "soldByTot": false,
-    "openingStock": 77
+    "openingStock": 41
   },
   {
     "name": "KILIMANJARO WATER 0.5 LTR",
     "category": "Soft Drinks",
-    "buyingPrice": 416.67,
+    "buyingPrice": 416.6666666666667,
     "sellingPrice": 1000.0,
     "soldByTot": false,
-    "openingStock": 30
+    "openingStock": 24
   },
   {
     "name": "KILIMANJARO WATER 1.5 LTR",
     "category": "Soft Drinks",
-    "buyingPrice": 916.67,
+    "buyingPrice": 916.6666666666666,
     "sellingPrice": 2500.0,
     "soldByTot": false,
-    "openingStock": 57
+    "openingStock": 60
   },
   {
     "name": "MADAFU",
@@ -229,15 +229,15 @@
     "buyingPrice": 500.0,
     "sellingPrice": 1500.0,
     "soldByTot": false,
-    "openingStock": 35
+    "openingStock": 32
   },
   {
     "name": "RED BULL ENERGY 250 Mls",
     "category": "Soft Drinks",
-    "buyingPrice": 3500.0,
+    "buyingPrice": 3333.3333333333335,
     "sellingPrice": 5500.0,
     "soldByTot": false,
-    "openingStock": 34
+    "openingStock": 27
   },
   {
     "name": "BALLANTINE 200 Mls",
@@ -245,7 +245,7 @@
     "buyingPrice": 16000.0,
     "sellingPrice": 25000.0,
     "soldByTot": false,
-    "openingStock": 4
+    "openingStock": 3
   },
   {
     "name": "BALLANTINE 750 Mls (TOTS)",
@@ -253,7 +253,8 @@
     "buyingPrice": 35000.0,
     "sellingPrice": 4000.0,
     "soldByTot": true,
-    "openingStock": 60
+    "openingStock": 60,
+    "totLimit": 30
   },
   {
     "name": "BLACK & WHITE 750 Mls",
@@ -269,7 +270,8 @@
     "buyingPrice": 100000.0,
     "sellingPrice": 3000.0,
     "soldByTot": true,
-    "openingStock": 0
+    "openingStock": 0,
+    "totLimit": 40
   },
   {
     "name": "FAMOUS GROUSE 200 Mls",
@@ -285,7 +287,8 @@
     "buyingPrice": 35000.0,
     "sellingPrice": 3000.0,
     "soldByTot": true,
-    "openingStock": 28
+    "openingStock": 28,
+    "totLimit": 30
   },
   {
     "name": "GRANTS 750 Mls (TOTS)",
@@ -293,7 +296,8 @@
     "buyingPrice": 28000.0,
     "sellingPrice": 4000.0,
     "soldByTot": true,
-    "openingStock": 49
+    "openingStock": 49,
+    "totLimit": 30
   },
   {
     "name": "J&B 200 Mls",
@@ -317,7 +321,8 @@
     "buyingPrice": 34000.0,
     "sellingPrice": 4000.0,
     "soldByTot": true,
-    "openingStock": 34
+    "openingStock": 34,
+    "totLimit": 30
   },
   {
     "name": "JACK DANIELS 700 Mls (TOTS)",
@@ -325,7 +330,8 @@
     "buyingPrice": 58000.0,
     "sellingPrice": 6000.0,
     "soldByTot": true,
-    "openingStock": 34
+    "openingStock": 34,
+    "totLimit": 28
   },
   {
     "name": "JAMESON 750 Mls (TOTS)",
@@ -333,7 +339,8 @@
     "buyingPrice": 40000.0,
     "sellingPrice": 4000.0,
     "soldByTot": true,
-    "openingStock": 30
+    "openingStock": 30,
+    "totLimit": 30
   },
   {
     "name": "JOHN WALKER - RED LABEL 750 Mls (TOTS)",
@@ -341,7 +348,8 @@
     "buyingPrice": 34000.0,
     "sellingPrice": 4000.0,
     "soldByTot": true,
-    "openingStock": 60
+    "openingStock": 60,
+    "totLimit": 30
   },
   {
     "name": "JOHN WALKER BLACK LABEL 750 Mls (TOTS)",
@@ -349,7 +357,8 @@
     "buyingPrice": 70000.0,
     "sellingPrice": 7000.0,
     "soldByTot": true,
-    "openingStock": 0
+    "openingStock": 0,
+    "totLimit": 30
   },
   {
     "name": "RED LABEL 200 Mls",
@@ -365,6 +374,15 @@
     "buyingPrice": 58000.0,
     "sellingPrice": 4000.0,
     "soldByTot": true,
+    "openingStock": 0,
+    "totLimit": 30
+  },
+  {
+    "name": "JACK DANIELS 200 Mls",
+    "category": "Whiskeys",
+    "buyingPrice": 0.0,
+    "sellingPrice": 35000.0,
+    "soldByTot": false,
     "openingStock": 0
   },
   {
@@ -373,7 +391,8 @@
     "buyingPrice": 75000.0,
     "sellingPrice": 7000.0,
     "soldByTot": true,
-    "openingStock": 30
+    "openingStock": 30,
+    "totLimit": 28
   },
   {
     "name": "HENNESSY 750 Mls (VSOP) (TOTS)",
@@ -381,7 +400,8 @@
     "buyingPrice": 170000.0,
     "sellingPrice": 10000.0,
     "soldByTot": true,
-    "openingStock": 34
+    "openingStock": 32,
+    "totLimit": 30
   },
   {
     "name": "HENNESSY VS 350 Mls",
@@ -421,7 +441,8 @@
     "buyingPrice": 24000.0,
     "sellingPrice": 4000.0,
     "soldByTot": true,
-    "openingStock": 0
+    "openingStock": 0,
+    "totLimit": 30
   },
   {
     "name": "GORDONS 750 Mls (TOTS)",
@@ -429,7 +450,8 @@
     "buyingPrice": 34000.0,
     "sellingPrice": 5000.0,
     "soldByTot": true,
-    "openingStock": 55
+    "openingStock": 55,
+    "totLimit": 30
   },
   {
     "name": "GORDONS S/S",
@@ -445,12 +467,12 @@
     "buyingPrice": 4000.0,
     "sellingPrice": 8000.0,
     "soldByTot": false,
-    "openingStock": 36
+    "openingStock": 45
   },
   {
     "name": "KONYAGI 750 Mls",
     "category": "Gins",
-    "buyingPrice": 10500.0,
+    "buyingPrice": 11000.0,
     "sellingPrice": 20000.0,
     "soldByTot": false,
     "openingStock": 12
@@ -485,7 +507,8 @@
     "buyingPrice": 38000.0,
     "sellingPrice": 4000.0,
     "soldByTot": true,
-    "openingStock": 0
+    "openingStock": 0,
+    "totLimit": 30
   },
   {
     "name": "BARCARD WHITE RUM 750 Mls (TOTS)",
@@ -493,7 +516,8 @@
     "buyingPrice": 38000.0,
     "sellingPrice": 4000.0,
     "soldByTot": true,
-    "openingStock": 0
+    "openingStock": 0,
+    "totLimit": 30
   },
   {
     "name": "CAPTAIN MORGAN 750 Mls (TOTS)",
@@ -501,7 +525,8 @@
     "buyingPrice": 30000.0,
     "sellingPrice": 5000.0,
     "soldByTot": true,
-    "openingStock": 0
+    "openingStock": 0,
+    "totLimit": 30
   },
   {
     "name": "MALIBU 750 Mls (TOTS)",
@@ -509,7 +534,8 @@
     "buyingPrice": 38000.0,
     "sellingPrice": 4000.0,
     "soldByTot": true,
-    "openingStock": 22
+    "openingStock": 22,
+    "totLimit": 30
   },
   {
     "name": "ABSOLUTE VODKA 750 Mls (TOTS)",
@@ -517,10 +543,11 @@
     "buyingPrice": 37000.0,
     "sellingPrice": 5000.0,
     "soldByTot": true,
-    "openingStock": 50
+    "openingStock": 50,
+    "totLimit": 30
   },
   {
-    "name": "SMINORF VODCA 250 Mls",
+    "name": "ABSOLUTE VODKA 200Mls",
     "category": "Vodka",
     "buyingPrice": 11000.0,
     "sellingPrice": 30000.0,
@@ -528,12 +555,29 @@
     "openingStock": 3
   },
   {
-    "name": "SMIRNOFF VODCA 750 Mls (TOTS)",
+    "name": "SMIRNOFF VODCA 250 Mls (TOTS)",
     "category": "Vodka",
     "buyingPrice": 30000.0,
-    "sellingPrice": 7000.0,
+    "sellingPrice": 18000.0,
     "soldByTot": true,
-    "openingStock": 2
+    "openingStock": 2,
+    "totLimit": 30
+  },
+  {
+    "name": "SMIRNOFF VODCA 750 Mls",
+    "category": "Vodka",
+    "buyingPrice": 10000.0,
+    "sellingPrice": 7000.0,
+    "soldByTot": false,
+    "openingStock": 18
+  },
+  {
+    "name": "SMIRNOFF VODKA 1200 MLS",
+    "category": "Vodka",
+    "buyingPrice": 0.0,
+    "sellingPrice": 20000.0,
+    "soldByTot": false,
+    "openingStock": 0
   },
   {
     "name": "CAMPARI 750 Mls (TOTS)",
@@ -541,7 +585,8 @@
     "buyingPrice": 38000.0,
     "sellingPrice": 5000.0,
     "soldByTot": true,
-    "openingStock": 30
+    "openingStock": 0,
+    "totLimit": 30
   },
   {
     "name": "CINZANO BIANCO 750 MLS (TOTS)",
@@ -549,7 +594,8 @@
     "buyingPrice": 25000.0,
     "sellingPrice": 4000.0,
     "soldByTot": true,
-    "openingStock": 0
+    "openingStock": 0,
+    "totLimit": 30
   },
   {
     "name": "CINZANO ROSSO 750 MLS (TOTS)",
@@ -557,12 +603,13 @@
     "buyingPrice": 25000.0,
     "sellingPrice": 4000.0,
     "soldByTot": true,
-    "openingStock": 0
+    "openingStock": 0,
+    "totLimit": 30
   },
   {
     "name": "AMARULA 375 Mls",
     "category": "Liquors",
-    "buyingPrice": 18000.0,
+    "buyingPrice": 15000.0,
     "sellingPrice": 28000.0,
     "soldByTot": false,
     "openingStock": 3
@@ -573,7 +620,8 @@
     "buyingPrice": 33000.0,
     "sellingPrice": 5000.0,
     "soldByTot": true,
-    "openingStock": 58
+    "openingStock": 58,
+    "totLimit": 30
   },
   {
     "name": "ANCIENT EARTH",
@@ -589,7 +637,8 @@
     "buyingPrice": 40000.0,
     "sellingPrice": 5000.0,
     "soldByTot": true,
-    "openingStock": 0
+    "openingStock": 0,
+    "totLimit": 30
   },
   {
     "name": "COMNTE JOSEPH (TOTS)",
@@ -597,7 +646,8 @@
     "buyingPrice": 28000.0,
     "sellingPrice": 5000.0,
     "soldByTot": true,
-    "openingStock": 15
+    "openingStock": 15,
+    "totLimit": 30
   },
   {
     "name": "GOLDEN NAPOLEONE 1 Ltr (TOTS)",
@@ -605,7 +655,8 @@
     "buyingPrice": 40000.0,
     "sellingPrice": 4000.0,
     "soldByTot": true,
-    "openingStock": 12
+    "openingStock": 12,
+    "totLimit": 40
   },
   {
     "name": "JAGERMEISTER 200 Mls",
@@ -621,7 +672,8 @@
     "buyingPrice": 40000.0,
     "sellingPrice": 4000.0,
     "soldByTot": true,
-    "openingStock": 33
+    "openingStock": 33,
+    "totLimit": 28
   },
   {
     "name": "JAGERMEISTER 750 Mls",
@@ -645,21 +697,22 @@
     "buyingPrice": 32000.0,
     "sellingPrice": 4000.0,
     "soldByTot": true,
-    "openingStock": 4
+    "openingStock": 4,
+    "totLimit": 30
   },
   {
     "name": "ST. REMMY (TOTS)",
     "category": "Liquors",
-    "buyingPrice": 1833.33,
+    "buyingPrice": 55000.0,
     "sellingPrice": 5000.0,
     "soldByTot": true,
     "openingStock": 15,
-    "buyingPriceUnit": "tot"
+    "totLimit": 30
   },
   {
     "name": "APOTHIC WINE",
     "category": "Wines",
-    "buyingPrice": 48000.0,
+    "buyingPrice": 35000.0,
     "sellingPrice": 60000.0,
     "soldByTot": false,
     "openingStock": 7
@@ -694,7 +747,7 @@
     "buyingPrice": 8000.0,
     "sellingPrice": 20000.0,
     "soldByTot": false,
-    "openingStock": 5
+    "openingStock": 4
   },
   {
     "name": "DROSTDY HOF 375 Mls (WHITE)",
@@ -710,7 +763,7 @@
     "buyingPrice": 15000.0,
     "sellingPrice": 30000.0,
     "soldByTot": false,
-    "openingStock": 5
+    "openingStock": 10
   },
   {
     "name": "DROSTDY HOF 750 Mls (WHITE)",
@@ -718,7 +771,7 @@
     "buyingPrice": 15000.0,
     "sellingPrice": 30000.0,
     "soldByTot": false,
-    "openingStock": 6
+    "openingStock": 5
   },
   {
     "name": "FOUR COUSINS RED",
@@ -726,7 +779,7 @@
     "buyingPrice": 17000.0,
     "sellingPrice": 25000.0,
     "soldByTot": false,
-    "openingStock": 9
+    "openingStock": 5
   },
   {
     "name": "FOUR COUSINS ROSE",
@@ -750,7 +803,7 @@
     "buyingPrice": 27000.0,
     "sellingPrice": 45000.0,
     "soldByTot": false,
-    "openingStock": 7
+    "openingStock": 9
   },
   {
     "name": "PEARLY BAY RED",
@@ -785,7 +838,7 @@
     "openingStock": 10
   },
   {
-    "name": "PROVETTO",
+    "name": "PROVETO",
     "category": "Champagne",
     "buyingPrice": 0.0,
     "sellingPrice": 45000.0,
@@ -806,12 +859,12 @@
     "buyingPrice": 4500.0,
     "sellingPrice": 7000.0,
     "soldByTot": false,
-    "openingStock": 14
+    "openingStock": 8
   },
   {
-    "name": "EMBASSY CLICK",
+    "name": "EMBASSY CKLICK",
     "category": "Cigarettes",
-    "buyingPrice": 6500.0,
+    "buyingPrice": 0.0,
     "sellingPrice": 8000.0,
     "soldByTot": false,
     "openingStock": 10

@@ -320,6 +320,32 @@ export function clearKitchenBarCacheOnce() {
   localStorage.setItem(marker, "1");
 }
 
+// The November opening stock is a new bar ledger. Drop older browser snapshots
+// before migration or pending writes can publish the old bar sales again.
+export function clearNovemberBarCacheOnce() {
+  if (typeof window === "undefined") return;
+  const marker = `${CASA_LOCAL_STORAGE_PREFIX}bar-november-opening-v1`;
+  if (localStorage.getItem(marker) === "1") return;
+  const keys = [
+    "orange-hotel-barista-state", "orange-hotel-barista-orders", "orange-hotel-barista-seq",
+    "orange-hotel-barista-payments", "orange-hotel-barista-menu", "orange-hotel-barista-starting-capital-v1",
+    "orange-hotel-barista-stock-in-history", "orange-hotel-barista-cancel-requests", "orange-hotel-barista-waste",
+    "orange-hotel-barista-purchase-session", "orange-hotel-barista-purchase-history",
+    "orange-hotel-barista-daily-stock-session", "orange-hotel-barista-daily-stock-history",
+    "orange-hotel-inv-bar-items", "orange-hotel-inv-bar-movements",
+    "orange-hotel-inventory-items", "orange-hotel-main-store-items",
+    "orange-hotel-store-movements", "orange-hotel-store-usage",
+    "orange-hotel-fnb-beverage-cost", "orange-hotel-fnb-recipe-cost", "orange-hotel-fnb-stock-sales",
+    "orange-hotel-cancelled-tickets", "orange-hotel-menu-audit-trail", "orange-hotel-expenses",
+  ];
+  keys.forEach((key) => {
+    localStorage.removeItem(getUnifiedLocalKey(key));
+    localStorage.removeItem(key);
+    localStorage.removeItem(getPendingSyncMarkerKey(key));
+  });
+  localStorage.setItem(marker, "1");
+}
+
 export const FIREBASE_SYNC_KEYS = [
   "orange-hotel-cashier-state",
   "orange-hotel-breakfast-allocations",
