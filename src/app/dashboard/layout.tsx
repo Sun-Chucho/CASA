@@ -10,7 +10,7 @@ import { KitchenPurchaseHistoryEntry, STORAGE_KITCHEN_PURCHASE_HISTORY } from "@
 import { MainStoreItem, STORAGE_MAIN_STORE_ITEMS, getStoreItemLabel, normalizeBaristaProductTarget, normalizeStockName } from "@/app/lib/inventory-transfer";
 import { getTotLimit } from "@/app/lib/barista-stock";
 import { normalizeRole } from "@/app/lib/auth";
-import { clearKitchenBarCacheOnce, clearNovemberBarCacheOnce, clearBookingsAndKitchenSalesCacheOnce, hydrateStorageKeyFromFirebase, migrateVerifiedCasaLocalData } from "@/app/lib/firebase-sync";
+import { clearKitchenBarCacheOnce, clearNovemberBarCacheOnce, clearBookingsAndKitchenSalesCacheOnce, hydrateStorageKeyFromFirebase, migrateVerifiedCasaLocalData, recoverPostOpeningBarSales, reverseVerifiedBh491BarSale, stagePostOpeningBarSales } from "@/app/lib/firebase-sync";
 import { readJson, readPosState, STORAGE_BARISTA_STATE, STORAGE_KITCHEN_STATE, writeJson, writePosState } from "@/app/lib/storage";
 import { usePathname, useRouter } from "next/navigation";
 import { Bell, Home, Hotel, Search, User, Clock, Menu, WalletCards, ReceiptText, Package } from "lucide-react";
@@ -1100,6 +1100,7 @@ export default function DashboardLayout({
       }
 
       localStorage.setItem("orange-hotel-role", savedRole);
+      stagePostOpeningBarSales();
       clearKitchenBarCacheOnce();
       clearNovemberBarCacheOnce();
       clearBookingsAndKitchenSalesCacheOnce();
@@ -1111,15 +1112,17 @@ export default function DashboardLayout({
       if (typeof window !== "undefined") {
         setSidebarOpen(window.innerWidth >= 768);
       }
-      setMounted(true);
-
       try {
+        await recoverPostOpeningBarSales();
+        await reverseVerifiedBh491BarSale();
         await hydrateStartupStateForRole(savedRole);
         if (cancelled) return;
         applyBusinessCorrections();
       } catch (error) {
         console.error("Dashboard hydration failed", error);
+        await hydrateStartupStateForRole(savedRole);
       }
+      if (!cancelled) setMounted(true);
     }
 
     void initializeDashboard();

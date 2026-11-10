@@ -251,6 +251,150 @@ export function subscribeToConnectionStatus(onChange: (connected: boolean) => vo
 
 const FIREBASE_STORAGE_ROOT = "casa-v2";
 const CASA_LOCAL_STORAGE_PREFIX = "casa-v2:";
+const BAR_POST_OPENING_RECOVERY_KEY = `${CASA_LOCAL_STORAGE_PREFIX}bar-post-opening-sales-recovery-v1`;
+const BAR_OPENING_RESET_AT = 1794321180000;
+const BAR_NOVEMBER_START_AT = 1793480400000;
+
+type RecoverableBarPayment = {
+  id: string;
+  code: string;
+  createdAt: number;
+  recordedAt?: number;
+  historical?: boolean;
+  total: number;
+  [key: string]: unknown;
+};
+
+function isPostOpeningBarPayment(value: unknown): value is RecoverableBarPayment {
+  if (!value || typeof value !== "object") return false;
+  const payment = value as Partial<RecoverableBarPayment>;
+  return typeof payment.id === "string" && payment.id.length > 0
+    && typeof payment.code === "string" && payment.code.length > 0
+    && Number.isFinite(payment.total) && Number(payment.total) > 0
+    && (Number(payment.createdAt) >= BAR_OPENING_RESET_AT
+      || (payment.historical === true && Number(payment.recordedAt) >= BAR_OPENING_RESET_AT
+        && Number(payment.createdAt) >= BAR_NOVEMBER_START_AT));
+}
+
+// Keep sales entered after the opening stock before either one-time cache reset runs.
+// This separate key survives a failed Firebase connection and is removed only after
+// every staged payment has been acknowledged by the cloud.
+export function stagePostOpeningBarSales() {
+  if (typeof window === "undefined") return;
+  const stored = localStorage.getItem(BAR_POST_OPENING_RECOVERY_KEY);
+  let staged: RecoverableBarPayment[] = [];
+  try { staged = (JSON.parse(stored ?? "[]") as unknown[]).filter(isPostOpeningBarPayment); } catch { /* preserve current cache below */ }
+  const sources = [getUnifiedLocalKey("orange-hotel-barista-state"), "orange-hotel-barista-state",
+    getUnifiedLocalKey("orange-hotel-barista-payments"), "orange-hotel-barista-payments"];
+  for (const key of sources) {
+    try {
+      const value = JSON.parse(localStorage.getItem(key) ?? "null") as { payments?: unknown[] } | unknown[] | null;
+      const payments = Array.isArray(value) ? value : value?.payments;
+      if (Array.isArray(payments)) staged.push(...payments.filter(isPostOpeningBarPayment));
+    } catch { /* ignore malformed legacy cache */ }
+  }
+  if (staged.length > 0) {
+    localStorage.setItem(BAR_POST_OPENING_RECOVERY_KEY,
+      JSON.stringify([...new Map(staged.map((payment) => [payment.id, payment])).values()]));
+  }
+}
+
+export async function recoverPostOpeningBarSales() {
+  if (typeof window === "undefined") return;
+  stagePostOpeningBarSales();
+  let staged: RecoverableBarPayment[];
+  try {
+    staged = (JSON.parse(localStorage.getItem(BAR_POST_OPENING_RECOVERY_KEY) ?? "[]") as unknown[])
+      .filter(isPostOpeningBarPayment);
+  } catch { return; }
+  if (staged.length === 0) return;
+  await withTimeout(ensureFirebaseAuthReady(), DIRECT_FIREBASE_WRITE_TIMEOUT_MS, "Bar sales recovery authentication timed out");
+  const [cloud, cancelledSnapshot] = await Promise.all([
+    get(ref(firebaseDatabase, toStoragePath("orange-hotel-barista-state"))),
+    get(ref(firebaseDatabase, toStoragePath("orange-hotel-cancelled-tickets"))),
+  ]);
+  const cloudIds = new Set(((cloud.val() as { payments?: RecoverableBarPayment[] } | null)?.payments ?? [])
+    .map((payment) => payment.id));
+  const cancelled = (cancelledSnapshot.val() as Array<{ code?: string; ticketId?: string; originalPaymentId?: string }> | null) ?? [];
+  staged = staged.filter((payment) => !cloudIds.has(payment.id) && !cancelled.some((entry) =>
+    entry.originalPaymentId === payment.id || entry.code === payment.code
+    || (typeof entry.ticketId === "string" && entry.ticketId.length > 0 && entry.ticketId === payment.ticketId)));
+  if (staged.length) localStorage.setItem(BAR_POST_OPENING_RECOVERY_KEY, JSON.stringify(staged));
+  else {
+    localStorage.removeItem(BAR_POST_OPENING_RECOVERY_KEY);
+    return;
+  }
+  for (const payment of staged.sort((a, b) => a.createdAt - b.createdAt)) {
+    const result = await withTimeout(runTransaction(ref(firebaseDatabase, toStoragePath("orange-hotel-barista-state")), (raw) => {
+      const state = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+      const payments = Array.isArray(state.payments) ? state.payments as RecoverableBarPayment[] : [];
+      if (payments.some((existing) => existing.id === payment.id)) return;
+      if (payments.some((existing) => existing.code === payment.code)) {
+        throw new Error(`Bar sale code ${payment.code} conflicts with a different cloud sale. Recovery is paused.`);
+      }
+      return { ...state, ticketSeq: Math.max(490, Number(state.ticketSeq) || 490) + 1,
+        payments: [payment, ...payments] };
+    }), DIRECT_FIREBASE_WRITE_TIMEOUT_MS, `Bar sale ${payment.code} recovery timed out`);
+    if (!result.committed && !(result.snapshot.val() as { payments?: RecoverableBarPayment[] } | null)
+      ?.payments?.some((existing) => existing.id === payment.id)) {
+      throw new Error(`Bar sale ${payment.code} was not acknowledged by Firebase.`);
+    }
+    staged = staged.filter((entry) => entry.id !== payment.id);
+    if (staged.length) localStorage.setItem(BAR_POST_OPENING_RECOVERY_KEY, JSON.stringify(staged));
+    else localStorage.removeItem(BAR_POST_OPENING_RECOVERY_KEY);
+  }
+}
+
+// BH-491 was entered in BarPOS after the new opening stock by mistake. Reverse
+// the actual sale once it reaches Firebase, including its one-unit stock effect.
+// A cancellation record makes the correction idempotent across devices.
+export async function reverseVerifiedBh491BarSale() {
+  if (typeof window === "undefined") return false;
+  await withTimeout(ensureFirebaseAuthReady(), DIRECT_FIREBASE_WRITE_TIMEOUT_MS, "Bar sale reversal authentication timed out");
+  const snapshot = await get(ref(firebaseDatabase, toStoragePath("orange-hotel-barista-state")));
+  const payments = (snapshot.val() as { payments?: RecoverableBarPayment[] } | null)?.payments ?? [];
+  const sale = payments.find((payment) => /^B-?H-?491$/i.test(payment.code));
+  if (!sale) return false;
+  const lines = Array.isArray(sale.lines) ? sale.lines as Array<{ name?: string; qty?: number }> : [];
+  if (!isPostOpeningBarPayment(sale) || lines.length !== 1 || lines[0].qty !== 1
+    || !/SERENGETI.*SMALL/i.test(lines[0].name ?? "")) {
+    throw new Error("BH-491 needs manual review: its date or product lines differ from the reported Serengeti small sale.");
+  }
+  const stateKey = "orange-hotel-barista-state";
+  const storeKey = "orange-hotel-main-store-items";
+  const inventoryKey = "orange-hotel-inventory-items";
+  const cancelledKey = "orange-hotel-cancelled-tickets";
+  await transactSyncedStorageKeys([stateKey, storeKey, inventoryKey, cancelledKey], (current) => {
+    const state = current[stateKey] as { payments?: RecoverableBarPayment[] } | null;
+    const live = state?.payments?.find((payment) => payment.id === sale.id);
+    if (!live) return current;
+    const cancelled = (current[cancelledKey] as Array<Record<string, unknown>> | null) ?? [];
+    const alreadyReversed = cancelled.some((entry) => entry.id === `void-${sale.id}`
+      || (entry.code === sale.code && entry.source === "barista" && entry.status === "cancelled"));
+    const stores = (current[storeKey] as Array<Record<string, unknown>> | null) ?? [];
+    const inventory = (current[inventoryKey] as Array<Record<string, unknown>> | null) ?? [];
+    const store = stores.find((entry) => entry.id === "nov-2026-bar-11");
+    const item = inventory.find((entry) => entry.id === "nov-2026-inv-11");
+    if (!store || !item || !/SERENGETI.*SMALL/i.test(String(store.name))
+      || !/SERENGETI.*SMALL/i.test(String(item.name))
+      || !Number.isFinite(store.stock) || store.stock !== item.stock) {
+      throw new Error("BH-491 stock ledgers differ. Reversal requires manual review.");
+    }
+    const cancelledAt = Date.now();
+    return {
+      ...current,
+      [stateKey]: { ...state, payments: state?.payments?.filter((payment) => payment.id !== sale.id) ?? [] },
+      [storeKey]: alreadyReversed ? stores : stores.map((entry) => entry.id === store.id
+        ? { ...entry, stock: Number(entry.stock) + 1, updatedAt: cancelledAt } : entry),
+      [inventoryKey]: alreadyReversed ? inventory : inventory.map((entry) => entry.id === item.id
+        ? { ...entry, stock: Number(entry.stock) + 1, updatedAt: cancelledAt } : entry),
+      [cancelledKey]: alreadyReversed ? cancelled : [{ ...live, id: `void-${sale.id}`,
+        originalPaymentId: sale.id, source: "barista", status: "cancelled", cancelledAt,
+        approvedBy: "BH-491 correction" }, ...cancelled],
+    };
+  });
+  return true;
+}
 
 function toStoragePath(key: string) {
   return `${FIREBASE_STORAGE_ROOT}/${key.replace(/[.#$[\]/]/g, "-")}`;
@@ -264,6 +408,7 @@ export function getUnifiedLocalKey(baseKey: string): string {
 // Otherwise an offline cache can publish the old records back to Firebase.
 export function clearKitchenBarCacheOnce() {
   if (typeof window === "undefined") return;
+  stagePostOpeningBarSales();
   const marker = `${CASA_LOCAL_STORAGE_PREFIX}kitchen-bar-reset-v2`;
   if (localStorage.getItem(marker) === "1") return;
 
@@ -324,6 +469,7 @@ export function clearKitchenBarCacheOnce() {
 // before migration or pending writes can publish the old bar sales again.
 export function clearNovemberBarCacheOnce() {
   if (typeof window === "undefined") return;
+  stagePostOpeningBarSales();
   const marker = `${CASA_LOCAL_STORAGE_PREFIX}bar-november-opening-v2`;
   if (localStorage.getItem(marker) === "1") return;
   const keys = [
