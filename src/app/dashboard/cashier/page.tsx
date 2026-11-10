@@ -208,7 +208,7 @@ export default function BookingPage() {
   const [rooms, setRooms] = useState<Room[]>(readRoomsState());
   const [transactions, setTransactions] = useState<BookingRecord[]>([]);
   const [breakfastAllocations, setBreakfastAllocations] = useState<BreakfastAllocation[]>([]);
-  const [receiptSeq, setReceiptSeq] = useState(84920);
+  const [receiptSeq, setReceiptSeq] = useState(0);
   const [role, setRole] = useState<Role>("cashier");
   const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
   const isManager = role === "manager";
@@ -218,7 +218,7 @@ export default function BookingPage() {
     setRole(readStoredRole() ?? "cashier");
     const applyCashierSnapshot = (incomingRooms?: Room[]) => {
       if (cancelled) return;
-      const snapshot = readCashierState<BookingRecord>(STORAGE_TX, STORAGE_SEQ, 84920);
+      const snapshot = readCashierState<BookingRecord>(STORAGE_TX, STORAGE_SEQ, 0);
       const normalizedTransactions: BookingRecord[] = snapshot.transactions.map((tx): BookingRecord => ({
           ...tx,
           status: tx.status === "credit" || tx.status === "checked-out" ? tx.status : "completed",

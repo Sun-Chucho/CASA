@@ -138,7 +138,7 @@ export default function KitchenPage() {
 
   const [cart, setCart] = useState<CartLine[]>([]);
   const [tickets, setTickets] = useState<KitchenTicket[]>([]);
-  const [ticketSeq, setTicketSeq] = useState(300);
+  const [ticketSeq, setTicketSeq] = useState(0);
   const [menuItems, setMenuItems] = useState<KitchenMenuItem[]>([]);
   const [kitchenPayments, setKitchenPayments] = useState<KitchenPaymentRecord[]>([]);
   const [posHydrated, setPosHydrated] = useState(false);
@@ -181,7 +181,7 @@ export default function KitchenPage() {
         STORAGE_SEQ,
         STORAGE_PAYMENTS,
         STORAGE_MENU,
-        300,
+        0,
       );
       setTickets(snapshot.tickets);
       setTicketSeq(snapshot.ticketSeq);
@@ -700,7 +700,7 @@ export default function KitchenPage() {
         STORAGE_SEQ,
         STORAGE_PAYMENTS,
         STORAGE_MENU,
-        300,
+        0,
       );
       const recordedAt = Date.now();
       const nextSeq = snapshot.ticketSeq + 1;
@@ -758,7 +758,7 @@ export default function KitchenPage() {
         STORAGE_SEQ,
         STORAGE_PAYMENTS,
         STORAGE_MENU,
-        300,
+        0,
       );
       const paymentMethodEditedAt = Date.now();
       const nextPayments = snapshot.payments.map((payment) =>

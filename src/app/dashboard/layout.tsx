@@ -10,7 +10,7 @@ import { KitchenPurchaseHistoryEntry, STORAGE_KITCHEN_PURCHASE_HISTORY } from "@
 import { MainStoreItem, STORAGE_MAIN_STORE_ITEMS, getStoreItemLabel, normalizeBaristaProductTarget, normalizeStockName } from "@/app/lib/inventory-transfer";
 import { getTotLimit } from "@/app/lib/barista-stock";
 import { normalizeRole } from "@/app/lib/auth";
-import { clearKitchenBarCacheOnce, clearNovemberBarCacheOnce, hydrateStorageKeyFromFirebase, migrateVerifiedCasaLocalData } from "@/app/lib/firebase-sync";
+import { clearKitchenBarCacheOnce, clearNovemberBarCacheOnce, clearBookingsAndKitchenSalesCacheOnce, hydrateStorageKeyFromFirebase, migrateVerifiedCasaLocalData } from "@/app/lib/firebase-sync";
 import { readJson, readPosState, STORAGE_BARISTA_STATE, STORAGE_KITCHEN_STATE, writeJson, writePosState } from "@/app/lib/storage";
 import { usePathname, useRouter } from "next/navigation";
 import { Bell, Home, Hotel, Search, User, Clock, Menu, WalletCards, ReceiptText, Package } from "lucide-react";
@@ -1102,6 +1102,7 @@ export default function DashboardLayout({
       localStorage.setItem("orange-hotel-role", savedRole);
       clearKitchenBarCacheOnce();
       clearNovemberBarCacheOnce();
+      clearBookingsAndKitchenSalesCacheOnce();
       migrateVerifiedCasaLocalData();
       setActiveUsername(readActiveSessionUsername(""));
       setRole(savedRole);

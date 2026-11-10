@@ -346,6 +346,25 @@ export function clearNovemberBarCacheOnce() {
   localStorage.setItem(marker, "1");
 }
 
+export function clearBookingsAndKitchenSalesCacheOnce() {
+  if (typeof window === "undefined") return;
+  const marker = `${CASA_LOCAL_STORAGE_PREFIX}bookings-kitchen-sales-reset-nov-2026-v1`;
+  if (localStorage.getItem(marker) === "1") return;
+  const keys = [
+    "orange-hotel-cashier-state", "orange-hotel-cashier-transactions", "orange-hotel-cashier-seq",
+    "orange-hotel-kitchen-state", "orange-hotel-kitchen-tickets", "orange-hotel-kitchen-seq",
+    "orange-hotel-kitchen-payments", "orange-hotel-kitchen-menu",
+    "orange-hotel-breakfast-allocations", "orange-hotel-rooms-state", "orange-hotel-website-bookings",
+    "orange-hotel-cancelled-tickets", "orange-hotel-fnb-stock-sales",
+  ];
+  keys.forEach((key) => {
+    localStorage.removeItem(getUnifiedLocalKey(key));
+    localStorage.removeItem(key);
+    localStorage.removeItem(getPendingSyncMarkerKey(key));
+  });
+  localStorage.setItem(marker, "1");
+}
+
 export const FIREBASE_SYNC_KEYS = [
   "orange-hotel-cashier-state",
   "orange-hotel-breakfast-allocations",
@@ -477,7 +496,7 @@ function sanitizeSyncedValue<T>(key: string, value: T): T {
 
   return {
     tickets: Array.isArray(snapshot.tickets) ? snapshot.tickets : [],
-    ticketSeq: Number.isFinite(snapshot.ticketSeq) ? Number(snapshot.ticketSeq) : 300,
+    ticketSeq: Number.isFinite(snapshot.ticketSeq) ? Number(snapshot.ticketSeq) : 0,
     payments: Array.isArray(snapshot.payments) ? snapshot.payments : [],
     menuItems: mergeKitchenMenuItems(
       (Array.isArray(snapshot.menuItems) ? snapshot.menuItems : []) as KitchenMenuItem[],
@@ -491,7 +510,7 @@ function mirrorCanonicalStateToLegacyLocal(key: string, value: unknown) {
   if (key === "orange-hotel-cashier-state") {
     const snapshot = value as { transactions?: unknown[]; receiptSeq?: number };
     setLocalCache("orange-hotel-cashier-transactions", JSON.stringify(Array.isArray(snapshot.transactions) ? snapshot.transactions : []));
-    setLocalCache("orange-hotel-cashier-seq", String(Number.isFinite(snapshot.receiptSeq) ? snapshot.receiptSeq : 84920));
+    setLocalCache("orange-hotel-cashier-seq", String(Number.isFinite(snapshot.receiptSeq) ? snapshot.receiptSeq : 0));
     localStorage.removeItem("orange-hotel-demo-seed-version");
     return;
   }
@@ -499,7 +518,7 @@ function mirrorCanonicalStateToLegacyLocal(key: string, value: unknown) {
   if (key === "orange-hotel-kitchen-state") {
     const snapshot = sanitizeSyncedValue(key, value) as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[] };
     setLocalCache("orange-hotel-kitchen-tickets", JSON.stringify(Array.isArray(snapshot.tickets) ? snapshot.tickets : []));
-    setLocalCache("orange-hotel-kitchen-seq", String(Number.isFinite(snapshot.ticketSeq) ? snapshot.ticketSeq : 300));
+    setLocalCache("orange-hotel-kitchen-seq", String(Number.isFinite(snapshot.ticketSeq) ? snapshot.ticketSeq : 0));
     setLocalCache(
       "orange-hotel-kitchen-payments",
       JSON.stringify(Array.isArray(snapshot.payments) ? snapshot.payments : []),
@@ -603,7 +622,7 @@ function hasUsableSyncedValue(key: string, value: unknown) {
 
   if (key === "orange-hotel-cashier-state") {
     const snapshot = value as { transactions?: unknown[]; receiptSeq?: number };
-    return Array.isArray(snapshot.transactions) && snapshot.transactions.length > 0;
+    return (Array.isArray(snapshot.transactions) && snapshot.transactions.length > 0) || Number.isFinite(snapshot.receiptSeq);
   }
 
   if (key === "orange-hotel-rooms-state") {
@@ -978,9 +997,9 @@ async function reconcileStorageValueInFirebase(key: string, preferredValue: unkn
 function getCanonicalDefaultValue(key: string) {
   switch (key) {
     case "orange-hotel-cashier-state":
-      return { transactions: [], receiptSeq: 84920 };
+      return { transactions: [], receiptSeq: 0 };
     case "orange-hotel-kitchen-state":
-      return { tickets: [], ticketSeq: 1, payments: [], menuItems: [] };
+      return { tickets: [], ticketSeq: 0, payments: [], menuItems: [] };
     case "orange-hotel-barista-state":
       return { tickets: [], ticketSeq: 1, payments: [], menuItems: [] };
     case "orange-hotel-company-stock":
@@ -1049,7 +1068,7 @@ function getLocalFallbackForSync(key: string) {
     if (transactions.length === 0 && !Number.isFinite(receiptSeq)) return null;
     return {
       transactions,
-      receiptSeq: Number.isFinite(receiptSeq) && receiptSeq > 0 ? receiptSeq : 84920,
+      receiptSeq: Number.isFinite(receiptSeq) && receiptSeq > 0 ? receiptSeq : 0,
     };
   }
 
@@ -1065,7 +1084,7 @@ function getLocalFallbackForSync(key: string) {
     }
     return {
       tickets,
-      ticketSeq: Number.isFinite(ticketSeq) && ticketSeq > 0 ? ticketSeq : 300,
+      ticketSeq: Number.isFinite(ticketSeq) && ticketSeq > 0 ? ticketSeq : 0,
       payments,
       menuItems,
     };

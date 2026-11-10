@@ -44,16 +44,16 @@ export function bookingOccupiesDate(booking: BreakfastBooking, date: string) {
   if (!booking.id || !booking.roomNumber || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
   const today = localDateKey(Date.now());
   if (date > today) return false;
+  const start = booking.checkInDate || (booking.createdAt ? localDateKey(booking.createdAt) : "");
+  if (!start || date < start) return false;
   // Cashier treats every booking that has not checked out as occupied, even
-  // when its scheduled checkout has passed. The current breakfast list must
-  // use the same rule so overstay and credit rooms remain visible.
+  // when its scheduled checkout has passed. Keep overstays visible today.
   if (date === today) return booking.status !== "checked-out";
 
-  const start = booking.checkInDate || (booking.createdAt ? localDateKey(booking.createdAt) : "");
-  if (start && date < start) return false;
-  if (booking.checkedOutAt) return date <= localDateKey(booking.checkedOutAt);
-  if (booking.status === "checked-out") return Boolean(booking.checkOutDate) && date <= booking.checkOutDate;
-  return true;
+  // For a past date, use the recorded stay interval. An open booking is not
+  // evidence that it occupied every day after its scheduled checkout.
+  const end = booking.checkedOutAt ? localDateKey(booking.checkedOutAt) : booking.checkOutDate;
+  return Boolean(end) && date <= end;
 }
 
 export function breakfastForBooking(bookingId: string, allocations: BreakfastAllocation[]) {

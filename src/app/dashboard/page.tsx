@@ -118,7 +118,7 @@ export default function OverviewPage() {
     const refreshOverview = () => {
       const savedRole = readStoredRole();
       const savedShift = localStorage.getItem("orange-hotel-shift");
-      const cashierSnapshot = readCashierState<CashierTransaction>("orange-hotel-cashier-transactions", "orange-hotel-cashier-seq", 84920);
+      const cashierSnapshot = readCashierState<CashierTransaction>("orange-hotel-cashier-transactions", "orange-hotel-cashier-seq", 0);
       const breakfast = readJson<BreakfastAllocation[]>(STORAGE_BREAKFAST) ?? [];
       const kitchenSnapshot = readPosState<QueueTicket, POSPaymentRecord, unknown>(activeKitchenKey, "orange-hotel-kitchen-tickets", "orange-hotel-kitchen-seq", "orange-hotel-kitchen-payments", "orange-hotel-kitchen-menu", 300);
       const baristaSnapshot = readPosState<QueueTicket, POSPaymentRecord, unknown>(activeBaristaKey, "orange-hotel-barista-orders", "orange-hotel-barista-seq", "orange-hotel-barista-payments", "orange-hotel-barista-menu", 490);

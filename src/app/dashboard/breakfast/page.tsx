@@ -26,7 +26,7 @@ export default function BreakfastPage() {
   useEffect(() => {
     setDate(localDateKey(Date.now()));
     const refresh = () => {
-      setBookings(readCashierState<BreakfastBooking>("orange-hotel-cashier-transactions", "orange-hotel-cashier-seq", 84920).transactions);
+      setBookings(readCashierState<BreakfastBooking>("orange-hotel-cashier-transactions", "orange-hotel-cashier-seq", 0).transactions);
       setAllocations(readJson<BreakfastAllocation[]>(STORAGE_BREAKFAST) ?? []);
     };
     refresh();
@@ -39,13 +39,20 @@ export default function BreakfastPage() {
     return () => { offBookings(); offBreakfast(); };
   }, []);
 
-  const occupied = useMemo(() => bookings
-    .filter((booking) => bookingOccupiesDate(booking, date))
-    .sort((a, b) => a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true })), [bookings, date]);
+  const occupied = useMemo(() => {
+    const eligible = bookings.filter((booking) => bookingOccupiesDate(booking, date));
+    // A room can check out and check in again on one date. Breakfast belongs
+    // to the guest who stayed the preceding night, so show that booking once.
+    eligible.sort((a, b) => (a.checkInDate || "").localeCompare(b.checkInDate || "") || (a.createdAt ?? 0) - (b.createdAt ?? 0));
+    const byRoom = new Map<string, BreakfastBooking>();
+    eligible.forEach((booking) => { if (!byRoom.has(booking.roomNumber)) byRoom.set(booking.roomNumber, booking); });
+    return [...byRoom.values()]
+      .sort((a, b) => a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true }));
+  }, [bookings, date]);
   const selected = useMemo(() => occupied.reduce((sum, booking) =>
     sum + (allocations.find((entry) => entry.id === breakfastId(booking.id, date))?.count ?? 0), 0), [occupied, allocations, date]);
-  const chequeLines = useMemo<BreakfastSaleLine[]>(() => bookings.flatMap((booking) =>
-    cart[booking.id] > 0 ? [{ booking, quantity: cart[booking.id] }] : []), [bookings, cart]);
+  const chequeLines = useMemo<BreakfastSaleLine[]>(() => occupied.flatMap((booking) =>
+    cart[booking.id] > 0 ? [{ booking, quantity: cart[booking.id] }] : []), [occupied, cart]);
   const chequeQuantity = chequeLines.reduce((sum, line) => sum + line.quantity, 0);
   const chequeTotal = chequeQuantity * BREAKFAST_PRICE;
 

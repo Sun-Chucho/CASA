@@ -58,7 +58,7 @@ export default function FinancesPage() {
     const activeBaristaKey = getActiveBaristaStateKey();
 
     const refreshFinances = () => {
-      const cashierSnapshot = readCashierState<BookingRecord>("orange-hotel-cashier-transactions", "orange-hotel-cashier-seq", 84920);
+      const cashierSnapshot = readCashierState<BookingRecord>("orange-hotel-cashier-transactions", "orange-hotel-cashier-seq", 0);
       const kitchenSnapshot = readPosState<unknown, PosPaymentRecord, unknown>(activeKitchenKey, "orange-hotel-kitchen-tickets", "orange-hotel-kitchen-seq", "orange-hotel-kitchen-payments", "orange-hotel-kitchen-menu", 300);
       const baristaSnapshot = readPosState<unknown, PosPaymentRecord, unknown>(activeBaristaKey, "orange-hotel-barista-orders", "orange-hotel-barista-seq", "orange-hotel-barista-payments", "orange-hotel-barista-menu", 490);
       setBookings(cashierSnapshot.transactions);

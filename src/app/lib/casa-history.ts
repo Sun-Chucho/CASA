@@ -173,7 +173,7 @@ export function sanitizeCasaHistory<T>(key: string, value: T): T {
     return {
       ...snapshot,
       transactions,
-      receiptSeq: Number.isFinite(receiptSeq) ? Math.max(receiptSeq, 84920) : 84920,
+      receiptSeq: Number.isFinite(receiptSeq) ? Math.max(receiptSeq, 0) : 0,
     } as T;
   }
 

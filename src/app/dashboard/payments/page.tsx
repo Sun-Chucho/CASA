@@ -239,7 +239,7 @@ export default function PaymentsPage() {
     const activeBaristaKey = getActiveBaristaStateKey();
 
     const refreshPayments = () => {
-      const cashierSnapshot = readCashierState<BookingRecord>(STORAGE_BOOKING_TX, "orange-hotel-cashier-seq", 84920);
+      const cashierSnapshot = readCashierState<BookingRecord>(STORAGE_BOOKING_TX, "orange-hotel-cashier-seq", 0);
       const kitchenSnapshot = readPosState<unknown, KitchenPaymentRecord, unknown>(
         activeKitchenKey,
         "orange-hotel-kitchen-tickets",
@@ -421,7 +421,7 @@ export default function PaymentsPage() {
     const nextNights = daysBetween(checkInDateDraft, checkOutDateDraft);
     if (!nextName || !nextRoomNumber || nextNights < 1) return;
 
-    const snapshot = readCashierState<BookingRecord>(STORAGE_BOOKING_TX, "orange-hotel-cashier-seq", 84920);
+    const snapshot = readCashierState<BookingRecord>(STORAGE_BOOKING_TX, "orange-hotel-cashier-seq", 0);
     const updatedAt = Date.now();
     const nextTransactions = snapshot.transactions.map((tx) =>
       tx.id === editingBookingId
@@ -472,7 +472,7 @@ export default function PaymentsPage() {
 
     if (selectedCredit.source === "booking") {
       const mappedMethod: PaymentMethod = method === "mobile" ? "mobile-money" : method;
-      const snapshot = readCashierState<BookingRecord>(STORAGE_BOOKING_TX, "orange-hotel-cashier-seq", 84920);
+      const snapshot = readCashierState<BookingRecord>(STORAGE_BOOKING_TX, "orange-hotel-cashier-seq", 0);
       const nextTransactions = snapshot.transactions.map((tx) =>
         tx.id === selectedCredit.id
           ? {

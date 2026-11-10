@@ -268,7 +268,7 @@ export default function AnalyticsPage() {
       const cashierSnapshot = readCashierState<BookingTransaction>(
         "orange-hotel-cashier-transactions",
         "orange-hotel-cashier-seq",
-        84920,
+        0,
       );
       const kitchenSnapshot = readPosState<unknown, PosPaymentRecord, unknown>(
         activeKitchenKey,

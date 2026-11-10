@@ -57,7 +57,7 @@ export default function RoomsPage() {
       const cashierSnapshot = readCashierState<BookingRoomRecord>(
         "orange-hotel-cashier-transactions",
         "orange-hotel-cashier-seq",
-        84920,
+        0,
       );
       const nextRooms = syncRoomsStateFromBookings(cashierSnapshot.transactions, baseRooms);
       setRooms(nextRooms);
@@ -110,7 +110,7 @@ export default function RoomsPage() {
     const cashierSnapshot = readCashierState<BookingRoomRecord>(
       "orange-hotel-cashier-transactions",
       "orange-hotel-cashier-seq",
-      84920,
+      0,
     );
 
     return cashierSnapshot.transactions.some(
@@ -123,7 +123,7 @@ export default function RoomsPage() {
       const cashierSnapshot = readCashierState<BookingRoomRecord>(
         "orange-hotel-cashier-transactions",
         "orange-hotel-cashier-seq",
-        84920,
+        0,
       );
       const activeBooking = [...cashierSnapshot.transactions]
         .filter((booking) => booking.roomNumber === roomNumber && isBookingStillActive(booking))
