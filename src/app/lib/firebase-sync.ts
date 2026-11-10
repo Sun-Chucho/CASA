@@ -324,7 +324,7 @@ export function clearKitchenBarCacheOnce() {
 // before migration or pending writes can publish the old bar sales again.
 export function clearNovemberBarCacheOnce() {
   if (typeof window === "undefined") return;
-  const marker = `${CASA_LOCAL_STORAGE_PREFIX}bar-november-opening-v1`;
+  const marker = `${CASA_LOCAL_STORAGE_PREFIX}bar-november-opening-v2`;
   if (localStorage.getItem(marker) === "1") return;
   const keys = [
     "orange-hotel-barista-state", "orange-hotel-barista-orders", "orange-hotel-barista-seq",
@@ -348,7 +348,7 @@ export function clearNovemberBarCacheOnce() {
 
 export function clearBookingsAndKitchenSalesCacheOnce() {
   if (typeof window === "undefined") return;
-  const marker = `${CASA_LOCAL_STORAGE_PREFIX}bookings-kitchen-sales-reset-nov-2026-v1`;
+  const marker = `${CASA_LOCAL_STORAGE_PREFIX}bookings-kitchen-sales-reset-nov-2026-v2`;
   if (localStorage.getItem(marker) === "1") return;
   const keys = [
     "orange-hotel-cashier-state", "orange-hotel-cashier-transactions", "orange-hotel-cashier-seq",
