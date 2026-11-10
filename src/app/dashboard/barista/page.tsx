@@ -1337,6 +1337,9 @@ export default function BaristaPage() {
     () => barRestockHistory.reduce((sum, entry) => sum + entry.amount, 0),
     [barRestockHistory],
   );
+  const displayedStartingCapital = startingCapital?.version === OPENING_CAPITAL_VERSION && startingCapital.amount > 0
+    ? startingCapital.amount
+    : BAR_OPENING_CAPITAL;
   const restockedQuantityByItem = useMemo(() => {
     const quantities = new Map<string, number>();
     for (const entry of barRestockHistory) {
@@ -1348,10 +1351,10 @@ export default function BaristaPage() {
   }, [barRestockHistory]);
 
   useEffect(() => {
-    if (!posHydrated || startingCapital?.version === OPENING_CAPITAL_VERSION || startingCapitalCaptureBusy.current || (role !== "manager" && role !== "director")) return;
+    if (!posHydrated || (startingCapital?.version === OPENING_CAPITAL_VERSION && startingCapital.amount === BAR_OPENING_CAPITAL) || startingCapitalCaptureBusy.current || (role !== "manager" && role !== "director")) return;
     const openingAmount = BAR_OPENING_CAPITAL;
     startingCapitalCaptureBusy.current = true;
-    void transactSyncedStorageValue<StartingCapitalSnapshot>(STORAGE_STARTING_CAPITAL, (current) => current?.version === OPENING_CAPITAL_VERSION ? current : { amount: openingAmount, capturedAt: current?.capturedAt ?? Date.now(), version: OPENING_CAPITAL_VERSION })
+    void transactSyncedStorageValue<StartingCapitalSnapshot>(STORAGE_STARTING_CAPITAL, (current) => current?.version === OPENING_CAPITAL_VERSION && current.amount === openingAmount ? current : { amount: openingAmount, capturedAt: current?.capturedAt ?? Date.now(), version: OPENING_CAPITAL_VERSION })
       .then(setStartingCapital)
       .catch((error) => console.error("Starting capital could not be saved", error))
       .finally(() => { startingCapitalCaptureBusy.current = false; });
@@ -1489,10 +1492,10 @@ export default function BaristaPage() {
     <aside className="space-y-4" aria-label="Barista capital summary">
       <Card className="border-none shadow-sm">
         <CardHeader><CardTitle className="text-sm font-black uppercase tracking-widest">Starting Capital</CardTitle><CardDescription>Opening inventory value at the original buying prices.</CardDescription></CardHeader>
-        <CardContent className="text-2xl font-black">{startingCapital ? `TSh ${startingCapital.amount.toLocaleString()}` : "Loading…"}</CardContent>
+        <CardContent className="text-2xl font-black">TSh {displayedStartingCapital.toLocaleString()}</CardContent>
       </Card>
       <Card className="border-none shadow-sm">
-        <CardHeader><CardTitle className="text-sm font-black uppercase tracking-widest">Restock Capital</CardTitle><CardDescription>Total cost of stock added after the opening inventory.</CardDescription></CardHeader>
+        <CardHeader><CardTitle className="text-sm font-black uppercase tracking-widest">Restock Capital</CardTitle><CardDescription>{restockCapital === 0 ? "No restocks recorded since opening inventory." : "Total cost of stock added after the opening inventory."}</CardDescription></CardHeader>
         <CardContent className="text-2xl font-black">TSh {restockCapital.toLocaleString()}</CardContent>
       </Card>
       <Card className="border-none shadow-sm">
@@ -2597,7 +2600,7 @@ export default function BaristaPage() {
           <Card className="border-none shadow-sm">
             <CardContent className="p-4">
               <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Starting Capital</p>
-              <p className="mt-2 text-2xl font-black">{startingCapital ? `TSh ${startingCapital.amount.toLocaleString()}` : "Loading…"}</p>
+              <p className="mt-2 text-2xl font-black">TSh {displayedStartingCapital.toLocaleString()}</p>
             </CardContent>
           </Card>
           <Card className="border-none shadow-sm">
@@ -2862,7 +2865,7 @@ export default function BaristaPage() {
           <Card className="border-none shadow-sm">
             <CardContent className="p-4">
               <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Starting Capital</p>
-              <p className="mt-2 text-2xl font-black">{startingCapital ? `TSh ${startingCapital.amount.toLocaleString()}` : "Loading…"}</p>
+              <p className="mt-2 text-2xl font-black">TSh {displayedStartingCapital.toLocaleString()}</p>
             </CardContent>
           </Card>
           <Card className="border-none shadow-sm">

@@ -23,9 +23,9 @@ if (!original || typeof original !== "object") throw new Error("The live databas
 
 const now = Date.now();
 const version = "cassa-bar-catalog-2026-11-opening-stock";
-const capitalVersion = "cassa-catalog-opening-capital-nov-2026-v1";
+const capitalVersion = "cassa-catalog-opening-capital-nov-2026-v2";
 const value = Math.round(catalog.reduce((sum, row) => sum + row.openingStock * row.buyingPrice / (row.soldByTot ? row.totLimit : 1), 0));
-if (catalog.length !== 105 || value !== 4953724) throw new Error(`Workbook reconciliation failed: ${catalog.length} items, TSh ${value}.`);
+if (catalog.length !== 105 || value !== 5083244) throw new Error(`Corrected opening stock reconciliation failed: ${catalog.length} items, TSh ${value}.`);
 const balance = (row) => {
   if (!row.soldByTot) return { stock: row.openingStock, totSold: 0, totLimit: 0 };
   const stock = Math.ceil(row.openingStock / row.totLimit);
@@ -33,11 +33,11 @@ const balance = (row) => {
 };
 const store = catalog.map((row, index) => {
   const b = balance(row);
-  return { id: `nov-2026-bar-${index + 1}`, name: row.name, size: "", stock: b.stock, unit: row.soldByTot ? "Bottle (sold by tot)" : row.category === "Cigarettes" ? "Packet" : "Bottle / unit", minStock: 0, lane: "barista", subCategory: row.category, buyingPrice: row.buyingPrice, sellingPrice: row.sellingPrice, totLimit: b.totLimit, totSold: b.totSold, updatedAt: now, catalogVersion: version };
+  return { id: `nov-2026-bar-${index + 1}`, name: row.name, size: "", stock: b.stock, unit: row.unit ?? (row.soldByTot ? "Bottle (sold by tot)" : row.category === "Cigarettes" ? "Packet" : "Bottle / unit"), minStock: 0, lane: "barista", subCategory: row.category, buyingPrice: row.buyingPrice, sellingPrice: row.sellingPrice, totLimit: b.totLimit, totSold: b.totSold, updatedAt: now, catalogVersion: version };
 });
 const inventory = catalog.map((row, index) => {
   const b = balance(row);
-  return { id: `nov-2026-inv-${index + 1}`, barcode: "", name: row.name, category: "Bar", subCategory: row.category, size: "", stock: b.stock, totSold: b.totSold, ...(b.totLimit ? { totPerBottle: b.totLimit } : {}), buyingPrice: row.buyingPrice, sellingPrice: row.sellingPrice, price: row.sellingPrice, status: "ACTIVE", minStock: 0, unit: row.soldByTot ? "Bottle (sold by tot)" : row.category === "Cigarettes" ? "Packet" : "Bottle / unit", updatedAt: now, catalogVersion: version };
+  return { id: `nov-2026-inv-${index + 1}`, barcode: "", name: row.name, category: "Bar", subCategory: row.category, size: "", stock: b.stock, totSold: b.totSold, ...(b.totLimit ? { totPerBottle: b.totLimit } : {}), buyingPrice: row.buyingPrice, sellingPrice: row.sellingPrice, price: row.sellingPrice, status: "ACTIVE", minStock: 0, unit: row.unit ?? (row.soldByTot ? "Bottle (sold by tot)" : row.category === "Cigarettes" ? "Packet" : "Bottle / unit"), updatedAt: now, catalogVersion: version };
 });
 const menuItems = catalog.map((row, index) => ({ id: `nov-2026-menu-${index + 1}`, name: row.name, price: row.sellingPrice, buyingPrice: row.buyingPrice, category: row.category, prepMinutes: 2, updatedAt: now, catalogVersion: version }));
 const next = structuredClone(original);

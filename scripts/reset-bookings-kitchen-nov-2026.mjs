@@ -22,7 +22,7 @@ if (!original || typeof original !== "object") throw new Error("The live databas
 
 const catalog = JSON.parse(fs.readFileSync(new URL("../src/app/lib/bar-catalog.json", import.meta.url), "utf8"));
 const barValue = Math.round(catalog.reduce((sum, row) => sum + row.openingStock * row.buyingPrice / (row.soldByTot ? row.totLimit : 1), 0));
-if (catalog.length !== 105 || barValue !== 4953724) throw new Error("The bar opening stock does not reconcile with the workbook.");
+if (catalog.length !== 105 || barValue !== 5083244) throw new Error("The corrected bar opening stock does not reconcile.");
 const cashier = original["orange-hotel-cashier-state"];
 const kitchen = original["orange-hotel-kitchen-state"];
 const rooms = original["orange-hotel-rooms-state"];
@@ -43,17 +43,17 @@ next["orange-hotel-main-store-items"] = [
   ...(original["orange-hotel-main-store-items"] ?? []).filter((item) => item?.lane !== "barista"),
   ...catalog.map((row, index) => {
     const b = barBalance(row);
-    return { id: `nov-2026-bar-${index + 1}`, name: row.name, size: "", stock: b.stock, unit: row.soldByTot ? "Bottle (sold by tot)" : row.category === "Cigarettes" ? "Packet" : "Bottle / unit", minStock: 0, lane: "barista", subCategory: row.category, buyingPrice: row.buyingPrice, sellingPrice: row.sellingPrice, totLimit: b.totLimit, totSold: b.totSold, updatedAt: now, catalogVersion: barVersion };
+    return { id: `nov-2026-bar-${index + 1}`, name: row.name, size: "", stock: b.stock, unit: row.unit ?? (row.soldByTot ? "Bottle (sold by tot)" : row.category === "Cigarettes" ? "Packet" : "Bottle / unit"), minStock: 0, lane: "barista", subCategory: row.category, buyingPrice: row.buyingPrice, sellingPrice: row.sellingPrice, totLimit: b.totLimit, totSold: b.totSold, updatedAt: now, catalogVersion: barVersion };
   }),
 ];
 next["orange-hotel-inventory-items"] = [
   ...(original["orange-hotel-inventory-items"] ?? []).filter((item) => item?.category?.toLowerCase() !== "bar"),
   ...catalog.map((row, index) => {
     const b = barBalance(row);
-    return { id: `nov-2026-inv-${index + 1}`, barcode: "", name: row.name, category: "Bar", subCategory: row.category, size: "", stock: b.stock, totSold: b.totSold, ...(b.totLimit ? { totPerBottle: b.totLimit } : {}), buyingPrice: row.buyingPrice, sellingPrice: row.sellingPrice, price: row.sellingPrice, status: "ACTIVE", minStock: 0, unit: row.soldByTot ? "Bottle (sold by tot)" : row.category === "Cigarettes" ? "Packet" : "Bottle / unit", updatedAt: now, catalogVersion: barVersion };
+    return { id: `nov-2026-inv-${index + 1}`, barcode: "", name: row.name, category: "Bar", subCategory: row.category, size: "", stock: b.stock, totSold: b.totSold, ...(b.totLimit ? { totPerBottle: b.totLimit } : {}), buyingPrice: row.buyingPrice, sellingPrice: row.sellingPrice, price: row.sellingPrice, status: "ACTIVE", minStock: 0, unit: row.unit ?? (row.soldByTot ? "Bottle (sold by tot)" : row.category === "Cigarettes" ? "Packet" : "Bottle / unit"), updatedAt: now, catalogVersion: barVersion };
   }),
 ];
-next["orange-hotel-barista-starting-capital-v1"] = { amount: barValue, capturedAt: now, version: "cassa-catalog-opening-capital-nov-2026-v1" };
+next["orange-hotel-barista-starting-capital-v1"] = { amount: barValue, capturedAt: now, version: "cassa-catalog-opening-capital-nov-2026-v2" };
 next["orange-hotel-cashier-state"] = { transactions: [], receiptSeq: 0 };
 next["orange-hotel-kitchen-state"] = { ...kitchen, tickets: [], ticketSeq: 0, payments: [] };
 next["orange-hotel-rooms-state"] = rooms.map((room) => room.status === "occupied" ? { ...room, status: "available" } : room);

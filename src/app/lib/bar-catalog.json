@@ -98,7 +98,7 @@
   {
     "name": "SMINOFF GWARANA",
     "category": "Local Beers",
-    "buyingPrice": 0.0,
+    "buyingPrice": 1640.0,
     "sellingPrice": 4000.0,
     "soldByTot": false,
     "openingStock": 18
@@ -840,7 +840,7 @@
   {
     "name": "PROVETO",
     "category": "Champagne",
-    "buyingPrice": 0.0,
+    "buyingPrice": 35000.0,
     "sellingPrice": 45000.0,
     "soldByTot": false,
     "openingStock": 1
@@ -864,7 +864,8 @@
   {
     "name": "EMBASSY CKLICK",
     "category": "Cigarettes",
-    "buyingPrice": 0.0,
+    "buyingPrice": 6500.0,
+    "unit": "Box",
     "sellingPrice": 8000.0,
     "soldByTot": false,
     "openingStock": 10

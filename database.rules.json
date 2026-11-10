@@ -88,7 +88,7 @@
         }
       },
       "orange-hotel-barista-starting-capital-v1": {
-        ".validate": "newData.child('version').val() === 'cassa-catalog-opening-capital-nov-2026-v1' && newData.child('amount').val() === 4953724"
+        ".validate": "newData.child('version').val() === 'cassa-catalog-opening-capital-nov-2026-v2' && newData.child('amount').val() === 5083244"
       }
     }
   }
