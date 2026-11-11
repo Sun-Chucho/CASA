@@ -4,6 +4,7 @@ export type ExpenseDepartment =
   | "kitchen"
   | "barista"
   | "rooms"
+  | "bank-card"
   | "office"
   | "managing-director"
   | "staff-salary-allowance"
@@ -30,15 +31,19 @@ export interface ExpenseRecord {
 
 export const EXPENSE_DEPARTMENTS: Array<{ value: ExpenseDepartment; label: string }> = [
   { value: "kitchen", label: "Kitchen" },
-  { value: "barista", label: "Barista" },
   { value: "rooms", label: "Rooms" },
-  { value: "office", label: "Office Expenses" },
-  { value: "managing-director", label: "Managing Director" },
-  { value: "staff-salary-allowance", label: "Staff Salary/Allowance" },
-  { value: "staff-food", label: "Staff Food" },
-  { value: "others", label: "Maintenance" },
-  { value: "utilities-government", label: "Utilities and Government" },
+  { value: "barista", label: "Bar" },
+  { value: "managing-director", label: "MD" },
+  { value: "bank-card", label: "Bank/Card" },
 ];
+
+const LEGACY_EXPENSE_DEPARTMENT_LABELS: Partial<Record<ExpenseDepartment, string>> = {
+  office: "Office Expenses",
+  "staff-salary-allowance": "Staff Salary/Allowance",
+  "staff-food": "Staff Food",
+  others: "Maintenance",
+  "utilities-government": "Utilities and Government",
+};
 
 export const EXPENSE_AMOUNT_TYPES: Array<{ value: ExpenseAmountType; label: string }> = [
   { value: "cash", label: "Cash" },
@@ -49,14 +54,19 @@ export const EXPENSE_AMOUNT_TYPES: Array<{ value: ExpenseAmountType; label: stri
 ];
 
 export function getExpenseDepartmentLabel(department: ExpenseDepartment) {
-  return EXPENSE_DEPARTMENTS.find((item) => item.value === department)?.label ?? "Maintenance";
+  return EXPENSE_DEPARTMENTS.find((item) => item.value === department)?.label
+    ?? LEGACY_EXPENSE_DEPARTMENT_LABELS[department]
+    ?? "Expense";
 }
 
 export function getExpenseAmountTypeLabel(amountType: ExpenseAmountType) {
   return EXPENSE_AMOUNT_TYPES.find((item) => item.value === amountType)?.label ?? "Cash";
 }
 
-const EXPENSE_DEPARTMENT_VALUES = new Set<ExpenseDepartment>(EXPENSE_DEPARTMENTS.map((item) => item.value));
+const EXPENSE_DEPARTMENT_VALUES = new Set<ExpenseDepartment>([
+  ...EXPENSE_DEPARTMENTS.map((item) => item.value),
+  ...Object.keys(LEGACY_EXPENSE_DEPARTMENT_LABELS) as ExpenseDepartment[],
+]);
 const EXPENSE_AMOUNT_TYPE_VALUES = new Set<ExpenseAmountType>(EXPENSE_AMOUNT_TYPES.map((item) => item.value));
 
 function normalizeExpenseDepartment(value: unknown): ExpenseDepartment {
@@ -66,6 +76,8 @@ function normalizeExpenseDepartment(value: unknown): ExpenseDepartment {
     .replace(/[\s_]+/g, "-");
 
   if (normalized === "bar" || normalized === "barista-expenses") return "barista";
+  if (normalized === "md") return "managing-director";
+  if (normalized === "bank/card" || normalized === "bankcard") return "bank-card";
   if (normalized === "restaurant" || normalized === "food" || normalized === "kitchen-expenses") return "kitchen";
   if (normalized === "maintenance") return "others";
   return EXPENSE_DEPARTMENT_VALUES.has(normalized as ExpenseDepartment)

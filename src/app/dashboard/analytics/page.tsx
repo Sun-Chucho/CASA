@@ -187,15 +187,16 @@ function escapeCsvCell(value: string | number) {
 function getOperatingExpenseLabel(expense: ExpenseRecord) {
   const title = expense.title.toLowerCase();
   if (expense.department === "kitchen") return "Kitchen";
-  if (expense.department === "barista") return "Barista";
+  if (expense.department === "barista") return "Bar";
+  if (expense.department === "bank-card") return "Bank/Card";
+  if (expense.department === "rooms") return "Rooms & Housekeeping";
+  if (expense.department === "managing-director") return "MD";
   if (expense.department === "staff-salary-allowance" || /salary|allowance|wage|payroll/.test(title)) return "Salary & Allowances";
   if (/internet|wi-?fi|dstv|television|\btv\b/.test(title)) return "TV / Internet";
   if (/electric|power|luku/.test(title)) return "Electricity";
   if (/generator|diesel|petrol|fuel/.test(title)) return "Generator / Fuel";
   if (expense.department === "staff-food") return "Staff Food";
   if (expense.department === "office") return "Office & Administration";
-  if (expense.department === "rooms") return "Rooms & Housekeeping";
-  if (expense.department === "managing-director") return "Managing Director";
   if (expense.department === "utilities-government") return "Utilities & Government";
   return "Maintenance & Other";
 }
@@ -573,10 +574,11 @@ export default function AnalyticsPage() {
       { label: "Rooms", revenue: totals.roomRevenue, expenses: periodExpenses.filter((expense) => expense.department === "rooms").reduce((sum, expense) => sum + expense.amount, 0), color: "#F57C00" },
       { label: "Breakfast", revenue: totals.breakfastRevenue, expenses: 0, color: "#D97706" },
       { label: "Kitchen", revenue: totals.kitchenRevenue, expenses: periodExpenses.filter((expense) => expense.department === "kitchen").reduce((sum, expense) => sum + expense.amount, 0), color: "#111111" },
-      { label: "Barista", revenue: totals.baristaRevenue, expenses: periodExpenses.filter((expense) => expense.department === "barista").reduce((sum, expense) => sum + expense.amount, 0), color: "#00A676" },
+      { label: "Bar", revenue: totals.baristaRevenue, expenses: periodExpenses.filter((expense) => expense.department === "barista").reduce((sum, expense) => sum + expense.amount, 0), color: "#00A676" },
       { label: "Laundry", revenue: totals.laundryRevenue, expenses: 0, color: "#2F80ED" },
       { label: "Office Expenses", revenue: 0, expenses: periodExpenses.filter((expense) => expense.department === "office").reduce((sum, expense) => sum + expense.amount, 0), color: "#2563EB" },
-      { label: "Managing Director", revenue: 0, expenses: periodExpenses.filter((expense) => expense.department === "managing-director").reduce((sum, expense) => sum + expense.amount, 0), color: "#B45309" },
+      { label: "MD", revenue: 0, expenses: periodExpenses.filter((expense) => expense.department === "managing-director").reduce((sum, expense) => sum + expense.amount, 0), color: "#B45309" },
+      { label: "Bank/Card", revenue: 0, expenses: periodExpenses.filter((expense) => expense.department === "bank-card").reduce((sum, expense) => sum + expense.amount, 0), color: "#2563EB" },
       { label: "Staff", revenue: 0, expenses: periodExpenses.filter((expense) => expense.department === "staff-salary-allowance" || expense.department === "staff-food").reduce((sum, expense) => sum + expense.amount, 0), color: "#8E44AD" },
       { label: "Utilities", revenue: 0, expenses: periodExpenses.filter((expense) => expense.department === "utilities-government").reduce((sum, expense) => sum + expense.amount, 0), color: "#64748B" },
       { label: "Maintenance", revenue: 0, expenses: periodExpenses.filter((expense) => expense.department === "others").reduce((sum, expense) => sum + expense.amount, 0), color: "#D92D20" },
@@ -659,7 +661,8 @@ export default function AnalyticsPage() {
       });
     const preferredLabels = [
       "Kitchen",
-      "Barista",
+      "Bar",
+      "Bank/Card",
       "Salary & Allowances",
       "TV / Internet",
       "Electricity",
@@ -667,7 +670,7 @@ export default function AnalyticsPage() {
       "Staff Food",
       "Office & Administration",
       "Rooms & Housekeeping",
-      "Managing Director",
+      "MD",
       "Utilities & Government",
       "Maintenance & Other",
     ];

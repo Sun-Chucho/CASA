@@ -181,7 +181,7 @@ export default function ExpensesPage() {
         <div>
           <h1 className="text-3xl font-black uppercase tracking-tight">Expenses</h1>
           <p className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
-            Record and review kitchen, barista, rooms, office, managing director, maintenance, and utility expense requests
+            Record and review kitchen, rooms, bar, MD, and bank/card expenses
           </p>
         </div>
         <Badge variant="outline" className="w-fit px-3 py-1 font-black uppercase tracking-widest">
