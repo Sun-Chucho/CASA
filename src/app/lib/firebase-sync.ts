@@ -396,33 +396,41 @@ export async function recoverRecentKitchenPosSales() {
   } catch { return; }
   if (staged.length === 0) return;
   const stateKey = "orange-hotel-kitchen-state";
-  for (const sale of staged.sort((a, b) => a.payment.createdAt - b.payment.createdAt)) {
-    const state = await transactSyncedStorageValue<Record<string, unknown>>(stateKey, (raw) => {
-      const state = raw && typeof raw === "object" ? raw : {};
-      const payments = Array.isArray(state.payments) ? state.payments as RecoverableKitchenSale["payment"][] : [];
-      const voidedPaymentIds = Array.isArray(state.voidedPaymentIds) ? state.voidedPaymentIds as string[] : [];
-      if (payments.some((payment) => payment.id === sale.payment.id) || voidedPaymentIds.includes(sale.payment.id)) return state;
-      const tickets = Array.isArray(state.tickets) ? state.tickets as RecoverableKitchenSale["ticket"][] : [];
-      const currentSeq = Math.max(0, Number(state.ticketSeq) || 0);
-      const codeConflict = payments.some((payment) => payment.code === sale.payment.code);
-      const nextSeq = codeConflict ? currentSeq + 1 : Math.max(currentSeq, Number(sale.payment.code.slice(2)) || 0);
-      const code = codeConflict ? `K-${nextSeq}` : sale.payment.code;
-      const payment = { ...sale.payment, code };
-      const voidedTicketIds = Array.isArray(state.voidedTicketIds) ? state.voidedTicketIds as string[] : [];
-      const ticket = sale.ticket && !voidedTicketIds.includes(sale.ticket.id)
-        && !tickets.some((entry) => entry?.id === sale.ticket?.id)
-        ? [{ ...sale.ticket, code }] : [];
-      return { ...state, ticketSeq: nextSeq, payments: [payment, ...payments], tickets: [...ticket, ...tickets] };
-    });
-    const acknowledged = state as { payments?: RecoverableKitchenSale["payment"][]; voidedPaymentIds?: string[] };
-    if (!acknowledged.payments?.some((payment) => payment.id === sale.payment.id)
-      && !acknowledged.voidedPaymentIds?.includes(sale.payment.id)) {
-      throw new Error(`Kitchen sale ${sale.payment.code} was not acknowledged by Firebase.`);
+  const state = await transactSyncedStorageValue<Record<string, unknown>>(stateKey, (raw) => {
+    const current = raw && typeof raw === "object" ? raw : {};
+    const payments = Array.isArray(current.payments) ? [...current.payments as RecoverableKitchenSale["payment"][]] : [];
+    const tickets = Array.isArray(current.tickets) ? [...current.tickets as NonNullable<RecoverableKitchenSale["ticket"]>[]] : [];
+    const voidedPaymentIds = new Set(Array.isArray(current.voidedPaymentIds) ? current.voidedPaymentIds as string[] : []);
+    const voidedTicketIds = new Set(Array.isArray(current.voidedTicketIds) ? current.voidedTicketIds as string[] : []);
+    const paymentIds = new Set(payments.map((payment) => payment.id));
+    const ticketIds = new Set(tickets.map((ticket) => ticket.id));
+    const codes = new Set(payments.map((payment) => payment.code));
+    let ticketSeq = Math.max(0, Number(current.ticketSeq) || 0,
+      ...payments.map((payment) => Number(payment.code?.match(/^K-(\d+)$/)?.[1]) || 0));
+    for (const sale of [...staged].sort((a, b) => a.payment.createdAt - b.payment.createdAt)) {
+      if (paymentIds.has(sale.payment.id) || voidedPaymentIds.has(sale.payment.id)) continue;
+      const requestedSeq = Number(sale.payment.code.slice(2)) || 0;
+      const code = codes.has(sale.payment.code) ? `K-${ticketSeq + 1}` : sale.payment.code;
+      ticketSeq = Math.max(ticketSeq, requestedSeq, Number(code.slice(2)) || 0);
+      codes.add(code);
+      payments.unshift({ ...sale.payment, code });
+      paymentIds.add(sale.payment.id);
+      if (sale.ticket && !voidedTicketIds.has(sale.ticket.id) && !ticketIds.has(sale.ticket.id)) {
+        tickets.unshift({ ...sale.ticket, code });
+        ticketIds.add(sale.ticket.id);
+      }
     }
-    staged = staged.filter((entry) => entry.payment.id !== sale.payment.id);
-    if (staged.length) localStorage.setItem(KITCHEN_POS_RECOVERY_KEY, JSON.stringify(staged));
-    else localStorage.removeItem(KITCHEN_POS_RECOVERY_KEY);
+    return { ...current, ticketSeq, payments, tickets };
+  });
+  const acknowledged = state as { payments?: RecoverableKitchenSale["payment"][]; voidedPaymentIds?: string[] };
+  const paymentIds = new Set(acknowledged.payments?.map((payment) => payment.id) ?? []);
+  const voidedPaymentIds = new Set(acknowledged.voidedPaymentIds ?? []);
+  staged = staged.filter((sale) => !paymentIds.has(sale.payment.id) && !voidedPaymentIds.has(sale.payment.id));
+  if (staged.length) {
+    localStorage.setItem(KITCHEN_POS_RECOVERY_KEY, JSON.stringify(staged));
+    throw new Error("Some Kitchen sales were not acknowledged by Firebase.");
   }
+  localStorage.removeItem(KITCHEN_POS_RECOVERY_KEY);
 }
 
 function isPostOpeningBarPayment(value: unknown): value is RecoverableBarPayment {
