@@ -137,5 +137,10 @@ export function writePosState<TTicket, TPayment, TMenu>(
   payments: TPayment[],
   menuItems: TMenu[],
 ) {
-  return writeJson(storageKey, { tickets, ticketSeq, payments, menuItems });
+  const previous = readJson<{ voidedPaymentIds?: string[]; voidedTicketIds?: string[] }>(storageKey);
+  return writeJson(storageKey, {
+    tickets, ticketSeq, payments, menuItems,
+    ...(previous?.voidedPaymentIds?.length ? { voidedPaymentIds: previous.voidedPaymentIds } : {}),
+    ...(previous?.voidedTicketIds?.length ? { voidedTicketIds: previous.voidedTicketIds } : {}),
+  });
 }

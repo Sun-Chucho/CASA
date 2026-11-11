@@ -43,6 +43,10 @@ function toDateTimeLocal(value: number) {
   return new Date(value - timezoneOffset).toISOString().slice(0, 16);
 }
 
+function toDateLocal(value: number) {
+  return toDateTimeLocal(value).slice(0, 10);
+}
+
 export default function ExpensesPage() {
   const [role, setRole] = useState<Role>("manager");
   const [department, setDepartment] = useState<ExpenseDepartment>("kitchen");
@@ -50,6 +54,7 @@ export default function ExpensesPage() {
   const [amount, setAmount] = useState("");
   const [amountType, setAmountType] = useState<ExpenseAmountType>("cash");
   const [notes, setNotes] = useState("");
+  const [entryDate, setEntryDate] = useState(() => toDateLocal(Date.now()));
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
   const [editingExpense, setEditingExpense] = useState<ExpenseRecord | null>(null);
   const [editTitle, setEditTitle] = useState("");
@@ -94,7 +99,8 @@ export default function ExpensesPage() {
   const saveExpense = () => {
     if (isDirector) return;
     const parsedAmount = Number(amount);
-    if (!title.trim() || Number.isNaN(parsedAmount) || parsedAmount <= 0) return;
+    const expenseDate = new Date(`${entryDate}T12:00:00`).getTime();
+    if (!title.trim() || Number.isNaN(parsedAmount) || parsedAmount <= 0 || !entryDate || !Number.isFinite(expenseDate)) return;
 
     const nextExpense: ExpenseRecord = {
       id: `expense-${Date.now()}`,
@@ -103,7 +109,8 @@ export default function ExpensesPage() {
       amount: parsedAmount,
       amountType,
       notes: notes.trim() || undefined,
-      createdAt: Date.now(),
+      createdAt: expenseDate,
+      enteredAt: Date.now(),
       createdBy: role,
       payoutStatus: role === "manager" ? "approved" : undefined,
     };
@@ -116,6 +123,7 @@ export default function ExpensesPage() {
     setAmount("");
     setAmountType("cash");
     setNotes("");
+    setEntryDate(toDateLocal(Date.now()));
   };
 
   const openMoveDialog = (expense: ExpenseRecord) => {
@@ -210,7 +218,7 @@ export default function ExpensesPage() {
               <WalletCards className="h-5 w-5 text-primary" />
               New {getExpenseDepartmentLabel(department)} Request
             </CardTitle>
-            <CardDescription>Save the request with amount type and optional notes.</CardDescription>
+            <CardDescription>Choose the expense date and save the request with amount type and optional notes.</CardDescription>
           </CardHeader>
           <CardContent className="grid grid-cols-1 gap-4 pt-4 md:grid-cols-2">
             <div className="space-y-1">
@@ -232,6 +240,10 @@ export default function ExpensesPage() {
                   <option key={item.value} value={item.value}>{item.label}</option>
                 ))}
               </select>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="expense-entry-date" className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Expense Date</Label>
+              <Input id="expense-entry-date" type="date" value={entryDate} onChange={(event) => setEntryDate(event.target.value)} />
             </div>
             <div className="space-y-1 md:col-span-2">
               <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Optional Notes</Label>
@@ -260,7 +272,8 @@ export default function ExpensesPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="font-black uppercase text-[10px] tracking-widest">Date</TableHead>
+                <TableHead className="font-black uppercase text-[10px] tracking-widest">Expense Date</TableHead>
+                <TableHead className="font-black uppercase text-[10px] tracking-widest">Entered On</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Title</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Type</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Notes</TableHead>
@@ -272,6 +285,7 @@ export default function ExpensesPage() {
               {filteredExpenses.map((expense) => (
                 <TableRow key={expense.id}>
                   <TableCell className="font-bold">{formatDate(expense.createdAt)}</TableCell>
+                  <TableCell className="font-medium">{formatDate(expense.enteredAt ?? expense.createdAt)}</TableCell>
                   <TableCell className="font-bold">{expense.title}</TableCell>
                   <TableCell className="font-bold">{getExpenseAmountTypeLabel(expense.amountType)}</TableCell>
                   <TableCell className="max-w-xs font-medium text-muted-foreground">{expense.notes ?? "-"}</TableCell>
@@ -293,7 +307,7 @@ export default function ExpensesPage() {
               ))}
               {filteredExpenses.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={isDirector ? 5 : 6} className="py-10 text-center text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  <TableCell colSpan={isDirector ? 6 : 7} className="py-10 text-center text-[10px] font-black uppercase tracking-widest text-muted-foreground">
                     No expenses saved for this group
                   </TableCell>
                 </TableRow>

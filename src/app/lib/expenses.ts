@@ -20,6 +20,7 @@ export interface ExpenseRecord {
   amountType: ExpenseAmountType;
   notes?: string;
   createdAt: number;
+  enteredAt?: number;
   updatedAt?: number;
   createdBy?: string;
   payoutStatus?: "approved" | "paid-out";

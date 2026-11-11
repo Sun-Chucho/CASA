@@ -514,6 +514,17 @@ export function clearBookingsAndKitchenSalesCacheOnce() {
   localStorage.setItem(marker, "1");
 }
 
+export function clearExpensesCacheOnce() {
+  if (typeof window === "undefined") return;
+  const marker = `${CASA_LOCAL_STORAGE_PREFIX}expenses-reset-nov-2026-v1`;
+  if (localStorage.getItem(marker) === "1") return;
+  const key = "orange-hotel-expenses";
+  localStorage.removeItem(getUnifiedLocalKey(key));
+  localStorage.removeItem(key);
+  localStorage.removeItem(getPendingSyncMarkerKey(key));
+  localStorage.setItem(marker, "1");
+}
+
 export const FIREBASE_SYNC_KEYS = [
   "orange-hotel-cashier-state",
   "orange-hotel-breakfast-allocations",
@@ -641,15 +652,24 @@ function sanitizeSyncedValue<T>(key: string, value: T): T {
     ticketSeq?: number;
     payments?: unknown[];
     menuItems?: unknown[];
+    voidedPaymentIds?: string[];
+    voidedTicketIds?: string[];
   };
 
+  const voidedPaymentIds = Array.isArray(snapshot.voidedPaymentIds) ? snapshot.voidedPaymentIds : [];
+  const voidedTicketIds = Array.isArray(snapshot.voidedTicketIds) ? snapshot.voidedTicketIds : [];
+
   return {
-    tickets: Array.isArray(snapshot.tickets) ? snapshot.tickets : [],
+    tickets: Array.isArray(snapshot.tickets) ? snapshot.tickets.filter((ticket) =>
+      !voidedTicketIds.includes((ticket as { id?: string }).id ?? "")) : [],
     ticketSeq: Number.isFinite(snapshot.ticketSeq) ? Number(snapshot.ticketSeq) : 0,
-    payments: Array.isArray(snapshot.payments) ? snapshot.payments : [],
+    payments: Array.isArray(snapshot.payments) ? snapshot.payments.filter((payment) =>
+      !voidedPaymentIds.includes((payment as { id?: string }).id ?? "")) : [],
     menuItems: mergeKitchenMenuItems(
       (Array.isArray(snapshot.menuItems) ? snapshot.menuItems : []) as KitchenMenuItem[],
     ),
+    ...(voidedPaymentIds.length > 0 ? { voidedPaymentIds } : {}),
+    ...(voidedTicketIds.length > 0 ? { voidedTicketIds } : {}),
   } as T;
 }
 
@@ -1015,8 +1035,8 @@ function mergeArrayRecordsForSync(localValue: unknown, remoteValue: unknown) {
 }
 
 function mergePosStateForSync(localValue: unknown, remoteValue: unknown) {
-  const localSnapshot = localValue as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[]; voidedPaymentIds?: string[] };
-  const remoteSnapshot = remoteValue as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[]; voidedPaymentIds?: string[] };
+  const localSnapshot = localValue as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[]; voidedPaymentIds?: string[]; voidedTicketIds?: string[] };
+  const remoteSnapshot = remoteValue as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[]; voidedPaymentIds?: string[]; voidedTicketIds?: string[] };
 
   if (!localSnapshot || typeof localSnapshot !== "object" || !remoteSnapshot || typeof remoteSnapshot !== "object") {
     return localValue;
@@ -1029,14 +1049,17 @@ function mergePosStateForSync(localValue: unknown, remoteValue: unknown) {
   const localMenuItems = Array.isArray(localSnapshot.menuItems) ? localSnapshot.menuItems : [];
   const remoteMenuItems = Array.isArray(remoteSnapshot.menuItems) ? remoteSnapshot.menuItems : [];
   const voidedPaymentIds = [...new Set([...(remoteSnapshot.voidedPaymentIds ?? []), ...(localSnapshot.voidedPaymentIds ?? [])])];
+  const voidedTicketIds = [...new Set([...(remoteSnapshot.voidedTicketIds ?? []), ...(localSnapshot.voidedTicketIds ?? [])])];
 
   return {
     ...localSnapshot,
-    tickets: mergeRecordsById(localTickets, remoteTickets),
+    tickets: mergeRecordsById(localTickets, remoteTickets).filter((ticket) =>
+      !voidedTicketIds.includes((ticket as { id?: string }).id ?? "")),
     payments: mergeRecordsById(localPayments, remotePayments).filter((payment) =>
       !voidedPaymentIds.includes((payment as { id?: string }).id ?? "")),
     menuItems: mergeRecordsById(localMenuItems, remoteMenuItems),
     ...(voidedPaymentIds.length > 0 ? { voidedPaymentIds } : {}),
+    ...(voidedTicketIds.length > 0 ? { voidedTicketIds } : {}),
     ticketSeq: Math.max(
       Number.isFinite(localSnapshot.ticketSeq) ? Number(localSnapshot.ticketSeq) : 0,
       Number.isFinite(remoteSnapshot.ticketSeq) ? Number(remoteSnapshot.ticketSeq) : 0,
@@ -1064,8 +1087,8 @@ function mergeCashierStateForRemoteApply(localValue: unknown, remoteValue: unkno
 }
 
 function mergePosStateForRemoteApply(localValue: unknown, remoteValue: unknown) {
-  const localSnapshot = localValue as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[]; voidedPaymentIds?: string[] };
-  const remoteSnapshot = remoteValue as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[]; voidedPaymentIds?: string[] };
+  const localSnapshot = localValue as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[]; voidedPaymentIds?: string[]; voidedTicketIds?: string[] };
+  const remoteSnapshot = remoteValue as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[]; voidedPaymentIds?: string[]; voidedTicketIds?: string[] };
 
   if (!localSnapshot || typeof localSnapshot !== "object" || !remoteSnapshot || typeof remoteSnapshot !== "object") {
     return remoteValue;
@@ -1078,15 +1101,18 @@ function mergePosStateForRemoteApply(localValue: unknown, remoteValue: unknown) 
   const localMenuItems = Array.isArray(localSnapshot.menuItems) ? localSnapshot.menuItems : [];
   const remoteMenuItems = Array.isArray(remoteSnapshot.menuItems) ? remoteSnapshot.menuItems : [];
   const voidedPaymentIds = [...new Set([...(remoteSnapshot.voidedPaymentIds ?? []), ...(localSnapshot.voidedPaymentIds ?? [])])];
+  const voidedTicketIds = [...new Set([...(remoteSnapshot.voidedTicketIds ?? []), ...(localSnapshot.voidedTicketIds ?? [])])];
 
   return {
     ...localSnapshot,
     ...remoteSnapshot,
-    tickets: mergeRecordsByIdWithRemoteWins(localTickets, remoteTickets),
+    tickets: mergeRecordsByIdWithRemoteWins(localTickets, remoteTickets).filter((ticket) =>
+      !voidedTicketIds.includes((ticket as { id?: string }).id ?? "")),
     payments: mergeRecordsByIdWithRemoteWins(localPayments, remotePayments).filter((payment) =>
       !voidedPaymentIds.includes((payment as { id?: string }).id ?? "")),
     menuItems: mergeRecordsByIdWithRemoteWins(localMenuItems, remoteMenuItems),
     ...(voidedPaymentIds.length > 0 ? { voidedPaymentIds } : {}),
+    ...(voidedTicketIds.length > 0 ? { voidedTicketIds } : {}),
     ticketSeq: Math.max(
       Number.isFinite(localSnapshot.ticketSeq) ? Number(localSnapshot.ticketSeq) : 0,
       Number.isFinite(remoteSnapshot.ticketSeq) ? Number(remoteSnapshot.ticketSeq) : 0,
@@ -1213,6 +1239,7 @@ function getCanonicalDefaultValue(key: string) {
 // These histories were explicitly cleared for the November opening. Firebase
 // stores empty arrays as null, so an old browser cache must not seed them again.
 const RESET_HISTORY_KEYS = new Set([
+  "orange-hotel-expenses",
   "orange-hotel-breakfast-allocations",
   "orange-hotel-website-bookings",
   "orange-hotel-barista-purchase-history",
@@ -1697,11 +1724,15 @@ export function subscribeToSyncedStorageKey<T>(key: string, onChange: (value: T 
         ref(firebaseDatabase, toStoragePath(key)),
         (snapshot) => {
           if (!snapshot.exists()) {
-            const fallbackValue = sanitizeForStorage((getLocalFallbackForSync(key) ?? getCanonicalDefaultValue(key)) as T | null);
+            const fallbackValue = sanitizeForStorage((RESET_HISTORY_KEYS.has(key)
+              ? getCanonicalDefaultValue(key)
+              : getLocalFallbackForSync(key) ?? getCanonicalDefaultValue(key)) as T | null);
             if (fallbackValue !== null) {
               setLocalCache(key, JSON.stringify(fallbackValue));
               mirrorCanonicalStateToLegacyLocal(key, fallbackValue);
-              void reconcileStorageValueInFirebase(key, fallbackValue).catch(() => undefined);
+              if (!RESET_HISTORY_KEYS.has(key)) {
+                void reconcileStorageValueInFirebase(key, fallbackValue).catch(() => undefined);
+              }
               dispatchStorageUpdated(key);
               onChange(fallbackValue);
               markSyncHealthy(key);
