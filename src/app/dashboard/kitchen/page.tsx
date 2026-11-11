@@ -1,7 +1,7 @@
 "use client";
 
 import { INV_KITCHEN_ITEMS_KEY, KitchenItem } from "@/app/lib/inventory-manager";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { readStoredRole } from "@/app/lib/auth";
 import {
@@ -34,7 +34,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { KitchenSessionManager } from "@/components/dashboard/kitchen-session-manager";
 import { ChefHat, Minus, Plus, Receipt, Search, Trash2, CheckCircle2, XCircle } from "lucide-react";
 import { useConfirmDialog } from "@/hooks/use-confirm-dialog";
-import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
+import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey, transactSyncedStorageValue } from "@/app/lib/firebase-sync";
 import { reconcileCartWithMenu } from "@/app/lib/pos-menu";
 
 type KitchenCategory = "all" | KitchenMenuCategory;
@@ -81,6 +81,15 @@ interface KitchenPaymentRecord {
   recordedAt?: number;
   paymentMethodEditedAt?: number;
   updatedAt?: number;
+}
+
+interface KitchenPosState {
+  tickets: KitchenTicket[];
+  ticketSeq: number;
+  payments: KitchenPaymentRecord[];
+  menuItems: KitchenMenuItem[];
+  voidedPaymentIds?: string[];
+  voidedTicketIds?: string[];
 }
 
 interface PendingOrder {
@@ -151,6 +160,9 @@ export default function KitchenPage() {
 
   const [pendingOrder, setPendingOrder] = useState<PendingOrder | null>(null);
   const [showPayNowPopup, setShowPayNowPopup] = useState(false);
+  const [savingOrder, setSavingOrder] = useState(false);
+  const [orderFeedback, setOrderFeedback] = useState("");
+  const savingOrderRef = useRef(false);
   const [pastPaymentDate, setPastPaymentDate] = useState("");
   const [pastPaymentSearch, setPastPaymentSearch] = useState("");
   const [pastPaymentCart, setPastPaymentCart] = useState<CartLine[]>([]);
@@ -529,67 +541,56 @@ export default function KitchenPage() {
       lines: cart.map((line) => ({ name: line.item.name, qty: line.qty })),
       total: subtotal,
     });
+    setOrderFeedback("");
     setShowPayNowPopup(true);
   };
 
   const finalizeOrder = async (method: PaidKitchenPaymentMethod) => {
-    if (isDirector) return;
-    if (!pendingOrder) return;
+    if (isDirector || !pendingOrder || savingOrderRef.current) return;
+    savingOrderRef.current = true;
+    setSavingOrder(true);
+    setOrderFeedback("");
+    const order = pendingOrder;
+    const recordedAt = Date.now();
+    const orderId = `kt-${crypto.randomUUID()}`;
+    const paymentId = `kp-${crypto.randomUUID()}`;
+    try {
+      const committed = await transactSyncedStorageValue<KitchenPosState>(getActiveKitchenStateKey(), (current) => {
+        const snapshot = current ?? { tickets: [], ticketSeq: 0, payments: [], menuItems };
+        const payments = Array.isArray(snapshot.payments) ? snapshot.payments : [];
+        if (payments.some((payment) => payment.id === paymentId)) return snapshot;
+        const nextSeq = Math.max(0, Number(snapshot.ticketSeq) || 0) + 1;
+        const code = `K-${nextSeq}`;
+        const ticket: KitchenTicket = { id: orderId, code, createdAt: recordedAt,
+          mode: order.mode, destination: order.destination, lines: order.lines, total: order.total };
+        const payment: KitchenPaymentRecord = { id: paymentId, ticketId: orderId, code, createdAt: recordedAt,
+          mode: order.mode, destination: order.destination, lines: order.lines, total: order.total,
+          status: "completed", method };
+        return { ...snapshot, ticketSeq: nextSeq, tickets: [ticket, ...(snapshot.tickets ?? [])],
+          payments: [payment, ...payments] };
+      });
+      const payment = committed.payments?.find((entry) => entry.id === paymentId);
+      if (!payment) throw new Error("The sale was not confirmed by CASA. Please retry.");
+      setTickets(committed.tickets ?? []);
+      setTicketSeq(committed.ticketSeq);
+      setKitchenPayments(committed.payments ?? []);
+      setCart([]);
+      setPendingOrder(null);
+      setShowPayNowPopup(false);
 
-    const nextSeq = ticketSeq + 1;
-    const createdAt = Date.now();
-    setTicketSeq(nextSeq);
-
-    const orderId = `kt-${createdAt}`;
-    const code = `K-${nextSeq}`;
-
-    const ticket: KitchenTicket = {
-      id: orderId,
-      code,
-      createdAt,
-      mode: pendingOrder.mode,
-      destination: pendingOrder.destination,
-      lines: pendingOrder.lines,
-      total: pendingOrder.total,
-    };
-
-    const paymentRecord: KitchenPaymentRecord = {
-      id: `kp-${createdAt}`,
-      ticketId: orderId,
-      code,
-      createdAt,
-      mode: pendingOrder.mode,
-      destination: pendingOrder.destination,
-      lines: pendingOrder.lines,
-      total: pendingOrder.total,
-      status: "completed",
-      method,
-    };
-
-    const nextTickets = [ticket, ...tickets];
-    const nextPayments = [paymentRecord, ...kitchenPayments];
-    setTickets(nextTickets);
-    setKitchenPayments(nextPayments);
-    writePosState(getActiveKitchenStateKey(), nextTickets, nextSeq, nextPayments, menuItems);
-
-    setCart([]);
-    setPendingOrder(null);
-    setShowPayNowPopup(false);
-
-    const printResult = await printDepartmentReceipt({
-      department: "kitchen",
-      code,
-      destination: pendingOrder.destination,
-      mode: pendingOrder.mode,
-      method,
-      status,
-      total: pendingOrder.total,
-      createdAt,
-      lines: pendingOrder.lines,
-    });
-
-    if (!printResult.ok && printResult.reason) {
-      window.alert(`Kitchen receipt was not printed: ${printResult.reason}`);
+      const printResult = await printDepartmentReceipt({
+        department: "kitchen", code: payment.code, destination: order.destination,
+        mode: order.mode, method, status: "completed", total: order.total,
+        createdAt: recordedAt, lines: order.lines,
+      });
+      if (!printResult.ok && printResult.reason) {
+        window.alert(`Kitchen receipt was not printed: ${printResult.reason}`);
+      }
+    } catch (error) {
+      setOrderFeedback(error instanceof Error ? error.message : "Sale could not sync. Please retry.");
+    } finally {
+      savingOrderRef.current = false;
+      setSavingOrder(false);
     }
   };
 
@@ -1624,16 +1625,17 @@ export default function KitchenPage() {
           <Card className="w-full max-w-md">
             <CardHeader>
               <CardTitle className="text-xl font-black uppercase tracking-tight">Pay Now Method</CardTitle>
-              <CardDescription>Select cash, mobile, or bank</CardDescription>
+              <CardDescription>Select cash, mobile, or bank.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <Button onClick={() => finalizeOrder("cash")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
+              {orderFeedback && <p className="rounded-md border border-red-300 bg-red-50 p-2 text-xs font-bold text-red-700">{orderFeedback}</p>}
+              <Button onClick={() => finalizeOrder("cash")} disabled={savingOrder} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
                 Cash
               </Button>
-              <Button onClick={() => finalizeOrder("mobile")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
+              <Button onClick={() => finalizeOrder("mobile")} disabled={savingOrder} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
                 Mobile
               </Button>
-              <Button onClick={() => finalizeOrder("bank")} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
+              <Button onClick={() => finalizeOrder("bank")} disabled={savingOrder} className="w-full h-11 font-black uppercase text-[10px] tracking-widest">
                 Bank
               </Button>
               <Button
@@ -1641,6 +1643,7 @@ export default function KitchenPage() {
                 onClick={() => {
                   setShowPayNowPopup(false);
                 }}
+                disabled={savingOrder}
                 className="w-full h-10 font-black uppercase text-[10px] tracking-widest"
               >
                 Close

@@ -10,7 +10,7 @@ import { KitchenPurchaseHistoryEntry, STORAGE_KITCHEN_PURCHASE_HISTORY } from "@
 import { MainStoreItem, STORAGE_MAIN_STORE_ITEMS, getStoreItemLabel, normalizeBaristaProductTarget, normalizeStockName } from "@/app/lib/inventory-transfer";
 import { getTotLimit } from "@/app/lib/barista-stock";
 import { normalizeRole } from "@/app/lib/auth";
-import { clearKitchenBarCacheOnce, clearNovemberBarCacheOnce, clearBookingsAndKitchenSalesCacheOnce, clearExpensesCacheOnce, hydrateStorageKeyFromFirebase, migrateVerifiedCasaLocalData, recoverPostOpeningBarSales, reverseVerifiedBh491BarSale, stagePostOpeningBarSales } from "@/app/lib/firebase-sync";
+import { clearKitchenBarCacheOnce, clearNovemberBarCacheOnce, clearBookingsAndKitchenSalesCacheOnce, clearExpensesCacheOnce, clearLaundryCacheOnce, hydrateStorageKeyFromFirebase, migrateVerifiedCasaLocalData, recoverPostOpeningBarSales, recoverRecentKitchenPosSales, reverseVerifiedBh491BarSale, stagePostOpeningBarSales, stageRecentKitchenPosSales } from "@/app/lib/firebase-sync";
 import { readJson, readPosState, STORAGE_BARISTA_STATE, STORAGE_KITCHEN_STATE, writeJson, writePosState } from "@/app/lib/storage";
 import { usePathname, useRouter } from "next/navigation";
 import { Bell, Home, Hotel, Search, User, Clock, Menu, WalletCards, ReceiptText, Package } from "lucide-react";
@@ -1101,10 +1101,12 @@ export default function DashboardLayout({
 
       localStorage.setItem("orange-hotel-role", savedRole);
       stagePostOpeningBarSales();
+      stageRecentKitchenPosSales();
       clearKitchenBarCacheOnce();
       clearNovemberBarCacheOnce();
       clearBookingsAndKitchenSalesCacheOnce();
       clearExpensesCacheOnce();
+      clearLaundryCacheOnce();
       migrateVerifiedCasaLocalData();
       setActiveUsername(readActiveSessionUsername(""));
       setRole(savedRole);
@@ -1115,6 +1117,7 @@ export default function DashboardLayout({
       }
       try {
         await recoverPostOpeningBarSales();
+        await recoverRecentKitchenPosSales();
         await reverseVerifiedBh491BarSale();
         await hydrateStartupStateForRole(savedRole);
         if (cancelled) return;

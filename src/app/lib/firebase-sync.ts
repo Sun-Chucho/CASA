@@ -252,6 +252,8 @@ export function subscribeToConnectionStatus(onChange: (connected: boolean) => vo
 const FIREBASE_STORAGE_ROOT = "casa-v2";
 const CASA_LOCAL_STORAGE_PREFIX = "casa-v2:";
 const BAR_POST_OPENING_RECOVERY_KEY = `${CASA_LOCAL_STORAGE_PREFIX}bar-post-opening-sales-recovery-v1`;
+const KITCHEN_POS_RECOVERY_KEY = `${CASA_LOCAL_STORAGE_PREFIX}kitchen-pos-sales-recovery-nov-2026-v1`;
+const KITCHEN_POS_RECOVERY_START_AT = Date.parse("2026-11-11T00:00:00+03:00");
 const BAR_OPENING_RESET_AT = 1794321180000;
 const BAR_NOVEMBER_START_AT = 1793480400000;
 
@@ -264,6 +266,100 @@ type RecoverableBarPayment = {
   total: number;
   [key: string]: unknown;
 };
+
+type RecoverableKitchenSale = {
+  payment: { id: string; ticketId: string; code: string; createdAt: number; status: string; method: string; historical?: boolean; [key: string]: unknown };
+  ticket?: { id: string; code: string; [key: string]: unknown };
+};
+
+function isRecoverableKitchenPayment(value: unknown): value is RecoverableKitchenSale["payment"] {
+  if (!value || typeof value !== "object") return false;
+  const payment = value as Partial<RecoverableKitchenSale["payment"]>;
+  return typeof payment.id === "string" && typeof payment.ticketId === "string"
+    && typeof payment.code === "string" && /^K-\d+$/.test(payment.code)
+    && Number(payment.createdAt) >= KITCHEN_POS_RECOVERY_START_AT
+    && Number(payment.total) > 0
+    && payment.status === "completed" && payment.method !== "credit" && payment.historical !== true;
+}
+
+// A POS device may have saved a sale locally before its Firebase request failed.
+// Preserve recent paid sales across the one-time cache clear, then reconcile them
+// with the shared kitchen ledger when this device comes online.
+export function stageRecentKitchenPosSales() {
+  if (typeof window === "undefined") return;
+  let staged: RecoverableKitchenSale[] = [];
+  try {
+    const saved = JSON.parse(localStorage.getItem(KITCHEN_POS_RECOVERY_KEY) ?? "[]");
+    if (Array.isArray(saved)) staged = saved;
+  } catch { /* use local snapshots */ }
+  const stateKeys = [getUnifiedLocalKey("orange-hotel-kitchen-state"), "orange-hotel-kitchen-state"];
+  const paymentKeys = [getUnifiedLocalKey("orange-hotel-kitchen-payments"), "orange-hotel-kitchen-payments"];
+  const ticketKeys = [getUnifiedLocalKey("orange-hotel-kitchen-tickets"), "orange-hotel-kitchen-tickets"];
+  const read = (key: string): unknown => { try { return JSON.parse(localStorage.getItem(key) ?? "null"); } catch { return null; } };
+  const legacyTickets = ticketKeys.flatMap((key) => { const value = read(key); return Array.isArray(value) ? value : []; });
+  for (const key of stateKeys) {
+    const state = read(key) as { payments?: unknown[]; tickets?: unknown[] } | null;
+    if (!Array.isArray(state?.payments)) continue;
+    const tickets = Array.isArray(state.tickets) ? state.tickets : [];
+    for (const payment of state.payments.filter(isRecoverableKitchenPayment)) {
+      const ticket = [...tickets, ...legacyTickets].find((entry) => entry?.id === payment.ticketId);
+      staged.push({ payment, ...(ticket ? { ticket } : {}) });
+    }
+  }
+  for (const key of paymentKeys) {
+    const value = read(key);
+    if (!Array.isArray(value)) continue;
+    for (const payment of value.filter(isRecoverableKitchenPayment)) {
+      const ticket = legacyTickets.find((entry) => entry?.id === payment.ticketId);
+      staged.push({ payment, ...(ticket ? { ticket } : {}) });
+    }
+  }
+  if (staged.length > 0) {
+    localStorage.setItem(KITCHEN_POS_RECOVERY_KEY,
+      JSON.stringify([...new Map(staged.filter((entry) => isRecoverableKitchenPayment(entry?.payment))
+        .map((entry) => [entry.payment.id, entry])).values()]));
+  }
+}
+
+export async function recoverRecentKitchenPosSales() {
+  if (typeof window === "undefined") return;
+  stageRecentKitchenPosSales();
+  let staged: RecoverableKitchenSale[];
+  try {
+    const saved = JSON.parse(localStorage.getItem(KITCHEN_POS_RECOVERY_KEY) ?? "[]");
+    staged = Array.isArray(saved) ? saved.filter((entry) => isRecoverableKitchenPayment(entry?.payment)) : [];
+  } catch { return; }
+  if (staged.length === 0) return;
+  await withTimeout(ensureFirebaseAuthReady(), DIRECT_FIREBASE_WRITE_TIMEOUT_MS, "Kitchen sales recovery authentication timed out");
+  const stateKey = "orange-hotel-kitchen-state";
+  for (const sale of staged.sort((a, b) => a.payment.createdAt - b.payment.createdAt)) {
+    const result = await withTimeout(runTransaction(ref(firebaseDatabase, toStoragePath(stateKey)), (raw) => {
+      const state = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+      const payments = Array.isArray(state.payments) ? state.payments as RecoverableKitchenSale["payment"][] : [];
+      const voidedPaymentIds = Array.isArray(state.voidedPaymentIds) ? state.voidedPaymentIds as string[] : [];
+      if (payments.some((payment) => payment.id === sale.payment.id) || voidedPaymentIds.includes(sale.payment.id)) return state;
+      const tickets = Array.isArray(state.tickets) ? state.tickets as RecoverableKitchenSale["ticket"][] : [];
+      const currentSeq = Math.max(0, Number(state.ticketSeq) || 0);
+      const codeConflict = payments.some((payment) => payment.code === sale.payment.code);
+      const nextSeq = codeConflict ? currentSeq + 1 : Math.max(currentSeq, Number(sale.payment.code.slice(2)) || 0);
+      const code = codeConflict ? `K-${nextSeq}` : sale.payment.code;
+      const payment = { ...sale.payment, code };
+      const voidedTicketIds = Array.isArray(state.voidedTicketIds) ? state.voidedTicketIds as string[] : [];
+      const ticket = sale.ticket && !voidedTicketIds.includes(sale.ticket.id)
+        && !tickets.some((entry) => entry?.id === sale.ticket?.id)
+        ? [{ ...sale.ticket, code }] : [];
+      return { ...state, ticketSeq: nextSeq, payments: [payment, ...payments], tickets: [...ticket, ...tickets] };
+    }), DIRECT_FIREBASE_WRITE_TIMEOUT_MS, `Kitchen sale ${sale.payment.code} recovery timed out`);
+    const state = result.snapshot.val() as { payments?: RecoverableKitchenSale["payment"][]; voidedPaymentIds?: string[] } | null;
+    if (!state?.payments?.some((payment) => payment.id === sale.payment.id)
+      && !state?.voidedPaymentIds?.includes(sale.payment.id)) {
+      throw new Error(`Kitchen sale ${sale.payment.code} was not acknowledged by Firebase.`);
+    }
+    staged = staged.filter((entry) => entry.payment.id !== sale.payment.id);
+    if (staged.length) localStorage.setItem(KITCHEN_POS_RECOVERY_KEY, JSON.stringify(staged));
+    else localStorage.removeItem(KITCHEN_POS_RECOVERY_KEY);
+  }
+}
 
 function isPostOpeningBarPayment(value: unknown): value is RecoverableBarPayment {
   if (!value || typeof value !== "object") return false;
@@ -519,6 +615,17 @@ export function clearExpensesCacheOnce() {
   const marker = `${CASA_LOCAL_STORAGE_PREFIX}expenses-reset-nov-2026-v1`;
   if (localStorage.getItem(marker) === "1") return;
   const key = "orange-hotel-expenses";
+  localStorage.removeItem(getUnifiedLocalKey(key));
+  localStorage.removeItem(key);
+  localStorage.removeItem(getPendingSyncMarkerKey(key));
+  localStorage.setItem(marker, "1");
+}
+
+export function clearLaundryCacheOnce() {
+  if (typeof window === "undefined") return;
+  const marker = `${CASA_LOCAL_STORAGE_PREFIX}laundry-reset-nov-2026-v1`;
+  if (localStorage.getItem(marker) === "1") return;
+  const key = "orange-hotel-laundry-records";
   localStorage.removeItem(getUnifiedLocalKey(key));
   localStorage.removeItem(key);
   localStorage.removeItem(getPendingSyncMarkerKey(key));
@@ -1240,6 +1347,7 @@ function getCanonicalDefaultValue(key: string) {
 // stores empty arrays as null, so an old browser cache must not seed them again.
 const RESET_HISTORY_KEYS = new Set([
   "orange-hotel-expenses",
+  "orange-hotel-laundry-records",
   "orange-hotel-breakfast-allocations",
   "orange-hotel-website-bookings",
   "orange-hotel-barista-purchase-history",
