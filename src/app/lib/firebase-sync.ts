@@ -1,5 +1,5 @@
 import { get, onValue, ref, remove, runTransaction, set } from "firebase/database";
-import { ensureFirebaseAuthReady, firebaseDatabase } from "@/app/lib/firebase";
+import { ensureFirebaseAuthReady, firebaseAuth, firebaseConfig, firebaseDatabase } from "@/app/lib/firebase";
 import { getStoreItemLabel, type MainStoreItem } from "@/app/lib/inventory-transfer";
 import { mergeKitchenMenuItems, type KitchenMenuItem } from "@/app/lib/kitchen-menu";
 import { getDefaultRooms, type InventoryItem } from "@/app/lib/mock-data";
@@ -102,13 +102,12 @@ function hasRecentSyncSuccess() {
 function getEffectiveConnectionState() {
   if (_firebaseRealtimeConnected) return true;
   if (hasRecentSyncSuccess()) return true;
-  if (typeof window !== "undefined" && window.navigator.onLine && Object.keys(_lastSyncedAt).length > 0) return true;
   return false;
 }
 
 function emitConnectionState(connected: boolean) {
   _firebaseRealtimeConnected = connected;
-  _isConnected = connected ? getEffectiveConnectionState() : false;
+  _isConnected = getEffectiveConnectionState();
   _connectionListeners.forEach((fn) => fn(_isConnected));
   if (connected) void flushPendingFirebaseWrites();
 }
@@ -219,6 +218,65 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
   });
 }
 
+// Some POS networks allow Firebase's HTTPS REST endpoint but interrupt the
+// realtime socket used by the browser SDK. Use authenticated, conditional REST
+// writes for Kitchen so a receipt is never reported as saved only on one device.
+let kitchenRestSession: { token: string; expiresAt: number } | null = null;
+
+async function getKitchenRestToken() {
+  if (kitchenRestSession && kitchenRestSession.expiresAt > Date.now()) return kitchenRestSession.token;
+  if (firebaseAuth.currentUser) {
+    try {
+      return await withTimeout(firebaseAuth.currentUser.getIdToken(), 5000, "Kitchen authentication timed out");
+    } catch { /* use the HTTPS authentication endpoint */ }
+  }
+  const response = await withTimeout(fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${encodeURIComponent(firebaseConfig.apiKey)}`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ returnSecureToken: true }) },
+  ), DIRECT_FIREBASE_WRITE_TIMEOUT_MS, "Kitchen REST authentication timed out");
+  if (!response.ok) throw new Error(`Kitchen authentication failed (${response.status})`);
+  const session = await response.json() as { idToken?: string; expiresIn?: string };
+  if (!session.idToken) throw new Error("Kitchen authentication did not return a token.");
+  kitchenRestSession = { token: session.idToken, expiresAt: Date.now() + Math.max(60, Number(session.expiresIn) || 3600) * 1000 - 60000 };
+  return session.idToken;
+}
+
+async function kitchenRestRequest(key: string, init: RequestInit = {}) {
+  const token = await getKitchenRestToken();
+  const base = firebaseConfig.databaseURL.replace(/\/+$/, "");
+  const url = `${base}/${toStoragePath(key)}.json?auth=${encodeURIComponent(token)}`;
+  const response = await withTimeout(fetch(url, { ...init, cache: "no-store" }),
+    DIRECT_FIREBASE_WRITE_TIMEOUT_MS, `Kitchen database request timed out for ${key}`);
+  if (response.status === 401 || response.status === 403) kitchenRestSession = null;
+  return response;
+}
+
+async function readKitchenRestValue<T>(key: string): Promise<T | null> {
+  const response = await kitchenRestRequest(key);
+  if (!response.ok) throw new Error(`Kitchen database read failed (${response.status})`);
+  return await response.json() as T | null;
+}
+
+async function transactKitchenRestValue<T>(key: string, updater: (current: T | null) => T | undefined): Promise<T> {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const currentResponse = await kitchenRestRequest(key, { headers: { "X-Firebase-ETag": "true" } });
+    if (!currentResponse.ok) throw new Error(`Kitchen database read failed (${currentResponse.status})`);
+    const etag = currentResponse.headers.get("etag");
+    if (!etag) throw new Error("Kitchen database did not provide a revision token.");
+    const current = await currentResponse.json() as T | null;
+    const next = updater(current);
+    if (next === undefined) throw new Error("Kitchen sale was cancelled before saving.");
+    const response = await kitchenRestRequest(key, {
+      method: "PUT", headers: { "Content-Type": "application/json", "if-match": etag },
+      body: JSON.stringify(sanitizeForStorage(next)),
+    });
+    if (response.status === 412) continue;
+    if (!response.ok) throw new Error(`Kitchen database save failed (${response.status})`);
+    return await response.json() as T;
+  }
+  throw new Error("Kitchen database changed during saving. Please retry.");
+}
+
 if (typeof window !== "undefined") {
   window.addEventListener("online", () => {
     void ensureFirebaseAuthReady()
@@ -282,6 +340,14 @@ function isRecoverableKitchenPayment(value: unknown): value is RecoverableKitche
     && payment.status === "completed" && payment.method !== "credit" && payment.historical !== true;
 }
 
+function hasStagedKitchenPosSales() {
+  if (typeof window === "undefined") return false;
+  try {
+    const staged = JSON.parse(localStorage.getItem(KITCHEN_POS_RECOVERY_KEY) ?? "[]");
+    return Array.isArray(staged) && staged.some((sale) => isRecoverableKitchenPayment(sale?.payment));
+  } catch { return false; }
+}
+
 // A POS device may have saved a sale locally before its Firebase request failed.
 // Preserve recent paid sales across the one-time cache clear, then reconcile them
 // with the shared kitchen ledger when this device comes online.
@@ -323,18 +389,16 @@ export function stageRecentKitchenPosSales() {
 
 export async function recoverRecentKitchenPosSales() {
   if (typeof window === "undefined") return;
-  stageRecentKitchenPosSales();
   let staged: RecoverableKitchenSale[];
   try {
     const saved = JSON.parse(localStorage.getItem(KITCHEN_POS_RECOVERY_KEY) ?? "[]");
     staged = Array.isArray(saved) ? saved.filter((entry) => isRecoverableKitchenPayment(entry?.payment)) : [];
   } catch { return; }
   if (staged.length === 0) return;
-  await withTimeout(ensureFirebaseAuthReady(), DIRECT_FIREBASE_WRITE_TIMEOUT_MS, "Kitchen sales recovery authentication timed out");
   const stateKey = "orange-hotel-kitchen-state";
   for (const sale of staged.sort((a, b) => a.payment.createdAt - b.payment.createdAt)) {
-    const result = await withTimeout(runTransaction(ref(firebaseDatabase, toStoragePath(stateKey)), (raw) => {
-      const state = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+    const state = await transactSyncedStorageValue<Record<string, unknown>>(stateKey, (raw) => {
+      const state = raw && typeof raw === "object" ? raw : {};
       const payments = Array.isArray(state.payments) ? state.payments as RecoverableKitchenSale["payment"][] : [];
       const voidedPaymentIds = Array.isArray(state.voidedPaymentIds) ? state.voidedPaymentIds as string[] : [];
       if (payments.some((payment) => payment.id === sale.payment.id) || voidedPaymentIds.includes(sale.payment.id)) return state;
@@ -349,10 +413,10 @@ export async function recoverRecentKitchenPosSales() {
         && !tickets.some((entry) => entry?.id === sale.ticket?.id)
         ? [{ ...sale.ticket, code }] : [];
       return { ...state, ticketSeq: nextSeq, payments: [payment, ...payments], tickets: [...ticket, ...tickets] };
-    }), DIRECT_FIREBASE_WRITE_TIMEOUT_MS, `Kitchen sale ${sale.payment.code} recovery timed out`);
-    const state = result.snapshot.val() as { payments?: RecoverableKitchenSale["payment"][]; voidedPaymentIds?: string[] } | null;
-    if (!state?.payments?.some((payment) => payment.id === sale.payment.id)
-      && !state?.voidedPaymentIds?.includes(sale.payment.id)) {
+    });
+    const acknowledged = state as { payments?: RecoverableKitchenSale["payment"][]; voidedPaymentIds?: string[] };
+    if (!acknowledged.payments?.some((payment) => payment.id === sale.payment.id)
+      && !acknowledged.voidedPaymentIds?.includes(sale.payment.id)) {
       throw new Error(`Kitchen sale ${sale.payment.code} was not acknowledged by Firebase.`);
     }
     staged = staged.filter((entry) => entry.payment.id !== sale.payment.id);
@@ -928,6 +992,9 @@ function areSnapshotsEqual(a: unknown, b: unknown) {
 }
 
 function shouldIgnoreRemoteValue(key: string, remoteValue: unknown) {
+  // Keep the POS device's unsent receipts visible until recovery acknowledges
+  // them; a remote listener must not replace them with the older cloud snapshot.
+  if (key === "orange-hotel-kitchen-state" && hasStagedKitchenPosSales()) return true;
   const pending = _pendingLocalWrites[key];
   if (!pending) {
     if (typeof window !== "undefined" && !hasPendingSyncMarker(key)) {
@@ -1552,17 +1619,30 @@ export async function transactSyncedStorageValue<T>(
   updater: (current: T | null) => T | undefined,
 ): Promise<T> {
   if (typeof window === "undefined") throw new Error("Stock changes require a browser session.");
-  await withTimeout(ensureFirebaseAuthReady(), DIRECT_FIREBASE_WRITE_TIMEOUT_MS, "Firebase authentication timed out");
-  const result = await withTimeout(
-    runTransaction(ref(firebaseDatabase, toStoragePath(key)), (remoteValue) => {
-      const next = updater(remoteValue as T | null);
-      return next === undefined ? undefined : sanitizeForStorage(next);
-    }),
-    DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
-    `Stock transaction timed out for ${key}`,
-  );
-  if (!result.committed) throw new Error("Stock change was not saved. Please refresh and try again.");
-  const committed = result.snapshot.val() as T;
+  const transactWithSdk = async () => {
+    await withTimeout(ensureFirebaseAuthReady(), DIRECT_FIREBASE_WRITE_TIMEOUT_MS, "Firebase authentication timed out");
+    const result = await withTimeout(
+      runTransaction(ref(firebaseDatabase, toStoragePath(key)), (remoteValue) => {
+        const next = updater(remoteValue as T | null);
+        return next === undefined ? undefined : sanitizeForStorage(next);
+      }),
+      DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
+      `Stock transaction timed out for ${key}`,
+    );
+    if (!result.committed) throw new Error("Stock change was not saved. Please refresh and try again.");
+    return result.snapshot.val() as T;
+  };
+  let committed: T;
+  if (key === "orange-hotel-kitchen-state") {
+    try {
+      committed = await transactKitchenRestValue(key, updater);
+    } catch (restError) {
+      console.error("Kitchen HTTPS sync failed; trying Firebase realtime", restError);
+      committed = await transactWithSdk();
+    }
+  } else {
+    committed = await transactWithSdk();
+  }
   setLocalCache(key, JSON.stringify(committed));
   clearPendingSync(key);
   dispatchStorageUpdated(key);
@@ -1621,7 +1701,29 @@ async function hydrateStorageKeyFromFirebaseInternal(key: string) {
     return sanitizedValue;
   };
 
+  if (key === "orange-hotel-kitchen-state") {
+    try {
+      const remoteValue = sanitizeForStorage(sanitizeSyncedValue(key, await readKitchenRestValue(key)));
+      if (remoteValue !== null) {
+        if (hasStagedKitchenPosSales()) return;
+        const localValue = getLocalSyncedValue(key);
+        const committed = hasPendingSyncMarker(key) && localValue !== null
+          ? await transactSyncedStorageValue(key, (current: unknown) =>
+            sanitizeForStorage(sanitizeSyncedValue(key, protectSyncedValueBeforeWrite(key, localValue, current))))
+          : remoteValue;
+        applyHydratedValue(committed);
+        clearPendingSync(key);
+        delete _pendingLocalWrites[key];
+        markSyncHealthy(key);
+        return;
+      }
+    } catch (error) {
+      console.error("Kitchen HTTPS hydrate failed; trying Firebase realtime", error);
+    }
+  }
+
   try {
+    if (key === "orange-hotel-kitchen-state" && hasStagedKitchenPosSales()) return;
     await withTimeout(
       ensureFirebaseAuthReady(),
       DIRECT_FIREBASE_WRITE_TIMEOUT_MS,
@@ -1679,6 +1781,24 @@ async function hydrateStorageKeyFromFirebaseInternal(key: string) {
     markSyncHealthy(key);
   } catch (error) {
     console.error(`Firebase direct hydrate failed for ${key}`, error);
+    if (key === "orange-hotel-kitchen-state") {
+      try {
+        const remoteValue = sanitizeForStorage(sanitizeSyncedValue(key, await readKitchenRestValue(key)));
+        const localValue = getLocalSyncedValue(key);
+        const committed = hasPendingSyncMarker(key) && localValue !== null
+          ? await transactSyncedStorageValue(key, (current: unknown) =>
+            sanitizeForStorage(sanitizeSyncedValue(key, protectSyncedValueBeforeWrite(key, localValue, current))))
+          : remoteValue;
+        applyHydratedValue(committed ?? getCanonicalDefaultValue(key));
+        clearPendingSync(key);
+        delete _pendingLocalWrites[key];
+        markSyncHealthy(key);
+      } catch (restError) {
+        emitConnectionState(false);
+        console.error("Kitchen HTTPS hydrate failed", restError);
+      }
+      return;
+    }
     if (!SERVER_SYNC_FALLBACK_ENABLED) {
       emitConnectionState(false);
       return;
@@ -1770,7 +1890,19 @@ export function subscribeToSyncedStorageKey<T>(key: string, onChange: (value: T 
   const pollServerSnapshot = async () => {
     if (document.visibilityState !== "visible" || !window.navigator.onLine) return;
     try {
-      const remoteValue = sanitizeForStorage(sanitizeSyncedValue(key, await fetchServerSyncedStorageValue<T>(key)));
+      if (key === "orange-hotel-kitchen-state") await recoverRecentKitchenPosSales();
+      if (key === "orange-hotel-kitchen-state" && hasPendingSyncMarker(key)) {
+        const localValue = getLocalSyncedValue(key);
+        if (localValue !== null) {
+          const committed = await transactSyncedStorageValue<T>(key, (current) =>
+            sanitizeForStorage(sanitizeSyncedValue(key, protectSyncedValueBeforeWrite(key, localValue, current))) as T);
+          onChange(committed);
+          return;
+        }
+      }
+      const remoteValue = sanitizeForStorage(sanitizeSyncedValue(key, key === "orange-hotel-kitchen-state"
+        ? await readKitchenRestValue<T>(key)
+        : await fetchServerSyncedStorageValue<T>(key)));
       if (remoteValue === null) return;
       if (shouldIgnoreRemoteValue(key, remoteValue)) return;
       const nextValue = sanitizeForStorage(sanitizeSyncedValue(key, mergeRemoteValueForLocalApply(key, remoteValue)));
@@ -1781,7 +1913,7 @@ export function subscribeToSyncedStorageKey<T>(key: string, onChange: (value: T 
         dispatchStorageUpdated(key);
         onChange(nextValue as T);
       }
-      if (!areSnapshotsEqual(remoteValue, nextValue)) {
+      if (key !== "orange-hotel-kitchen-state" && !areSnapshotsEqual(remoteValue, nextValue)) {
         await writeServerSyncedStorageValue(key, nextValue).catch(() => undefined);
       }
       markSyncHealthy(key);
@@ -1791,11 +1923,11 @@ export function subscribeToSyncedStorageKey<T>(key: string, onChange: (value: T 
   };
 
   const ensureFallbackPolling = () => {
-    if (!SERVER_SYNC_FALLBACK_ENABLED || pollTimer !== null || isDisposed) return;
+    if ((key !== "orange-hotel-kitchen-state" && !SERVER_SYNC_FALLBACK_ENABLED) || pollTimer !== null || isDisposed) return;
     void pollServerSnapshot();
     pollTimer = window.setInterval(() => {
       void pollServerSnapshot();
-    }, 120000);
+    }, key === "orange-hotel-kitchen-state" ? 30000 : 120000);
   };
 
   const resumeFallbackPolling = () => {
@@ -1811,6 +1943,7 @@ export function subscribeToSyncedStorageKey<T>(key: string, onChange: (value: T 
 
   window.addEventListener("online", resumeFallbackPolling);
   document.addEventListener("visibilitychange", resumeFallbackPolling);
+  if (key === "orange-hotel-kitchen-state") ensureFallbackPolling();
 
   // Every subscriber must reconcile durable offline writes. Previously only a
   // few pages explicitly hydrated, so a marker left by a failed write could
@@ -1844,7 +1977,7 @@ export function subscribeToSyncedStorageKey<T>(key: string, onChange: (value: T 
               dispatchStorageUpdated(key);
               onChange(fallbackValue);
               markSyncHealthy(key);
-              stopFallbackPolling();
+              if (key !== "orange-hotel-kitchen-state") stopFallbackPolling();
               return;
             }
             readSnapshotValue<T>(key, null, onChange);
@@ -1861,7 +1994,7 @@ export function subscribeToSyncedStorageKey<T>(key: string, onChange: (value: T 
             void reconcileStorageValueInFirebase(key, mergedValue).catch(() => undefined);
           }
           markSyncHealthy(key);
-          stopFallbackPolling();
+          if (key !== "orange-hotel-kitchen-state") stopFallbackPolling();
         },
         (error) => {
           emitConnectionState(false);
@@ -1883,7 +2016,7 @@ export function subscribeToSyncedStorageKey<T>(key: string, onChange: (value: T 
     window.removeEventListener("online", resumeFallbackPolling);
     document.removeEventListener("visibilitychange", resumeFallbackPolling);
     firebaseUnsubscribe();
-    stopFallbackPolling();
+          if (key !== "orange-hotel-kitchen-state") stopFallbackPolling();
     if (pendingReconcileTimer !== null) window.clearInterval(pendingReconcileTimer);
   };
 }
