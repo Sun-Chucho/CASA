@@ -28,18 +28,33 @@ const DEFAULT_OPTIONS: ConfirmOptions = {
 
 export function useConfirmDialog() {
   const resolverRef = useRef<((value: boolean) => void) | null>(null);
+  const closingValueRef = useRef<boolean | null>(null);
   const [open, setOpen] = useState(false);
   const [options, setOptions] = useState<ConfirmOptions>(DEFAULT_OPTIONS);
 
   const closeWithValue = (value: boolean) => {
-    resolverRef.current?.(value);
-    resolverRef.current = null;
+    if (!resolverRef.current || closingValueRef.current !== null) return;
+    closingValueRef.current = value;
     setOpen(false);
+  };
+
+  const finishClose = () => {
+    const resolve = resolverRef.current;
+    if (!resolve) return;
+    resolverRef.current = null;
+    const value = closingValueRef.current ?? false;
+    closingValueRef.current = null;
+    resolve(value);
   };
 
   const confirm = (nextOptions: ConfirmOptions) =>
     new Promise<boolean>((resolve) => {
+      if (resolverRef.current) {
+        resolve(false);
+        return;
+      }
       resolverRef.current = resolve;
+      closingValueRef.current = null;
       setOptions({
         ...DEFAULT_OPTIONS,
         ...nextOptions,
@@ -54,7 +69,7 @@ export function useConfirmDialog() {
         if (!nextOpen && open) closeWithValue(false);
       }}
     >
-      <AlertDialogContent>
+      <AlertDialogContent onCloseAutoFocus={finishClose}>
         <AlertDialogHeader>
           <AlertDialogTitle>{options.title}</AlertDialogTitle>
           <AlertDialogDescription>{options.description}</AlertDialogDescription>
