@@ -313,10 +313,12 @@ export async function recoverPostOpeningBarSales() {
     get(ref(firebaseDatabase, toStoragePath("orange-hotel-barista-state"))),
     get(ref(firebaseDatabase, toStoragePath("orange-hotel-cancelled-tickets"))),
   ]);
-  const cloudIds = new Set(((cloud.val() as { payments?: RecoverableBarPayment[] } | null)?.payments ?? [])
+  const cloudState = cloud.val() as { payments?: RecoverableBarPayment[]; voidedPaymentIds?: string[] } | null;
+  const cloudIds = new Set((cloudState?.payments ?? [])
     .map((payment) => payment.id));
+  const voidedIds = new Set(cloudState?.voidedPaymentIds ?? []);
   const cancelled = (cancelledSnapshot.val() as Array<{ code?: string; ticketId?: string; originalPaymentId?: string }> | null) ?? [];
-  staged = staged.filter((payment) => !cloudIds.has(payment.id) && !cancelled.some((entry) =>
+  staged = staged.filter((payment) => !cloudIds.has(payment.id) && !voidedIds.has(payment.id) && !cancelled.some((entry) =>
     entry.originalPaymentId === payment.id || entry.code === payment.code
     || (typeof entry.ticketId === "string" && entry.ticketId.length > 0 && entry.ticketId === payment.ticketId)));
   if (staged.length) localStorage.setItem(BAR_POST_OPENING_RECOVERY_KEY, JSON.stringify(staged));
@@ -328,6 +330,7 @@ export async function recoverPostOpeningBarSales() {
     const result = await withTimeout(runTransaction(ref(firebaseDatabase, toStoragePath("orange-hotel-barista-state")), (raw) => {
       const state = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
       const payments = Array.isArray(state.payments) ? state.payments as RecoverableBarPayment[] : [];
+      if (Array.isArray(state.voidedPaymentIds) && state.voidedPaymentIds.includes(payment.id)) return;
       if (payments.some((existing) => existing.id === payment.id)) return;
       if (payments.some((existing) => existing.code === payment.code)) {
         throw new Error(`Bar sale code ${payment.code} conflicts with a different cloud sale. Recovery is paused.`);
@@ -1012,8 +1015,8 @@ function mergeArrayRecordsForSync(localValue: unknown, remoteValue: unknown) {
 }
 
 function mergePosStateForSync(localValue: unknown, remoteValue: unknown) {
-  const localSnapshot = localValue as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[] };
-  const remoteSnapshot = remoteValue as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[] };
+  const localSnapshot = localValue as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[]; voidedPaymentIds?: string[] };
+  const remoteSnapshot = remoteValue as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[]; voidedPaymentIds?: string[] };
 
   if (!localSnapshot || typeof localSnapshot !== "object" || !remoteSnapshot || typeof remoteSnapshot !== "object") {
     return localValue;
@@ -1025,12 +1028,15 @@ function mergePosStateForSync(localValue: unknown, remoteValue: unknown) {
   const remotePayments = Array.isArray(remoteSnapshot.payments) ? remoteSnapshot.payments : [];
   const localMenuItems = Array.isArray(localSnapshot.menuItems) ? localSnapshot.menuItems : [];
   const remoteMenuItems = Array.isArray(remoteSnapshot.menuItems) ? remoteSnapshot.menuItems : [];
+  const voidedPaymentIds = [...new Set([...(remoteSnapshot.voidedPaymentIds ?? []), ...(localSnapshot.voidedPaymentIds ?? [])])];
 
   return {
     ...localSnapshot,
     tickets: mergeRecordsById(localTickets, remoteTickets),
-    payments: mergeRecordsById(localPayments, remotePayments),
+    payments: mergeRecordsById(localPayments, remotePayments).filter((payment) =>
+      !voidedPaymentIds.includes((payment as { id?: string }).id ?? "")),
     menuItems: mergeRecordsById(localMenuItems, remoteMenuItems),
+    ...(voidedPaymentIds.length > 0 ? { voidedPaymentIds } : {}),
     ticketSeq: Math.max(
       Number.isFinite(localSnapshot.ticketSeq) ? Number(localSnapshot.ticketSeq) : 0,
       Number.isFinite(remoteSnapshot.ticketSeq) ? Number(remoteSnapshot.ticketSeq) : 0,
@@ -1058,8 +1064,8 @@ function mergeCashierStateForRemoteApply(localValue: unknown, remoteValue: unkno
 }
 
 function mergePosStateForRemoteApply(localValue: unknown, remoteValue: unknown) {
-  const localSnapshot = localValue as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[] };
-  const remoteSnapshot = remoteValue as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[] };
+  const localSnapshot = localValue as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[]; voidedPaymentIds?: string[] };
+  const remoteSnapshot = remoteValue as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[]; voidedPaymentIds?: string[] };
 
   if (!localSnapshot || typeof localSnapshot !== "object" || !remoteSnapshot || typeof remoteSnapshot !== "object") {
     return remoteValue;
@@ -1071,13 +1077,16 @@ function mergePosStateForRemoteApply(localValue: unknown, remoteValue: unknown) 
   const remotePayments = Array.isArray(remoteSnapshot.payments) ? remoteSnapshot.payments : [];
   const localMenuItems = Array.isArray(localSnapshot.menuItems) ? localSnapshot.menuItems : [];
   const remoteMenuItems = Array.isArray(remoteSnapshot.menuItems) ? remoteSnapshot.menuItems : [];
+  const voidedPaymentIds = [...new Set([...(remoteSnapshot.voidedPaymentIds ?? []), ...(localSnapshot.voidedPaymentIds ?? [])])];
 
   return {
     ...localSnapshot,
     ...remoteSnapshot,
     tickets: mergeRecordsByIdWithRemoteWins(localTickets, remoteTickets),
-    payments: mergeRecordsByIdWithRemoteWins(localPayments, remotePayments),
+    payments: mergeRecordsByIdWithRemoteWins(localPayments, remotePayments).filter((payment) =>
+      !voidedPaymentIds.includes((payment as { id?: string }).id ?? "")),
     menuItems: mergeRecordsByIdWithRemoteWins(localMenuItems, remoteMenuItems),
+    ...(voidedPaymentIds.length > 0 ? { voidedPaymentIds } : {}),
     ticketSeq: Math.max(
       Number.isFinite(localSnapshot.ticketSeq) ? Number(localSnapshot.ticketSeq) : 0,
       Number.isFinite(remoteSnapshot.ticketSeq) ? Number(remoteSnapshot.ticketSeq) : 0,
