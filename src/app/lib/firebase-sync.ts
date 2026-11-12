@@ -330,6 +330,12 @@ type RecoverableKitchenSale = {
   ticket?: { id: string; code: string; [key: string]: unknown };
 };
 
+function kitchenRecordTime(value: unknown): number {
+  if (!value || typeof value !== "object") return 0;
+  const record = value as { createdAt?: unknown; recordedAt?: unknown; historical?: unknown };
+  return Number(record.historical ? record.recordedAt ?? record.createdAt : record.createdAt) || 0;
+}
+
 function isRecoverableKitchenPayment(value: unknown): value is RecoverableKitchenSale["payment"] {
   if (!value || typeof value !== "object") return false;
   const payment = value as Partial<RecoverableKitchenSale["payment"]>;
@@ -398,6 +404,7 @@ export async function recoverRecentKitchenPosSales() {
   const stateKey = "orange-hotel-kitchen-state";
   const state = await transactSyncedStorageValue<Record<string, unknown>>(stateKey, (raw) => {
     const current = raw && typeof raw === "object" ? raw : {};
+    const salesResetAt = Number(current.salesResetAt) || 0;
     const payments = Array.isArray(current.payments) ? [...current.payments as RecoverableKitchenSale["payment"][]] : [];
     const tickets = Array.isArray(current.tickets) ? [...current.tickets as NonNullable<RecoverableKitchenSale["ticket"]>[]] : [];
     const voidedPaymentIds = new Set(Array.isArray(current.voidedPaymentIds) ? current.voidedPaymentIds as string[] : []);
@@ -408,6 +415,7 @@ export async function recoverRecentKitchenPosSales() {
     let ticketSeq = Math.max(0, Number(current.ticketSeq) || 0,
       ...payments.map((payment) => Number(payment.code?.match(/^K-(?:H-)?(\d+)$/)?.[1]) || 0));
     for (const sale of [...staged].sort((a, b) => a.payment.createdAt - b.payment.createdAt)) {
+      if (kitchenRecordTime(sale.payment) <= salesResetAt) continue;
       if (paymentIds.has(sale.payment.id) || voidedPaymentIds.has(sale.payment.id)) continue;
       const requestedSeq = Number(sale.payment.code.match(/^K-(?:H-)?(\d+)$/)?.[1]) || 0;
       let code = sale.payment.code;
@@ -428,10 +436,11 @@ export async function recoverRecentKitchenPosSales() {
     }
     return { ...current, ticketSeq, payments, tickets };
   });
-  const acknowledged = state as { payments?: RecoverableKitchenSale["payment"][]; voidedPaymentIds?: string[] };
+  const acknowledged = state as { payments?: RecoverableKitchenSale["payment"][]; voidedPaymentIds?: string[]; salesResetAt?: number };
   const paymentIds = new Set(acknowledged.payments?.map((payment) => payment.id) ?? []);
   const voidedPaymentIds = new Set(acknowledged.voidedPaymentIds ?? []);
-  staged = staged.filter((sale) => !paymentIds.has(sale.payment.id) && !voidedPaymentIds.has(sale.payment.id));
+  staged = staged.filter((sale) => kitchenRecordTime(sale.payment) > (Number(acknowledged.salesResetAt) || 0)
+    && !paymentIds.has(sale.payment.id) && !voidedPaymentIds.has(sale.payment.id));
   if (staged.length) {
     localStorage.setItem(KITCHEN_POS_RECOVERY_KEY, JSON.stringify(staged));
     throw new Error("Some Kitchen sales were not acknowledged by Firebase.");
@@ -583,6 +592,22 @@ function toStoragePath(key: string) {
 
 export function getUnifiedLocalKey(baseKey: string): string {
   return `${CASA_LOCAL_STORAGE_PREFIX}${baseKey}`;
+}
+
+// Drop pre-reset kitchen snapshots before any recovery or pending sync can stage them.
+export function clearFreshKitchenSalesCacheOnce() {
+  if (typeof window === "undefined") return;
+  const marker = `${CASA_LOCAL_STORAGE_PREFIX}kitchen-sales-reset-2026-11-12-v1`;
+  if (localStorage.getItem(marker) === "1") return;
+  for (const key of ["orange-hotel-kitchen-state", "orange-hotel-kitchen-tickets",
+    "orange-hotel-kitchen-seq", "orange-hotel-kitchen-payments", KITCHEN_POS_RECOVERY_KEY]) {
+    localStorage.removeItem(key);
+    if (key !== KITCHEN_POS_RECOVERY_KEY) {
+      localStorage.removeItem(getUnifiedLocalKey(key));
+      localStorage.removeItem(getPendingSyncMarkerKey(key));
+    }
+  }
+  localStorage.setItem(marker, "1");
 }
 
 // Clear snapshots from browsers that were used before the kitchen/bar reset.
@@ -843,22 +868,25 @@ function sanitizeSyncedValue<T>(key: string, value: T): T {
     menuItems?: unknown[];
     voidedPaymentIds?: string[];
     voidedTicketIds?: string[];
+    salesResetAt?: number;
   };
 
   const voidedPaymentIds = Array.isArray(snapshot.voidedPaymentIds) ? snapshot.voidedPaymentIds : [];
   const voidedTicketIds = Array.isArray(snapshot.voidedTicketIds) ? snapshot.voidedTicketIds : [];
+  const salesResetAt = Number(snapshot.salesResetAt) || 0;
 
   return {
     tickets: Array.isArray(snapshot.tickets) ? snapshot.tickets.filter((ticket) =>
-      !voidedTicketIds.includes((ticket as { id?: string }).id ?? "")) : [],
+      !voidedTicketIds.includes((ticket as { id?: string }).id ?? "") && (!salesResetAt || kitchenRecordTime(ticket) > salesResetAt)) : [],
     ticketSeq: Number.isFinite(snapshot.ticketSeq) ? Number(snapshot.ticketSeq) : 0,
     payments: Array.isArray(snapshot.payments) ? snapshot.payments.filter((payment) =>
-      !voidedPaymentIds.includes((payment as { id?: string }).id ?? "")) : [],
+      !voidedPaymentIds.includes((payment as { id?: string }).id ?? "") && (!salesResetAt || kitchenRecordTime(payment) > salesResetAt)) : [],
     menuItems: mergeKitchenMenuItems(
       (Array.isArray(snapshot.menuItems) ? snapshot.menuItems : []) as KitchenMenuItem[],
     ),
     ...(voidedPaymentIds.length > 0 ? { voidedPaymentIds } : {}),
     ...(voidedTicketIds.length > 0 ? { voidedTicketIds } : {}),
+    ...(salesResetAt > 0 ? { salesResetAt } : {}),
   } as T;
 }
 
@@ -1227,8 +1255,8 @@ function mergeArrayRecordsForSync(localValue: unknown, remoteValue: unknown) {
 }
 
 function mergePosStateForSync(localValue: unknown, remoteValue: unknown) {
-  const localSnapshot = localValue as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[]; voidedPaymentIds?: string[]; voidedTicketIds?: string[] };
-  const remoteSnapshot = remoteValue as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[]; voidedPaymentIds?: string[]; voidedTicketIds?: string[] };
+  const localSnapshot = localValue as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[]; voidedPaymentIds?: string[]; voidedTicketIds?: string[]; salesResetAt?: number };
+  const remoteSnapshot = remoteValue as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[]; voidedPaymentIds?: string[]; voidedTicketIds?: string[]; salesResetAt?: number };
 
   if (!localSnapshot || typeof localSnapshot !== "object" || !remoteSnapshot || typeof remoteSnapshot !== "object") {
     return localValue;
@@ -1242,19 +1270,21 @@ function mergePosStateForSync(localValue: unknown, remoteValue: unknown) {
   const remoteMenuItems = Array.isArray(remoteSnapshot.menuItems) ? remoteSnapshot.menuItems : [];
   const voidedPaymentIds = [...new Set([...(remoteSnapshot.voidedPaymentIds ?? []), ...(localSnapshot.voidedPaymentIds ?? [])])];
   const voidedTicketIds = [...new Set([...(remoteSnapshot.voidedTicketIds ?? []), ...(localSnapshot.voidedTicketIds ?? [])])];
+  const salesResetAt = Math.max(Number(localSnapshot.salesResetAt) || 0, Number(remoteSnapshot.salesResetAt) || 0);
 
   return {
     ...localSnapshot,
     tickets: mergeRecordsById(localTickets, remoteTickets).filter((ticket) =>
-      !voidedTicketIds.includes((ticket as { id?: string }).id ?? "")),
+      !voidedTicketIds.includes((ticket as { id?: string }).id ?? "") && (!salesResetAt || kitchenRecordTime(ticket) > salesResetAt)),
     payments: mergeRecordsById(localPayments, remotePayments).filter((payment) =>
-      !voidedPaymentIds.includes((payment as { id?: string }).id ?? "")),
+      !voidedPaymentIds.includes((payment as { id?: string }).id ?? "") && (!salesResetAt || kitchenRecordTime(payment) > salesResetAt)),
     menuItems: mergeRecordsById(localMenuItems, remoteMenuItems),
     ...(voidedPaymentIds.length > 0 ? { voidedPaymentIds } : {}),
     ...(voidedTicketIds.length > 0 ? { voidedTicketIds } : {}),
+    ...(salesResetAt > 0 ? { salesResetAt } : {}),
     ticketSeq: Math.max(
-      Number.isFinite(localSnapshot.ticketSeq) ? Number(localSnapshot.ticketSeq) : 0,
-      Number.isFinite(remoteSnapshot.ticketSeq) ? Number(remoteSnapshot.ticketSeq) : 0,
+      (Number(localSnapshot.salesResetAt) || 0) === salesResetAt ? Number(localSnapshot.ticketSeq) || 0 : 0,
+      (Number(remoteSnapshot.salesResetAt) || 0) === salesResetAt ? Number(remoteSnapshot.ticketSeq) || 0 : 0,
     ),
   };
 }
@@ -1279,8 +1309,8 @@ function mergeCashierStateForRemoteApply(localValue: unknown, remoteValue: unkno
 }
 
 function mergePosStateForRemoteApply(localValue: unknown, remoteValue: unknown) {
-  const localSnapshot = localValue as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[]; voidedPaymentIds?: string[]; voidedTicketIds?: string[] };
-  const remoteSnapshot = remoteValue as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[]; voidedPaymentIds?: string[]; voidedTicketIds?: string[] };
+  const localSnapshot = localValue as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[]; voidedPaymentIds?: string[]; voidedTicketIds?: string[]; salesResetAt?: number };
+  const remoteSnapshot = remoteValue as { tickets?: unknown[]; ticketSeq?: number; payments?: unknown[]; menuItems?: unknown[]; voidedPaymentIds?: string[]; voidedTicketIds?: string[]; salesResetAt?: number };
 
   if (!localSnapshot || typeof localSnapshot !== "object" || !remoteSnapshot || typeof remoteSnapshot !== "object") {
     return remoteValue;
@@ -1294,20 +1324,22 @@ function mergePosStateForRemoteApply(localValue: unknown, remoteValue: unknown) 
   const remoteMenuItems = Array.isArray(remoteSnapshot.menuItems) ? remoteSnapshot.menuItems : [];
   const voidedPaymentIds = [...new Set([...(remoteSnapshot.voidedPaymentIds ?? []), ...(localSnapshot.voidedPaymentIds ?? [])])];
   const voidedTicketIds = [...new Set([...(remoteSnapshot.voidedTicketIds ?? []), ...(localSnapshot.voidedTicketIds ?? [])])];
+  const salesResetAt = Math.max(Number(localSnapshot.salesResetAt) || 0, Number(remoteSnapshot.salesResetAt) || 0);
 
   return {
     ...localSnapshot,
     ...remoteSnapshot,
     tickets: mergeRecordsByIdWithRemoteWins(localTickets, remoteTickets).filter((ticket) =>
-      !voidedTicketIds.includes((ticket as { id?: string }).id ?? "")),
+      !voidedTicketIds.includes((ticket as { id?: string }).id ?? "") && (!salesResetAt || kitchenRecordTime(ticket) > salesResetAt)),
     payments: mergeRecordsByIdWithRemoteWins(localPayments, remotePayments).filter((payment) =>
-      !voidedPaymentIds.includes((payment as { id?: string }).id ?? "")),
+      !voidedPaymentIds.includes((payment as { id?: string }).id ?? "") && (!salesResetAt || kitchenRecordTime(payment) > salesResetAt)),
     menuItems: mergeRecordsByIdWithRemoteWins(localMenuItems, remoteMenuItems),
     ...(voidedPaymentIds.length > 0 ? { voidedPaymentIds } : {}),
     ...(voidedTicketIds.length > 0 ? { voidedTicketIds } : {}),
+    ...(salesResetAt > 0 ? { salesResetAt } : {}),
     ticketSeq: Math.max(
-      Number.isFinite(localSnapshot.ticketSeq) ? Number(localSnapshot.ticketSeq) : 0,
-      Number.isFinite(remoteSnapshot.ticketSeq) ? Number(remoteSnapshot.ticketSeq) : 0,
+      (Number(localSnapshot.salesResetAt) || 0) === salesResetAt ? Number(localSnapshot.ticketSeq) || 0 : 0,
+      (Number(remoteSnapshot.salesResetAt) || 0) === salesResetAt ? Number(remoteSnapshot.ticketSeq) || 0 : 0,
     ),
   };
 }

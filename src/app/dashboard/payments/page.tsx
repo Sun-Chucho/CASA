@@ -322,8 +322,7 @@ export default function PaymentsPage() {
 
   const breakfastRows = useMemo<PaymentRow[]>(() => breakfast.filter((entry) => entry.count > 0).flatMap((entry) => {
     const booking = bookingTransactions.find((tx) => tx.id === entry.bookingId);
-    if (!booking || booking.status === "credit") return [];
-    return [{ source: "breakfast" as const, id: entry.id, ref: booking.receiptNo, payer: entry.guestName, context: `${entry.count} breakfast guest${entry.count === 1 ? "" : "s"}`, roomNumber: entry.roomNumber, dateLabel: entry.date, method: booking.payment, amount: entry.count * BREAKFAST_PRICE, createdAt: new Date(`${entry.date}T10:00:00`).getTime(), updatedAt: entry.updatedAt, status: "completed" as const }];
+    return [{ source: "breakfast" as const, id: entry.id, ref: booking?.receiptNo ?? `Breakfast ${entry.date}`, payer: entry.guestName, context: `${entry.count} breakfast guest${entry.count === 1 ? "" : "s"}`, roomNumber: entry.roomNumber, dateLabel: entry.date, method: booking?.payment ?? "booking", amount: entry.count * BREAKFAST_PRICE, createdAt: new Date(`${entry.date}T10:00:00`).getTime(), updatedAt: entry.updatedAt, status: booking?.status === "credit" ? "credit" as const : "completed" as const }];
   }), [breakfast, bookingTransactions]);
 
   const kitchenRows = useMemo<PaymentRow[]>(
@@ -531,20 +530,20 @@ export default function PaymentsPage() {
   const canViewAllTabs = role === "manager" || role === "director";
   const headerDescription =
     role === "kitchen"
-      ? "Kitchen payment tracking only"
+      ? "Kitchen and breakfast payment tracking"
       : role === "barista"
       ? "Barista payment tracking only"
       : role === "cashier"
       ? "Reception payment tracking only"
-      : "Reception, kitchen, and barista payment tracking";
+      : "Reception, breakfast, kitchen, and barista payment tracking";
   const cardDescription =
     role === "kitchen"
-      ? "Kitchen payments only"
+      ? "Use tabs to review breakfast and kitchen payments"
       : role === "barista"
       ? "Barista payments only"
       : role === "cashier"
       ? "Reception booking payments only"
-      : "Use tabs to review reception, kitchen, and barista payments";
+      : "Use tabs to review reception, breakfast, kitchen, and barista payments";
 
   return (
     <div className="space-y-6">
@@ -594,19 +593,15 @@ export default function PaymentsPage() {
                   className="h-10 w-full md:w-[160px]"
                 />
               )}
-              {canViewAllTabs && (
+              {(canViewAllTabs || role === "kitchen") && (
                 <Tabs value={paymentsTab} onValueChange={(value) => setPaymentsTab(value as PaymentsTab)} className="w-full md:w-auto">
                   <TabsList className="h-10 w-full md:w-auto">
-                    <TabsTrigger value="reception" className="text-[10px] font-black uppercase tracking-widest">
-                      Reception
-                    </TabsTrigger>
+                    {canViewAllTabs && <TabsTrigger value="reception" className="text-[10px] font-black uppercase tracking-widest">Reception</TabsTrigger>}
                     <TabsTrigger value="breakfast" className="text-[10px] font-black uppercase tracking-widest">Breakfast</TabsTrigger>
                     <TabsTrigger value="kitchen" className="text-[10px] font-black uppercase tracking-widest">
                       Kitchen
                     </TabsTrigger>
-                    <TabsTrigger value="barista" className="text-[10px] font-black uppercase tracking-widest">
-                      Barista
-                    </TabsTrigger>
+                    {canViewAllTabs && <TabsTrigger value="barista" className="text-[10px] font-black uppercase tracking-widest">Barista</TabsTrigger>}
                   </TabsList>
                 </Tabs>
               )}
