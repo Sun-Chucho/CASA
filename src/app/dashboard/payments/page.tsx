@@ -16,6 +16,7 @@ import { Receipt } from "lucide-react";
 import { useIsDirector } from "@/hooks/use-is-director";
 import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
 import { bookingChargeDays } from "@/app/lib/booking-stay";
+import { barSaleBusinessDate } from "@/app/lib/bar-sale-date";
 
 type PaymentsTab = "reception" | "breakfast" | "kitchen" | "barista";
 type PaymentDateFilter = "all" | "date";
@@ -76,6 +77,7 @@ interface BaristaPaymentRecord {
   ticketId: string;
   code: string;
   createdAt: number;
+  businessDate?: string;
   mode: "restaurant" | "room-service" | "take-away";
   destination: string;
   roomNumber?: string;
@@ -99,6 +101,7 @@ interface PaymentRow {
   method: string;
   amount: number;
   createdAt: number;
+  businessDate?: string;
   updatedAt?: number;
   status: "completed" | "credit";
 }
@@ -154,12 +157,9 @@ function getUpdatedPaymentDetail(createdAt: number, updatedAt?: number) {
   return `Updated ${new Date(revision).toLocaleString()}`;
 }
 
-function matchesPaymentDateFilter(createdAt: number, filter: PaymentDateFilter, selectedDate: string) {
+function matchesPaymentDateFilter(row: PaymentRow, filter: PaymentDateFilter, selectedDate: string) {
   if (filter === "all") return true;
-
-  const createdDate = new Date(createdAt);
-  if (!Number.isFinite(createdDate.getTime())) return false;
-  return Boolean(selectedDate) && toDayKey(createdDate.getTime()) === selectedDate;
+  return Boolean(selectedDate) && (row.businessDate || toDayKey(row.createdAt)) === selectedDate;
 }
 
 function normalizeReceiptNo(value: string) {
@@ -354,11 +354,14 @@ export default function PaymentsPage() {
         payer: "Barista Order",
         context: formatPaymentItems(tx.lines) || tx.destination,
         roomNumber: getPosRoomNumber(tx),
-        dateLabel: formatDate(new Date(tx.createdAt).toISOString()),
-        dateDetail: getUpdatedPaymentDetail(tx.createdAt, tx.updatedAt ?? tx.paymentMethodEditedAt),
+        dateLabel: formatDate(`${barSaleBusinessDate(tx)}T12:00:00`),
+        dateDetail: barSaleBusinessDate(tx) !== toDayKey(tx.createdAt)
+          ? `Entered ${formatDate(new Date(tx.createdAt).toISOString())}`
+          : getUpdatedPaymentDetail(tx.createdAt, tx.updatedAt ?? tx.paymentMethodEditedAt),
         method: tx.method,
         amount: asNumber(tx.total),
         createdAt: asNumber(tx.createdAt),
+        businessDate: barSaleBusinessDate(tx),
         updatedAt: asNumber(tx.updatedAt ?? tx.paymentMethodEditedAt) || undefined,
         status: tx.status,
       })),
@@ -523,7 +526,7 @@ export default function PaymentsPage() {
 
   const rows = useMemo(() => {
     return activePaymentRows
-      .filter((row) => matchesPaymentDateFilter(row.createdAt, paymentDateFilter, selectedPaymentDate))
+      .filter((row) => matchesPaymentDateFilter(row, paymentDateFilter, selectedPaymentDate))
       .sort((a, b) => getPaymentRevision(b.createdAt, b.updatedAt) - getPaymentRevision(a.createdAt, a.updatedAt));
   }, [activePaymentRows, paymentDateFilter, selectedPaymentDate]);
 

@@ -62,6 +62,7 @@ type BookingTransaction = {
 
 type PosPaymentRecord = {
   createdAt?: number;
+  businessDate?: string;
   total?: number;
   status?: "completed" | "credit";
 };
@@ -514,7 +515,7 @@ export default function AnalyticsPage() {
     });
     baristaPayments.forEach((payment) => {
       if (payment.status === "credit" || !payment.createdAt || !payment.total) return;
-      if (previousRows.includes(toDayKey(payment.createdAt))) {
+      if (previousRows.includes(barSaleBusinessDate(payment))) {
         previousTotal += payment.total;
       }
     });

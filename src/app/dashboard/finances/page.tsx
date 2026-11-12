@@ -6,6 +6,7 @@ import { ExpenseRecord, STORAGE_EXPENSES, getExpenseDepartmentLabel, normalizeEx
 import { getLaundryBusinessTimestamp, LaundryRecord, STORAGE_LAUNDRY_RECORDS } from "@/app/lib/laundry";
 import { getActiveBaristaStateKey, getActiveKitchenStateKey, readCashierState, readJson, readPosState } from "@/app/lib/storage";
 import { hydrateStorageKeyFromFirebase, subscribeToSyncedStorageKey } from "@/app/lib/firebase-sync";
+import { barSaleBusinessDate } from "@/app/lib/bar-sale-date";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -20,6 +21,7 @@ interface BookingRecord {
 interface PosPaymentRecord {
   total: number;
   createdAt?: number;
+  businessDate?: string;
   status?: "completed" | "credit";
 }
 
@@ -93,7 +95,7 @@ export default function FinancesPage() {
   const totals = useMemo(() => {
     const datedBookings = bookings.filter((item) => matchesSelectedDate(item.createdAt, selectedDate));
     const datedKitchenPayments = kitchenPayments.filter((item) => matchesSelectedDate(item.createdAt, selectedDate));
-    const datedBaristaPayments = baristaPayments.filter((item) => matchesSelectedDate(item.createdAt, selectedDate));
+    const datedBaristaPayments = baristaPayments.filter((item) => !selectedDate || barSaleBusinessDate(item) === selectedDate);
     const datedLaundryRecords = laundryRecords.filter((item) =>
       matchesSelectedDate(getLaundryBusinessTimestamp(item), selectedDate),
     );
