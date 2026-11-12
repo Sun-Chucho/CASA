@@ -1,4 +1,4 @@
-const CACHE_NAME = "cassa-hotel-shell-v4";
+const CACHE_NAME = "cassa-hotel-shell-v5";
 
 async function cacheFirst(request) {
   const cache = await caches.open(CACHE_NAME);
