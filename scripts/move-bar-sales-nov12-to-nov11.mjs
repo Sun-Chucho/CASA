@@ -25,6 +25,20 @@ if (!Array.isArray(state?.payments)) throw new Error("Barista payments missing o
 const businessDate = (sale) => sale.businessDate || (Number.isFinite(sale.createdAt)
   ? new Date(sale.createdAt + 3 * 3600000).toISOString().slice(0, 10) : "");
 const target = state.payments.filter((sale) => businessDate(sale) === "2026-11-12");
+const expectedCodes = new Set(Array.from({ length: 13 }, (_, index) => `B-${638 + index}`));
+if (process.argv.includes("--verify")) {
+  const moved = state.payments.filter((sale) => expectedCodes.has(sale.code));
+  const verified = { sales: moved.length,
+    items: moved.reduce((sum, sale) => sum + (sale.lines?.reduce((count, line) => count + Number(line.qty || 0), 0) ?? 1), 0),
+    paid: moved.filter((sale) => sale.status !== "credit").reduce((sum, sale) => sum + Number(sale.total || 0), 0),
+    credit: moved.filter((sale) => sale.status === "credit").reduce((sum, sale) => sum + Number(sale.total || 0), 0),
+  };
+  if (verified.sales !== 13 || verified.items !== 40 || verified.paid !== 119500 || verified.credit !== 0
+    || moved.some((sale) => businessDate(sale) !== "2026-11-11")
+    || target.some((sale) => expectedCodes.has(sale.code))) throw new Error("Barista date correction is not intact.");
+  console.log(JSON.stringify({ businessDate: "2026-11-11", ...verified, november12MovedReceipts: 0 }));
+  process.exit(0);
+}
 const summary = {
   sales: target.length,
   items: target.reduce((sum, sale) => sum + (sale.lines?.reduce((count, line) => count + Number(line.qty || 0), 0) ?? 1), 0),
@@ -35,7 +49,6 @@ const summary = {
 };
 console.log(JSON.stringify(summary, null, 2));
 if (!process.argv.includes("--apply")) process.exit(0);
-const expectedCodes = new Set(Array.from({ length: 13 }, (_, index) => `B-${638 + index}`));
 if (summary.sales !== 13 || summary.items !== 40 || summary.paid !== 119500 || summary.credit !== 0
   || target.some((sale) => !expectedCodes.has(sale.code) || sale.historical === true
     || sale.businessDate !== "2026-11-12" || !sale.id)

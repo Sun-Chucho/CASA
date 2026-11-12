@@ -637,7 +637,7 @@ export default function PaymentsPage() {
                   </div>
                   <div>
                     <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
-                      {paymentsTab === "reception" ? "Dates" : "Created"}
+                      {paymentsTab === "reception" ? "Dates" : paymentsTab === "barista" ? "Sales Date" : "Created"}
                     </p>
                     <p className="mt-1 font-bold">{tx.dateLabel}</p>
                     {tx.dateDetail && (
@@ -707,7 +707,7 @@ export default function PaymentsPage() {
                 <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Context</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Room Number</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">
-                  {paymentsTab === "reception" ? "Dates" : "Created"}
+                  {paymentsTab === "reception" ? "Dates" : paymentsTab === "barista" ? "Sales Date" : "Created"}
                 </TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Method</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest h-12">Amount</TableHead>
