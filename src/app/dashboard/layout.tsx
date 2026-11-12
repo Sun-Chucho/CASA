@@ -1116,9 +1116,11 @@ export default function DashboardLayout({
         setSidebarOpen(window.innerWidth >= 768);
       }
       try {
-        await recoverPostOpeningBarSales();
-        await recoverRecentKitchenPosSales();
-        await reverseVerifiedBh491BarSale();
+        const recoveryResults = await Promise.allSettled([recoverRecentKitchenPosSales(), recoverPostOpeningBarSales()]);
+        recoveryResults.forEach((result, index) => {
+          if (result.status === "rejected") console.error(`${index === 0 ? "Kitchen" : "Bar"} POS recovery failed`, result.reason);
+        });
+        await reverseVerifiedBh491BarSale().catch((error) => console.error("Bar sale correction failed", error));
         await hydrateStartupStateForRole(savedRole);
         if (cancelled) return;
         applyBusinessCorrections();
@@ -1135,6 +1137,35 @@ export default function DashboardLayout({
       cancelled = true;
     };
   }, [router]);
+
+  useEffect(() => {
+    let recovering = false;
+    const retryPendingPosSales = async () => {
+      if (recovering || !navigator.onLine || document.visibilityState !== "visible") return;
+      const kitchenPending = localStorage.getItem("casa-v2:kitchen-pos-sales-recovery-nov-2026-v1");
+      const barPending = localStorage.getItem("casa-v2:bar-post-opening-sales-recovery-v1");
+      if (!kitchenPending && !barPending) return;
+      recovering = true;
+      try {
+        const results = await Promise.allSettled([
+          ...(kitchenPending ? [recoverRecentKitchenPosSales()] : []),
+          ...(barPending ? [recoverPostOpeningBarSales()] : []),
+        ]);
+        results.forEach((result) => { if (result.status === "rejected") console.error("Pending POS recovery failed", result.reason); });
+      } finally {
+        recovering = false;
+      }
+    };
+    const onVisibilityChange = () => { if (document.visibilityState === "visible") void retryPendingPosSales(); };
+    window.addEventListener("online", retryPendingPosSales);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    const timer = window.setInterval(() => void retryPendingPosSales(), 30000);
+    return () => {
+      window.removeEventListener("online", retryPendingPosSales);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     const checkForUpdate = () => {

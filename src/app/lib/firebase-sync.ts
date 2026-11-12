@@ -241,40 +241,40 @@ async function getKitchenRestToken() {
   return session.idToken;
 }
 
-async function kitchenRestRequest(key: string, init: RequestInit = {}) {
+async function posRestRequest(key: string, init: RequestInit = {}) {
   const token = await getKitchenRestToken();
   const base = firebaseConfig.databaseURL.replace(/\/+$/, "");
   const url = `${base}/${toStoragePath(key)}.json?auth=${encodeURIComponent(token)}`;
   const response = await withTimeout(fetch(url, { ...init, cache: "no-store" }),
-    DIRECT_FIREBASE_WRITE_TIMEOUT_MS, `Kitchen database request timed out for ${key}`);
+    DIRECT_FIREBASE_WRITE_TIMEOUT_MS, `POS database request timed out for ${key}`);
   if (response.status === 401 || response.status === 403) kitchenRestSession = null;
   return response;
 }
 
-async function readKitchenRestValue<T>(key: string): Promise<T | null> {
-  const response = await kitchenRestRequest(key);
-  if (!response.ok) throw new Error(`Kitchen database read failed (${response.status})`);
+async function readPosRestValue<T>(key: string): Promise<T | null> {
+  const response = await posRestRequest(key);
+  if (!response.ok) throw new Error(`POS database read failed (${response.status})`);
   return await response.json() as T | null;
 }
 
-async function transactKitchenRestValue<T>(key: string, updater: (current: T | null) => T | undefined): Promise<T> {
+async function transactPosRestValue<T>(key: string, updater: (current: T | null) => T | undefined): Promise<T> {
   for (let attempt = 0; attempt < 6; attempt += 1) {
-    const currentResponse = await kitchenRestRequest(key, { headers: { "X-Firebase-ETag": "true" } });
-    if (!currentResponse.ok) throw new Error(`Kitchen database read failed (${currentResponse.status})`);
+    const currentResponse = await posRestRequest(key, { headers: { "X-Firebase-ETag": "true" } });
+    if (!currentResponse.ok) throw new Error(`POS database read failed (${currentResponse.status})`);
     const etag = currentResponse.headers.get("etag");
-    if (!etag) throw new Error("Kitchen database did not provide a revision token.");
+    if (!etag) throw new Error("POS database did not provide a revision token.");
     const current = await currentResponse.json() as T | null;
     const next = updater(current);
-    if (next === undefined) throw new Error("Kitchen sale was cancelled before saving.");
-    const response = await kitchenRestRequest(key, {
+    if (next === undefined) throw new Error("POS sale was cancelled before saving.");
+    const response = await posRestRequest(key, {
       method: "PUT", headers: { "Content-Type": "application/json", "if-match": etag },
       body: JSON.stringify(sanitizeForStorage(next)),
     });
     if (response.status === 412) continue;
-    if (!response.ok) throw new Error(`Kitchen database save failed (${response.status})`);
+    if (!response.ok) throw new Error(`POS database save failed (${response.status})`);
     return await response.json() as T;
   }
-  throw new Error("Kitchen database changed during saving. Please retry.");
+  throw new Error("POS database changed during saving. Please retry.");
 }
 
 if (typeof window !== "undefined") {
@@ -482,18 +482,15 @@ export async function recoverPostOpeningBarSales() {
       .filter(isPostOpeningBarPayment);
   } catch { return; }
   if (staged.length === 0) return;
-  await withTimeout(ensureFirebaseAuthReady(), DIRECT_FIREBASE_WRITE_TIMEOUT_MS, "Bar sales recovery authentication timed out");
-  const [cloud, cancelledSnapshot] = await Promise.all([
-    get(ref(firebaseDatabase, toStoragePath("orange-hotel-barista-state"))),
-    get(ref(firebaseDatabase, toStoragePath("orange-hotel-cancelled-tickets"))),
+  const [cloudState, cancelled] = await Promise.all([
+    readPosRestValue<{ payments?: RecoverableBarPayment[]; voidedPaymentIds?: string[] }>("orange-hotel-barista-state"),
+    readPosRestValue<Array<{ code?: string; ticketId?: string; originalPaymentId?: string }>>("orange-hotel-cancelled-tickets"),
   ]);
-  const cloudState = cloud.val() as { payments?: RecoverableBarPayment[]; voidedPaymentIds?: string[] } | null;
   const cloudIds = new Set((cloudState?.payments ?? [])
     .map((payment) => payment.id));
   const voidedIds = new Set(cloudState?.voidedPaymentIds ?? []);
-  const cancelled = (cancelledSnapshot.val() as Array<{ code?: string; ticketId?: string; originalPaymentId?: string }> | null) ?? [];
-  staged = staged.filter((payment) => !cloudIds.has(payment.id) && !voidedIds.has(payment.id) && !cancelled.some((entry) =>
-    entry.originalPaymentId === payment.id || entry.code === payment.code
+  staged = staged.filter((payment) => !cloudIds.has(payment.id) && !voidedIds.has(payment.id) && !(cancelled ?? []).some((entry) =>
+    entry.originalPaymentId === payment.id
     || (typeof entry.ticketId === "string" && entry.ticketId.length > 0 && entry.ticketId === payment.ticketId)));
   if (staged.length) localStorage.setItem(BAR_POST_OPENING_RECOVERY_KEY, JSON.stringify(staged));
   else {
@@ -501,19 +498,26 @@ export async function recoverPostOpeningBarSales() {
     return;
   }
   for (const payment of staged.sort((a, b) => a.createdAt - b.createdAt)) {
-    const result = await withTimeout(runTransaction(ref(firebaseDatabase, toStoragePath("orange-hotel-barista-state")), (raw) => {
-      const state = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+    const committed = await transactSyncedStorageValue<Record<string, unknown>>("orange-hotel-barista-state", (raw) => {
+      const state = raw && typeof raw === "object" ? raw : {};
       const payments = Array.isArray(state.payments) ? state.payments as RecoverableBarPayment[] : [];
-      if (Array.isArray(state.voidedPaymentIds) && state.voidedPaymentIds.includes(payment.id)) return;
-      if (payments.some((existing) => existing.id === payment.id)) return;
-      if (payments.some((existing) => existing.code === payment.code)) {
-        throw new Error(`Bar sale code ${payment.code} conflicts with a different cloud sale. Recovery is paused.`);
+      if (Array.isArray(state.voidedPaymentIds) && state.voidedPaymentIds.includes(payment.id)) return state;
+      if (payments.some((existing) => existing.id === payment.id)) return state;
+      const codes = new Set(payments.map((existing) => existing.code));
+      let ticketSeq = Math.max(490, Number(state.ticketSeq) || 490,
+        ...payments.map((existing) => Number(existing.code?.match(/^B-(?:H-)?(\d+)$/)?.[1]) || 0));
+      let code = payment.code;
+      if (codes.has(code)) {
+        do {
+          ticketSeq += 1;
+          code = `${payment.historical ? "B-H-" : "B-"}${ticketSeq}`;
+        } while (codes.has(code));
       }
-      return { ...state, ticketSeq: Math.max(490, Number(state.ticketSeq) || 490) + 1,
-        payments: [payment, ...payments] };
-    }), DIRECT_FIREBASE_WRITE_TIMEOUT_MS, `Bar sale ${payment.code} recovery timed out`);
-    if (!result.committed && !(result.snapshot.val() as { payments?: RecoverableBarPayment[] } | null)
-      ?.payments?.some((existing) => existing.id === payment.id)) {
+      return { ...state, ticketSeq: Math.max(ticketSeq, (Number(state.ticketSeq) || 490) + 1),
+        payments: [{ ...payment, code }, ...payments] };
+    });
+    if (!(committed.payments as RecoverableBarPayment[] | undefined)?.some((existing) => existing.id === payment.id)
+      && !(committed.voidedPaymentIds as string[] | undefined)?.includes(payment.id)) {
       throw new Error(`Bar sale ${payment.code} was not acknowledged by Firebase.`);
     }
     staged = staged.filter((entry) => entry.id !== payment.id);
@@ -1647,11 +1651,11 @@ export async function transactSyncedStorageValue<T>(
     return result.snapshot.val() as T;
   };
   let committed: T;
-  if (key === "orange-hotel-kitchen-state") {
+  if (key === "orange-hotel-kitchen-state" || key === "orange-hotel-barista-state") {
     try {
-      committed = await transactKitchenRestValue(key, updater);
+      committed = await transactPosRestValue(key, updater);
     } catch (restError) {
-      console.error("Kitchen HTTPS sync failed; trying Firebase realtime", restError);
+      console.error("POS HTTPS sync failed; trying Firebase realtime", restError);
       committed = await transactWithSdk();
     }
   } else {
@@ -1717,7 +1721,7 @@ async function hydrateStorageKeyFromFirebaseInternal(key: string) {
 
   if (key === "orange-hotel-kitchen-state") {
     try {
-      const remoteValue = sanitizeForStorage(sanitizeSyncedValue(key, await readKitchenRestValue(key)));
+      const remoteValue = sanitizeForStorage(sanitizeSyncedValue(key, await readPosRestValue(key)));
       if (remoteValue !== null) {
         if (hasStagedKitchenPosSales()) return;
         const localValue = getLocalSyncedValue(key);
@@ -1797,7 +1801,7 @@ async function hydrateStorageKeyFromFirebaseInternal(key: string) {
     console.error(`Firebase direct hydrate failed for ${key}`, error);
     if (key === "orange-hotel-kitchen-state") {
       try {
-        const remoteValue = sanitizeForStorage(sanitizeSyncedValue(key, await readKitchenRestValue(key)));
+        const remoteValue = sanitizeForStorage(sanitizeSyncedValue(key, await readPosRestValue(key)));
         const localValue = getLocalSyncedValue(key);
         const committed = hasPendingSyncMarker(key) && localValue !== null
           ? await transactSyncedStorageValue(key, (current: unknown) =>
@@ -1915,7 +1919,7 @@ export function subscribeToSyncedStorageKey<T>(key: string, onChange: (value: T 
         }
       }
       const remoteValue = sanitizeForStorage(sanitizeSyncedValue(key, key === "orange-hotel-kitchen-state"
-        ? await readKitchenRestValue<T>(key)
+        ? await readPosRestValue<T>(key)
         : await fetchServerSyncedStorageValue<T>(key)));
       if (remoteValue === null) return;
       if (shouldIgnoreRemoteValue(key, remoteValue)) return;
