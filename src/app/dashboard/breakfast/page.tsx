@@ -49,8 +49,8 @@ export default function BreakfastPage() {
     return [...byRoom.values()]
       .sort((a, b) => a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true }));
   }, [bookings, date]);
-  const selected = useMemo(() => occupied.reduce((sum, booking) =>
-    sum + (allocations.find((entry) => entry.id === breakfastId(booking.id, date))?.count ?? 0), 0), [occupied, allocations, date]);
+  const dateAllocations = useMemo(() => allocations.filter((entry) => entry.date === date && entry.count > 0), [allocations, date]);
+  const selected = useMemo(() => dateAllocations.reduce((sum, entry) => sum + entry.count, 0), [dateAllocations]);
   const chequeLines = useMemo<BreakfastSaleLine[]>(() => occupied.flatMap((booking) =>
     cart[booking.id] > 0 ? [{ booking, quantity: cart[booking.id] }] : []), [occupied, cart]);
   const chequeQuantity = chequeLines.reduce((sum, line) => sum + line.quantity, 0);
@@ -127,6 +127,13 @@ export default function BreakfastPage() {
       <span>{occupied.length} occupied rooms</span><span>·</span><span>{selected} breakfasts sold</span><span>·</span>
       <span>TSh {(selected * BREAKFAST_PRICE).toLocaleString()} recorded</span>
     </div>
+    {ready && dateAllocations.length > 0 && <Card><CardHeader className="pb-2"><CardTitle className="text-base">Recorded breakfast sales</CardTitle>
+      <CardDescription>{date} · {selected} breakfasts · TSh {(selected * BREAKFAST_PRICE).toLocaleString()}</CardDescription></CardHeader>
+      <CardContent className="space-y-2 text-sm">{dateAllocations.map((entry) =>
+        <div key={entry.id} className="flex justify-between gap-3 border-b pb-2 last:border-b-0">
+          <span>Room {entry.roomNumber} · {entry.guestName} · {entry.count} breakfast{entry.count === 1 ? "" : "s"}</span>
+          <span className="font-bold">TSh {(entry.count * BREAKFAST_PRICE).toLocaleString()}</span>
+        </div>)}</CardContent></Card>}
     {error && <p role="alert" className="text-sm font-semibold text-red-600">{error}</p>}
     {!ready && <p>Loading room stays and breakfast records…</p>}
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">

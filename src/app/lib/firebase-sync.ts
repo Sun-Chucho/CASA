@@ -311,7 +311,7 @@ const FIREBASE_STORAGE_ROOT = "casa-v2";
 const CASA_LOCAL_STORAGE_PREFIX = "casa-v2:";
 const BAR_POST_OPENING_RECOVERY_KEY = `${CASA_LOCAL_STORAGE_PREFIX}bar-post-opening-sales-recovery-v1`;
 const KITCHEN_POS_RECOVERY_KEY = `${CASA_LOCAL_STORAGE_PREFIX}kitchen-pos-sales-recovery-nov-2026-v1`;
-const KITCHEN_POS_RECOVERY_START_AT = Date.parse("2026-11-11T00:00:00+03:00");
+const KITCHEN_POS_RECOVERY_START_AT = Date.parse("2026-11-01T00:00:00+03:00");
 const BAR_OPENING_RESET_AT = 1794321180000;
 const BAR_NOVEMBER_START_AT = 1793480400000;
 
@@ -334,10 +334,10 @@ function isRecoverableKitchenPayment(value: unknown): value is RecoverableKitche
   if (!value || typeof value !== "object") return false;
   const payment = value as Partial<RecoverableKitchenSale["payment"]>;
   return typeof payment.id === "string" && typeof payment.ticketId === "string"
-    && typeof payment.code === "string" && /^K-\d+$/.test(payment.code)
+    && typeof payment.code === "string" && /^K-(?:H-)?\d+$/.test(payment.code)
     && Number(payment.createdAt) >= KITCHEN_POS_RECOVERY_START_AT
     && Number(payment.total) > 0
-    && payment.status === "completed" && payment.method !== "credit" && payment.historical !== true;
+    && payment.status === "completed" && payment.method !== "credit";
 }
 
 function hasStagedKitchenPosSales() {
@@ -406,12 +406,18 @@ export async function recoverRecentKitchenPosSales() {
     const ticketIds = new Set(tickets.map((ticket) => ticket.id));
     const codes = new Set(payments.map((payment) => payment.code));
     let ticketSeq = Math.max(0, Number(current.ticketSeq) || 0,
-      ...payments.map((payment) => Number(payment.code?.match(/^K-(\d+)$/)?.[1]) || 0));
+      ...payments.map((payment) => Number(payment.code?.match(/^K-(?:H-)?(\d+)$/)?.[1]) || 0));
     for (const sale of [...staged].sort((a, b) => a.payment.createdAt - b.payment.createdAt)) {
       if (paymentIds.has(sale.payment.id) || voidedPaymentIds.has(sale.payment.id)) continue;
-      const requestedSeq = Number(sale.payment.code.slice(2)) || 0;
-      const code = codes.has(sale.payment.code) ? `K-${ticketSeq + 1}` : sale.payment.code;
-      ticketSeq = Math.max(ticketSeq, requestedSeq, Number(code.slice(2)) || 0);
+      const requestedSeq = Number(sale.payment.code.match(/^K-(?:H-)?(\d+)$/)?.[1]) || 0;
+      let code = sale.payment.code;
+      if (codes.has(code)) {
+        do {
+          ticketSeq += 1;
+          code = `${sale.payment.historical ? "K-H-" : "K-"}${ticketSeq}`;
+        } while (codes.has(code));
+      }
+      ticketSeq = Math.max(ticketSeq, requestedSeq, Number(code.match(/^K-(?:H-)?(\d+)$/)?.[1]) || 0);
       codes.add(code);
       payments.unshift({ ...sale.payment, code });
       paymentIds.add(sale.payment.id);

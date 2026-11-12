@@ -25,16 +25,16 @@
       "orange-hotel-kitchen-state": {
         "tickets": {
           "$index": {
-            ".validate": "newData.child('createdAt').val() >= 1794321180000 && (!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1785099600000)"
+            ".validate": "newData.child('createdAt').val() >= 1793480400000"
           }
         },
         "payments": {
           "$index": {
-            ".validate": "newData.child('createdAt').val() >= 1794321180000 && (!newData.hasChild('createdAt') || newData.child('createdAt').val() >= 1785099600000)"
+            ".validate": "newData.child('createdAt').val() >= 1793480400000"
           }
         },
         "ticketSeq": {
-          ".validate": "newData.isNumber() && newData.val() >= 0 && (!data.exists() || newData.val() <= data.val() + 1)"
+          ".validate": "newData.isNumber() && newData.val() >= 0 && (!data.exists() || newData.val() >= data.val())"
         }
       },
       "orange-hotel-barista-state": {
@@ -64,7 +64,7 @@
       },
       "orange-hotel-breakfast-allocations": {
         "$index": {
-          ".validate": "newData.child('updatedAt').val() >= 1794321180000"
+          ".validate": "newData.child('updatedAt').val() >= 1793480400000"
         }
       },
       "orange-hotel-barista-stock-in-history": {
