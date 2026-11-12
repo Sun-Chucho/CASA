@@ -21,9 +21,12 @@ const etag = response.headers.get("etag");
 const root = await response.json();
 const kitchenKey = "orange-hotel-kitchen-state";
 const kitchen = root?.[kitchenKey];
-if (!kitchen || !Array.isArray(kitchen.payments) || !Array.isArray(kitchen.tickets)) {
+if (!kitchen || (kitchen.payments !== undefined && !Array.isArray(kitchen.payments))
+  || (kitchen.tickets !== undefined && !Array.isArray(kitchen.tickets))) {
   throw new Error("Kitchen ledger has an unexpected shape; no reset was made.");
 }
+const payments = kitchen.payments ?? [];
+const tickets = kitchen.tickets ?? [];
 const oldBreakfast = JSON.stringify(root["orange-hotel-breakfast-allocations"] ?? null);
 const oldMenu = JSON.stringify(kitchen.menuItems ?? []);
 const oldStock = JSON.stringify(root["orange-hotel-main-store-items"] ?? null);
@@ -34,8 +37,8 @@ next[kitchenKey] = {
   tickets: [],
   payments: [],
   salesResetAt: resetAt,
-  voidedPaymentIds: [...new Set([...(kitchen.voidedPaymentIds ?? []), ...kitchen.payments.map((entry) => entry.id).filter(Boolean)])],
-  voidedTicketIds: [...new Set([...(kitchen.voidedTicketIds ?? []), ...kitchen.tickets.map((entry) => entry.id).filter(Boolean)])],
+  voidedPaymentIds: [...new Set([...(kitchen.voidedPaymentIds ?? []), ...payments.map((entry) => entry.id).filter(Boolean)])],
+  voidedTicketIds: [...new Set([...(kitchen.voidedTicketIds ?? []), ...tickets.map((entry) => entry.id).filter(Boolean)])],
 };
 for (const key of ["orange-hotel-kitchen-tickets", "orange-hotel-kitchen-payments"]) delete next[key];
 if (Array.isArray(next["orange-hotel-cancelled-tickets"])) {
@@ -44,8 +47,8 @@ if (Array.isArray(next["orange-hotel-cancelled-tickets"])) {
 if (Array.isArray(next["orange-hotel-fnb-stock-sales"])) {
   next["orange-hotel-fnb-stock-sales"] = next["orange-hotel-fnb-stock-sales"].filter((entry) => entry?.department !== "kitchen");
 }
-console.log(JSON.stringify({ paymentsToClear: kitchen.payments.length, ticketsToClear: kitchen.tickets.length,
-  salesTotalToClear: kitchen.payments.reduce((sum, entry) => sum + Number(entry.total || 0), 0),
+console.log(JSON.stringify({ paymentsToClear: payments.length, ticketsToClear: tickets.length,
+  salesTotalToClear: payments.reduce((sum, entry) => sum + Number(entry.total || 0), 0),
   receiptCounterRetained: kitchen.ticketSeq, breakfastAllocationsRetained: (root["orange-hotel-breakfast-allocations"] ?? []).length }));
 if (!process.argv.includes("--apply")) process.exit(0);
 
