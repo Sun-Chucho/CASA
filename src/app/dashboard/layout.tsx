@@ -1137,13 +1137,16 @@ export default function DashboardLayout({
   }, [router]);
 
   useEffect(() => {
-    if (!window.matchMedia("(display-mode: standalone)").matches) return;
     const checkForUpdate = () => {
       if (document.visibilityState === "visible") void registerPwaServiceWorker();
     };
     checkForUpdate();
     document.addEventListener("visibilitychange", checkForUpdate);
-    return () => document.removeEventListener("visibilitychange", checkForUpdate);
+    const timer = window.setInterval(checkForUpdate, 30000);
+    return () => {
+      document.removeEventListener("visibilitychange", checkForUpdate);
+      window.clearInterval(timer);
+    };
   }, []);
 
 

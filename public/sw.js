@@ -1,4 +1,4 @@
-const CACHE_NAME = "cassa-hotel-shell-v3";
+const CACHE_NAME = "cassa-hotel-shell-v4";
 
 async function cacheFirst(request) {
   const cache = await caches.open(CACHE_NAME);
@@ -83,8 +83,14 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then(async (keys) => {
+      const replacingExistingWorker = keys.some((key) => key.startsWith("cassa-hotel-shell-") && key !== CACHE_NAME);
       await Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)));
       await self.clients.claim();
+      if (replacingExistingWorker) {
+        const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+        await Promise.all(clients.filter((client) => new URL(client.url).pathname.startsWith("/dashboard"))
+          .map((client) => client.navigate(client.url).catch(() => undefined)));
+      }
     }),
   );
 });
